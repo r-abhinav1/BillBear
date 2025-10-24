@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bill Bear Results - {{ room['room_name'] }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #121212;
+            color: #FFFFFF;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .trans-logo {
+            max-width: 150px;
+            height: auto;
+            display: block;
+            margin: 1rem auto;
+            opacity: 0.9;
+        }
+
+        .top-bar {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            padding: 1rem 0;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .top-bar h1 {
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            font-weight: 600;
+            color: #FFFFFF;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            background: #1E1E1E;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333333;
+        }
+
+        .room-info {
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+            text-align: center;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        .room-info h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .room-info p {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+
+        .total-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .summary-item {
+            background: #2D2D2D;
+            padding: 1.5rem;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid #333333;
+        }
+
+        .summary-item h3 {
+            color: #CCCCCC;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .summary-item .amount {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #FFFFFF;
+        }
+
+        .summary-item.grand-total {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            color: #FFFFFF;
+        }
+
+        .summary-item.grand-total h3 {
+            color: #FFFFFF;
+            opacity: 0.9;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            background: #1E1E1E;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .results-table th {
+            background: #2D2D2D;
+            color: #FFFFFF;
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #333333;
+        }
+
+        .results-table td {
+            padding: 1rem;
+            border-bottom: 1px solid #333333;
+            color: #CCCCCC;
+        }
+
+        .results-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .results-table tr:hover {
+            background: #252525;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: #FFFFFF;
+        }
+
+        .amount {
+            font-weight: 600;
+            color: #4CAF50;
+            font-size: 1.1rem;
+        }
+
+        .selected-items {
+            color: #CCCCCC;
+            font-size: 0.9rem;
+            max-width: 300px;
+            word-wrap: break-word;
+        }
+
+        .percentage {
+            color: #3F51B5;
+            font-weight: 600;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            color: #FFFFFF;
+            box-shadow: 0 4px 15px rgba(63, 81, 181, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(63, 81, 181, 0.4);
+        }
+
+        .btn-secondary {
+            background: #333333;
+            color: #FFFFFF;
+            border: 2px solid #555555;
+        }
+
+        .btn-secondary:hover {
+            background: #555555;
+            border-color: #777777;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+        }
+
+        .share-section {
+            background: #1E1E1E;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-top: 2rem;
+            border: 1px solid #333333;
+            text-align: center;
+        }
+
+        .share-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+        }
+
+        .share-url {
+            background: #2D2D2D;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #3F51B5;
+            border: 1px solid #333333;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .share-url-text {
+            flex: 1;
+        }
+
+        .copy-btn {
+            background: #333333;
+            color: #FFFFFF;
+            border: 2px solid #555555;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .copy-btn:hover {
+            background: #555555;
+            border-color: #777777;
+        }
+
+        .copy-btn.copied {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+
+        .breakdown-details {
+            background: #1E1E1E;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 2rem;
+            border: 1px solid #333333;
+        }
+
+        .breakdown-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+        }
+
+        .breakdown-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .breakdown-item {
+            background: #2D2D2D;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #333333;
+        }
+
+        .breakdown-item h4 {
+            color: #FFFFFF;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .breakdown-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 0.3rem 0;
+            font-size: 0.9rem;
+        }
+
+        .breakdown-row.total {
+            font-weight: 600;
+            color: #4CAF50;
+            border-top: 1px solid #333333;
+            padding-top: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .total-summary {
+                grid-template-columns: 1fr;
+            }
+
+            .action-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .btn {
+                width: 100%;
+                max-width: 300px;
+                justify-content: center;
+            }
+
+            .results-table {
+                font-size: 0.9rem;
+            }
+
+            .results-table th,
+            .results-table td {
+                padding: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="logo-banner">
+        <img src="{{ url_for('static', filename='images/trans_logo.png') }}" alt="Transparent Logo" class="trans-logo">
+    </div>
+
+    <div class="top-bar">
+        <h1>💰 Bill Bear Results</h1>
+    </div>
+
+    <div class="container">
+        <div class="room-info">
+            <h2>{{ room['room_name'] }}</h2>
+            <p>Room Code: {{ room_code }} | Host: {{ room['host_name'] }}</p>
+        </div>
+
+        <div class="total-summary">
+            <div class="summary-item">
+                <h3>Subtotal</h3>
+                <div class="amount">₹{{ bill_split.totals.subtotal }}</div>
+            </div>
+            <div class="summary-item">
+                <h3>Service Charge</h3>
+                <div class="amount">₹{{ bill_split.totals.service_charge }}</div>
+            </div>
+            <div class="summary-item">
+                <h3>Discount</h3>
+                <div class="amount">₹{{ bill_split.totals.discount }}</div>
+            </div>
+            <div class="summary-item">
+                <h3>Taxes (CGST + SGST)</h3>
+                <div class="amount">₹{{ bill_split.totals.cgst + bill_split.totals.sgst }}</div>
+            </div>
+            <div class="summary-item grand-total">
+                <h3>Grand Total</h3>
+                <div class="amount">₹{{ bill_split.totals.grand_total }}</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 style="color: #FFFFFF; margin-bottom: 1.5rem; font-size: 1.3rem;">💸 Individual Bill Bear</h2>
+            <table class="results-table">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Selected Items</th>
+                        <th>Item Total</th>
+                        <th>Share %</th>
+                        <th>Final Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user, details in bill_split.user_breakdown.items() %}
+                    <tr>
+                        <td class="user-name">{{ user }}</td>
+                        <td class="selected-items">
+                            {% if details.selected_items %}
+                                {{ details.selected_items | join(', ') }}
+                            {% else %}
+                                <em>No items selected</em>
+                            {% endif %}
+                        </td>
+                        <td class="amount">₹{{ details.item_total }}</td>
+                        <td class="percentage">{{ details.percentage }}%</td>
+                        <td class="amount">₹{{ details.final_amount }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="breakdown-details">
+            <h3 class="breakdown-title">📊 Detailed Breakdown</h3>
+            <div class="breakdown-grid">
+                {% for user, details in bill_split.user_breakdown.items() %}
+                <div class="breakdown-item">
+                    <h4>{{ user }}</h4>
+                    <div class="breakdown-row">
+                        <span>Item Total:</span>
+                        <span>₹{{ details.item_total }}</span>
+                    </div>
+                    <div class="breakdown-row">
+                        <span>Service Charge:</span>
+                        <span>₹{{ details.service_charge }}</span>
+                    </div>
+                    <div class="breakdown-row">
+                        <span>CGST:</span>
+                        <span>₹{{ details.cgst }}</span>
+                    </div>
+                    <div class="breakdown-row">
+                        <span>SGST:</span>
+                        <span>₹{{ details.sgst }}</span>
+                    </div>
+                    <div class="breakdown-row">
+                        <span>Discount:</span>
+                        <span>-₹{{ details.discount }}</span>
+                    </div>
+                    <div class="breakdown-row total">
+                        <span>Total:</span>
+                        <span>₹{{ details.final_amount }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="action-buttons">
+            {% if pdf_available %}
+            <a href="/room/{{ room_code }}/download" class="btn btn-primary">
+                ⬇️ Download PDF
+            </a>
+            {% endif %}
+            <button onclick="copyShareLink()" class="btn btn-secondary" id="shareBtn">
+                📋 Copy Share Link
+            </button>
+            <a href="/" class="btn btn-success">
+                🏠 New Session
+            </a>
+        </div>
+
+        <div class="share-section">
+            <h3 class="share-title">🔗 Share Results</h3>
+            <div class="share-url">
+                <span class="share-url-text" id="shareUrl">{{ request.url }}</span>
+                <button onclick="copyShareLink()" class="copy-btn" id="copyBtn">📋 Copy</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function copyShareLink() {
+            const shareUrl = document.getElementById('shareUrl').textContent;
+            const copyBtn = document.getElementById('copyBtn');
+            const shareBtn = document.getElementById('shareBtn');
+            
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    copyBtn.textContent = '✅ Copied!';
+                    shareBtn.textContent = '✅ Copied!';
+                    copyBtn.classList.add('copied');
+                    
+                    setTimeout(() => {
+                        copyBtn.textContent = '📋 Copy';
+                        shareBtn.textContent = '📋 Copy Share Link';
+                        copyBtn.classList.remove('copied');
+                    }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                    fallbackCopyTextToClipboard(shareUrl, copyBtn, shareBtn);
+                });
+            } else {
+                fallbackCopyTextToClipboard(shareUrl, copyBtn, shareBtn);
+            }
+        }
+
+        function fallbackCopyTextToClipboard(text, copyBtn, shareBtn) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.top = '0';
+            textArea.style.left = '0';
+            textArea.style.position = 'fixed';
+            
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    copyBtn.textContent = '✅ Copied!';
+                    shareBtn.textContent = '✅ Copied!';
+                    copyBtn.classList.add('copied');
+                    
+                    setTimeout(() => {
+                        copyBtn.textContent = '📋 Copy';
+                        shareBtn.textContent = '📋 Copy Share Link';
+                        copyBtn.classList.remove('copied');
+                    }, 2000);
+                } else {
+                    copyBtn.textContent = '❌ Failed';
+                    shareBtn.textContent = '❌ Failed';
+                    setTimeout(() => {
+                        copyBtn.textContent = '📋 Copy';
+                        shareBtn.textContent = '📋 Copy Share Link';
+                    }, 2000);
+                }
+            } catch (err) {
+                console.error('Fallback: Oops, unable to copy', err);
+                copyBtn.textContent = '❌ Failed';
+                shareBtn.textContent = '❌ Failed';
+                setTimeout(() => {
+                    copyBtn.textContent = '📋 Copy';
+                    shareBtn.textContent = '📋 Copy Share Link';
+                }, 2000);
+            }
+            
+            document.body.removeChild(textArea);
+        }
+    </script>
+</body>
+</html>

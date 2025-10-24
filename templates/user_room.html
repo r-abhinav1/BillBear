@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joining {{ room['room_name'] }} - Bill Bear</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #121212 0%, #1E1E1E 100%);
+            color: #FFFFFF;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .container {
+            background: rgba(30, 30, 30, 0.95);
+            border-radius: 20px;
+            padding: 3rem;
+            width: 100%;
+            max-width: 500px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+            border: 1px solid #333333;
+            text-align: center;
+            animation: fadeInUp 0.8s ease-out;
+            backdrop-filter: blur(10px);
+        }
+
+        @keyframes fadeInUp {
+            from { 
+                opacity: 0; 
+                transform: translateY(30px) scale(0.95); 
+            }
+            to { 
+                opacity: 1; 
+                transform: translateY(0) scale(1); 
+            }
+        }
+
+        .loading-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 2rem;
+            border: 4px solid rgba(63, 81, 181, 0.2);
+            border-top: 4px solid #3F51B5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .welcome-message {
+            margin-bottom: 2rem;
+        }
+
+        .welcome-message h1 {
+            font-size: clamp(1.8rem, 5vw, 2.5rem);
+            font-weight: 700;
+            color: #FFFFFF;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #3F51B5 0%, #FF4081 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .welcome-message p {
+            color: #CCCCCC;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+        }
+
+        .room-info {
+            background: linear-gradient(135deg, rgba(63, 81, 181, 0.1) 0%, rgba(255, 64, 129, 0.1) 100%);
+            border: 1px solid rgba(63, 81, 181, 0.2);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .room-info h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .info-item {
+            text-align: center;
+        }
+
+        .info-label {
+            font-size: 0.8rem;
+            color: #999999;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.25rem;
+        }
+
+        .info-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #FFFFFF;
+        }
+
+        .progress-container {
+            margin: 2rem 0;
+        }
+
+        .progress-text {
+            color: #CCCCCC;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3F51B5 0%, #FF4081 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .status-message {
+            color: #4CAF50;
+            font-weight: 500;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .redirect-message {
+            color: #CCCCCC;
+            font-size: 0.85rem;
+            font-style: italic;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 2rem 1.5rem;
+            }
+            
+            .info-grid {
+                grid-template-columns: 1fr;
+                gap: 0.5rem;
+            }
+        }
+
+        /* Accessibility improvements */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="loading-icon"></div>
+        
+        <div class="welcome-message">
+            <h1>Welcome!</h1>
+            <p>You've successfully joined the room</p>
+        </div>
+        
+        <div class="room-info">
+            <h2>{{ room['room_name'] }}</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Host</div>
+                    <div class="info-value">{{ room['host_name'] }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Members</div>
+                    <div class="info-value">{{ room['users']|length if room['users'] else 0 }}/{{ room['num_people'] }}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="progress-container">
+            <div class="progress-text">Setting up your experience...</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="status-message" id="statusMessage">Initializing...</div>
+            <div class="redirect-message">You will be redirected automatically</div>
+        </div>
+    </div>
+
+    <script>
+        // Simulate loading progress and redirect
+        document.addEventListener('DOMContentLoaded', function() {
+            const progressFill = document.getElementById('progressFill');
+            const statusMessage = document.getElementById('statusMessage');
+            
+            const messages = [
+                'Initializing...',
+                'Loading room data...',
+                'Preparing item selection...',
+                'Almost ready...',
+                'Complete!'
+            ];
+            
+            let progress = 0;
+            let messageIndex = 0;
+            
+            const interval = setInterval(() => {
+                progress += 20;
+                progressFill.style.width = progress + '%';
+                
+                if (messageIndex < messages.length) {
+                    statusMessage.textContent = messages[messageIndex];
+                    messageIndex++;
+                }
+                
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        // Redirect based on user status
+                        window.location.href = window.location.href + '/select-items';
+                    }, 500);
+                }
+            }, 800);
+        });
+    </script>
+</body>
+</html>
+

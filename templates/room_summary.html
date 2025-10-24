@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Room Summary - {{ room.room_name }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+         box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #121212;
+            color: #FFFFFF;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .trans-logo {
+            max-width: 150px;
+            height: auto;
+            display: block;
+            margin: 1rem auto;
+            opacity: 0.9;
+        }
+
+        .top-bar {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            padding: 1rem 0;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .top-bar h1 {
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            font-weight: 600;
+            color: #FFFFFF;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            background: #1E1E1E;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333333;
+        }
+
+        .room-info {
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+            text-align: center;
+            padding: 2rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+        }
+
+        .room-info h2 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+
+        .room-info p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .info-item {
+            background: #2D2D2D;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid #333333;
+            text-align: center;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #CCCCCC;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #FFFFFF;
+        }
+
+        .qr-section {
+            text-align: center;
+            background: #1E1E1E;
+            padding: 2rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            border: 1px solid #333333;
+        }
+
+        .qr-container {
+            display: inline-block;
+            padding: 1rem;
+            background: #FFFFFF;
+            border-radius: 12px;
+            box-shadow: 0 0 20px rgba(63, 81, 181, 0.3);
+            border: 3px solid #3F51B5;
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from { box-shadow: 0 0 20px rgba(63, 81, 181, 0.3); }
+            to { box-shadow: 0 0 30px rgba(63, 81, 181, 0.6); }
+        }
+
+        .qr-code {
+            display: block;
+            width: 200px;
+            height: 200px;
+            border-radius: 8px;
+        }
+
+        .qr-instructions {
+            margin-top: 1rem;
+            color: #CCCCCC;
+            font-size: 1rem;
+        }
+
+        .join-url {
+            background: #2D2D2D;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #3F51B5;
+            border: 1px solid #333333;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .items-table th,
+        .items-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #333333;
+        }
+
+        .items-table th {
+            background: #2D2D2D;
+            color: #FFFFFF;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .items-table tr:nth-child(even) {
+            background: #252525;
+        }
+
+        .items-table tr:hover {
+            background: #2A2A2A;
+            transition: background-color 0.2s ease;
+        }
+
+        .price-cell {
+            text-align: right;
+            font-weight: 600;
+            color: #4CAF50;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-decoration: none;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-height: 48px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            color: #FFFFFF;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(63, 81, 181, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 0.5rem;
+        }
+
+        .status-success {
+            background: #4CAF50;
+            color: #FFFFFF;
+        }
+
+        .status-warning {
+            background: #FF9800;
+            color: #FFFFFF;
+        }
+
+        .bill-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            border: 1px solid #333333;
+        }
+
+        @media (min-width: 768px) {
+            .container {
+                padding: 2rem;
+            }
+
+            .card {
+                padding: 2rem;
+            }
+
+            .info-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .qr-code {
+                width: 250px;
+                height: 250px;
+            }
+
+            .actions {
+                justify-content: flex-end;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .info-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        /* Accessibility improvements */
+        input:focus, button:focus, a:focus {
+            outline: 3px solid #3F51B5;
+            outline-offset: 2px;
+        }
+
+        /* Copy button animation */
+        .copy-btn {
+            background: #333333;
+            color: #FFFFFF;
+            border: 2px solid #555555;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            margin-left: 0.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .copy-btn:hover {
+            background: #555555;
+            border-color: #777777;
+        }
+
+        .copy-btn.copied {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+
+        /* Loading and transition animations */
+        .updating {
+            opacity: 0.7;
+            transition: opacity 0.3s ease;
+        }
+
+        .member-item {
+            transition: all 0.3s ease;
+        }
+
+        .member-item.new {
+            animation: slideIn 0.5s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+
+
+        .connection-status.connected {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: #f44336;
+            color: white;
+        }
+
+        .connection-status.connecting {
+            background: #FF9800;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="logo-banner">
+        <img src="{{ url_for('static', filename='images/trans_logo.png') }}" alt="Transparent Logo" class="trans-logo">
+    </div>
+
+    <header class="top-bar">
+        <h1>🏠 Room Summary</h1>
+    </header>
+
+    <!-- Connection status indicator -->
+    <div id="connection-status" class="connection-status connecting">
+        🔄 Connecting...
+    </div>
+
+    <main class="container">
+        <div class="room-info">
+            <h2>{{ room.room_name }}</h2>
+            <p>Host: {{ room.host_name }}</p>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="info-label">Room Code</div>
+                <div class="info-value">{{ room_code }}</div>
+            </div>
+
+            <div class="info-item">
+                <div class="info-label">Expected People</div>
+                <div class="info-value">{{ room.num_people }}</div>
+            </div>
+
+            <div class="info-item">
+                <div class="info-label">Joined Users</div>
+                <div class="info-value">{{ room.users | length }}</div>
+            </div>
+
+            <div class="info-item">
+                <div class="info-label">Items Selected</div>
+                <div class="info-value">{{ room.get('submitted_users', []) | length }} / {{ room.users | length }}</div>
+            </div>
+        </div>
+
+        <div class="qr-section">
+            <h3 class="section-title">📱 Join Room</h3>
+            <p class="qr-instructions">Scan this QR code or share the link below:</p>
+            
+            <div class="qr-container">
+                <img src="{{ qr_b64 }}" alt="QR Code for joining room" class="qr-code">
+            </div>
+            
+            <div class="join-url">
+                <span id="joinUrl">{{ join_url }}</span>
+                <button type="button" class="copy-btn" onclick="copyToClipboard()" id="copyBtn">
+                    📋 Copy
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="section-title">📄 Bill Items</h3>
+            <div class="table-container">
+                <table class="items-table">
+                    <thead>
+                        <tr>
+                            <th>Item Name</th>
+                            <th>Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in room['items'] %}
+                        <tr>
+                            <td>{{ item.name }}</td>
+                            <td class="price-cell">{{ item.price }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="section-title">👥 Room Members</h3>
+            <div class="info-grid" id="members-container">
+                {% for user in room.users %}
+                <div class="info-item member-item">
+                    <div class="info-value">
+                        <span class="member-name">{{ user }}</span>
+                        {% if user == room.host_name %}
+                        <span class="status-badge status-success">Host</span>
+                        {% endif %}
+                        {% if user in room.get('submitted_users', []) %}
+                        <span class="status-badge status-success">Selected</span>
+                        {% else %}
+                        <span class="status-badge status-warning">Pending</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="actions" id="actions-container">
+            {% if room.host_name in room.get('submitted_users', []) %}
+                <a href="/room/{{ room_code }}/waiting/{{ room.host_name }}" class="btn btn-success">
+                    ✅ Items Selected - Go to Waiting Room
+                </a>
+            {% else %}
+                <a href="/room/{{ room_code }}/user/{{ room.host_name }}/select-items" class="btn btn-success">
+                    🛒 Select My Items
+                </a>
+                <a href="/room/{{ room_code }}/waiting/{{ room.host_name }}" class="btn btn-primary">
+                    ⏳ Go to Waiting Room
+                </a>
+            {% endif %}
+            <a href="/edit/{{ room_code }}" class="btn btn-primary">
+                ✏️ Edit Items
+            </a>
+        </div>
+    </main>
+
+    <!-- Member template for JavaScript rendering -->
+    <template id="member-template">
+        <div class="info-item member-item">
+            <div class="info-value">
+                <span class="member-name"></span>
+                <span class="host-badge status-badge status-success" style="display: none;">Host</span>
+                <span class="selected-badge status-badge status-success" style="display: none;">Selected</span>
+                <span class="pending-badge status-badge status-warning" style="display: none;">Pending</span>
+            </div>
+        </div>
+    </template>
+
+    <script>
+        // Copy to clipboard functionality
+        function copyToClipboard() {
+            const joinUrl = document.getElementById('joinUrl').textContent;
+            const copyBtn = document.getElementById('copyBtn');
+            
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(joinUrl).then(() => {
+                    copyBtn.textContent = '✅ Copied!';
+                    copyBtn.classList.add('copied');
+                    
+                    setTimeout(() => {
+                        copyBtn.textContent = '📋 Copy';
+                        copyBtn.classList.remove('copied');
+                    }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                    fallbackCopyTextToClipboard(joinUrl, copyBtn);
+                });
+            } else {
+                fallbackCopyTextToClipboard(joinUrl, copyBtn);
+            }
+        }
+
+        function fallbackCopyTextToClipboard(text, copyBtn) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.top = '0';
+            textArea.style.left = '0';
+            textArea.style.position = 'fixed';
+            
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    copyBtn.textContent = '✅ Copied!';
+                    copyBtn.classList.add('copied');
+                    
+                    setTimeout(() => {
+                        copyBtn.textContent = '📋 Copy';
+                        copyBtn.classList.remove('copied');
+                    }, 2000);
+                } else {
+                    copyBtn.textContent = '❌ Failed';
+                    setTimeout(() => {
+                        copyBtn.textContent = '📋 Copy';
+                    }, 2000);
+                }
+            } catch (err) {
+                console.error('Fallback: Oops, unable to copy', err);
+                copyBtn.textContent = '❌ Failed';
+                setTimeout(() => {
+                    copyBtn.textContent = '📋 Copy';
+                }, 2000);
+            }
+            
+            document.body.removeChild(textArea);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Bill Items - Bill Bear</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #121212;
+            color: #FFFFFF;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .top-bar {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            padding: 1rem 0;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .top-bar h1 {
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            font-weight: 600;
+            color: #FFFFFF;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            background: #1E1E1E;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333333;
+        }
+
+        .instructions {
+            background: linear-gradient(135deg, #FF4081 0%, #F06292 100%);
+            color: #FFFFFF;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid #AD1457;
+        }
+
+        .instructions p {
+            margin: 0;
+            font-weight: 500;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            border-radius: 8px;
+            background: #1E1E1E;
+            border: 1px solid #333333;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 600px;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #333333;
+        }
+
+        th {
+            background: #2D2D2D;
+            color: #FFFFFF;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        tr:nth-child(even) {
+            background: #252525;
+        }
+
+        tr:hover {
+            background: #2A2A2A;
+            transition: background-color 0.2s ease;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 0.75rem;
+            background: #2D2D2D;
+            border: 2px solid #333333;
+            border-radius: 6px;
+            color: #FFFFFF;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            min-height: 48px;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #3F51B5;
+            box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
+            background: #333333;
+        }
+
+        input[type="text"]:hover {
+            border-color: #555555;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-decoration: none;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-height: 48px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            color: #FFFFFF;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(63, 81, 181, 0.4);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #333333;
+            color: #FFFFFF;
+            border: 2px solid #555555;
+        }
+
+        .btn-secondary:hover {
+            background: #555555;
+            border-color: #777777;
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .financial-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .financial-item {
+            background: #2D2D2D;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #333333;
+        }
+
+        .financial-item label {
+            display: block;
+            color: #CCCCCC;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-success {
+            background: #4CAF50;
+            color: #FFFFFF;
+        }
+
+        .status-warning {
+            background: #FF9800;
+            color: #FFFFFF;
+        }
+
+        @media (min-width: 768px) {
+            .container {
+                padding: 2rem;
+            }
+
+            .card {
+                padding: 2rem;
+            }
+
+            .financial-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .actions {
+                justify-content: flex-end;
+            }
+
+            table {
+                min-width: auto;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .financial-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        /* Loading animation for form submission */
+        .loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        .loading .btn-primary {
+            position: relative;
+            color: transparent;
+        }
+
+        .loading .btn-primary::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #FFFFFF;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            transform: translate(-50%, -50%);
+        }
+
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        /* Accessibility improvements */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        input:focus, button:focus {
+            outline: 3px solid #3F51B5;
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body>
+    <header class="top-bar">
+        <h1>Edit Bill Items</h1>
+    </header>
+
+    <main class="container">
+        <div class="instructions">
+            <p>Review and edit the extracted bill items below. Make sure all items and prices are correct before proceeding.</p>
+        </div>
+
+        <form method="POST" id="editForm" action="/edit/{{room_code}}">
+            <div class="card">
+                <h2 class="section-title">Bill Items</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Item Name</th>
+                                <th>Price (₹)</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="itemsTable">
+                            {% for item in items['items'] %}
+                            <tr class="item-row">
+                                <td>
+                                    <input type="text" name="item_name" value="{{ item.name }}" required 
+                                           placeholder="Enter item name" aria-label="Item name">
+                                </td>
+                                <td>
+                                    <input type="text" name="item_price" value="{{ item.price }}" required 
+                                           placeholder="₹0.00" aria-label="Item price">
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-secondary" onclick="removeRow(this)" 
+                                            aria-label="Remove item">
+                                        ❌
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="actions">
+                    <button type="button" class="btn btn-secondary" onclick="addRow()" id="addItemBtn">
+                        ➕ Add Item
+                    </button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 class="section-title">Bill Summary</h2>
+                <div class="financial-grid">
+                    <div class="financial-item">
+                        <label for="subtotal">Subtotal:</label>
+                        <input type="text" id="subtotal" name="subtotal" 
+                               value="{{ items.subtotal or 'N/A' }}" 
+                               placeholder="₹0.00" aria-label="Subtotal amount">
+                    </div>
+
+                    <div class="financial-item">
+                        <label for="serviceCharge">Service Charge:</label>
+                        <input type="text" id="serviceCharge" name="serviceCharge" 
+                               value="{{ items.serviceCharge or 'N/A' }}" 
+                               placeholder="₹0.00" aria-label="Service charge amount">
+                    </div>
+
+                    <div class="financial-item">
+                        <label for="discount">Discount:</label>
+                        <input type="text" id="discount" name="discount" 
+                               value="{{ items.discount or 'N/A' }}" 
+                               placeholder="₹0.00" aria-label="Discount amount">
+                    </div>
+
+                    <div class="financial-item">
+                        <label for="cgst">CGST:</label>
+                        <input type="text" id="cgst" name="cgst" 
+                               value="{{ items.cgst or 'N/A' }}" 
+                               placeholder="₹0.00" aria-label="CGST amount">
+                    </div>
+
+                    <div class="financial-item">
+                        <label for="sgst">SGST:</label>
+                        <input type="text" id="sgst" name="sgst" 
+                               value="{{ items.sgst or 'N/A' }}" 
+                               placeholder="₹0.00" aria-label="SGST amount">
+                    </div>
+
+                    <div class="financial-item">
+                        <label for="total">Total:</label>
+                        <input type="text" id="total" name="total" 
+                               value="{{ items.total or 'N/A' }}" 
+                               placeholder="₹0.00" aria-label="Total amount">
+                    </div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button type="submit" class="btn btn-primary" id="submitBtn">
+                     Update Items & Continue
+                </button>
+            </div>
+        </form>
+    </main>
+
+    <script>
+        function addRow() {
+            const table = document.getElementById('itemsTable');
+            const newRow = document.createElement('tr');
+            newRow.className = 'item-row';
+            newRow.innerHTML = `
+                <td>
+                    <input type="text" name="item_name" required 
+                           placeholder="Enter item name" aria-label="Item name">
+                </td>
+                <td>
+                    <input type="text" name="item_price" required 
+                           placeholder="₹0.00" aria-label="Item price">
+                </td>
+                <td>
+                    <button type="button" class="btn btn-secondary" onclick="removeRow(this)" 
+                            aria-label="Remove item">
+                        ❌
+                    </button>
+                </td>
+            `;
+            table.appendChild(newRow);
+            
+            // Focus on the new item name input
+            newRow.querySelector('input[name="item_name"]').focus();
+        }
+
+        function removeRow(button) {
+            const row = button.closest('tr');
+            row.remove();
+        }
+
+        // Form submission with loading state
+        document.getElementById('editForm').addEventListener('submit', function(e) {
+            const form = e.target;
+            const submitBtn = document.getElementById('submitBtn');
+            
+            form.classList.add('loading');
+            submitBtn.disabled = true;
+            
+            // Re-enable if form fails to submit for some reason
+            setTimeout(() => {
+                form.classList.remove('loading');
+                submitBtn.disabled = false;
+            }, 5000);
+        });
+
+        // Auto-format currency inputs
+        document.querySelectorAll('input[type="text"]').forEach(input => {
+            if (input.name.includes('price') || input.name.includes('total') || 
+                input.name.includes('charge') || input.name.includes('discount') || 
+                input.name.includes('gst')) {
+                
+                input.addEventListener('blur', function() {
+                    let value = this.value.replace(/[^\d.]/g, '');
+                    if (value && !isNaN(value)) {
+                        this.value = '₹' + parseFloat(value).toFixed(2);
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+ 

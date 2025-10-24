@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Bill Bear Results - {{ room['room_name'] }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #3F51B5;
+        }
+        
+        .header h1 {
+            color: #3F51B5;
+            font-size: 24px;
+            margin: 0 0 10px 0;
+        }
+        
+        .header p {
+            color: #666;
+            margin: 5px 0;
+        }
+        
+        .room-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .room-info h2 {
+            color: #2e7d32;
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .summary-item {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+        
+        .summary-item h3 {
+            color: #666;
+            font-size: 11px;
+            margin: 0 0 5px 0;
+            text-transform: uppercase;
+        }
+        
+        .summary-item .amount {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .grand-total {
+            background-color: #3F51B5 !important;
+            color: white !important;
+        }
+        
+        .grand-total h3 {
+            color: white !important;
+        }
+        
+        .grand-total .amount {
+            color: white !important;
+        }
+        
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 11px;
+        }
+        
+        .results-table th {
+            background-color: #f8f9fa;
+            color: #333;
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #dee2e6;
+        }
+        
+        .results-table td {
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            vertical-align: top;
+        }
+        
+        .results-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        .user-name {
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .amount {
+            font-weight: bold;
+            color: #2e7d32;
+        }
+        
+        .percentage {
+            color: #3F51B5;
+            font-weight: bold;
+        }
+        
+        .selected-items {
+            font-size: 10px;
+            color: #666;
+            max-width: 200px;
+            word-wrap: break-word;
+        }
+        
+        .breakdown-section {
+            margin-top: 30px;
+            page-break-inside: avoid;
+        }
+        
+        .breakdown-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 5px;
+        }
+        
+        .breakdown-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        
+        .breakdown-item {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+            page-break-inside: avoid;
+        }
+        
+        .breakdown-item h4 {
+            color: #333;
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        
+        .breakdown-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 3px 0;
+            font-size: 10px;
+        }
+        
+        .breakdown-row.total {
+            font-weight: bold;
+            color: #2e7d32;
+            border-top: 1px solid #dee2e6;
+            padding-top: 5px;
+            margin-top: 10px;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 10px;
+            color: #666;
+            border-top: 1px solid #dee2e6;
+            padding-top: 10px;
+        }
+        
+        .page-break {
+            page-break-before: always;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>💰 Bill Bear Results</h1>
+        <p>Generated on {{ current_date.strftime('%B %d, %Y at %I:%M %p') }}</p>
+    </div>
+
+    <div class="room-info">
+        <h2>{{ room['room_name'] }}</h2>
+        <p><strong>Room Code:</strong> {{ room_code }} | <strong>Host:</strong> {{ room['host_name'] }}</p>
+    </div>
+
+    <div class="summary-grid">
+        <div class="summary-item">
+            <h3>Subtotal</h3>
+            <div class="amount">₹{{ bill_split.totals.subtotal }}</div>
+        </div>
+        <div class="summary-item">
+            <h3>Service Charge</h3>
+            <div class="amount">₹{{ bill_split.totals.service_charge }}</div>
+        </div>
+        <div class="summary-item">
+            <h3>Discount</h3>
+            <div class="amount">₹{{ bill_split.totals.discount }}</div>
+        </div>
+        <div class="summary-item">
+            <h3>CGST</h3>
+            <div class="amount">₹{{ bill_split.totals.cgst }}</div>
+        </div>
+        <div class="summary-item">
+            <h3>SGST</h3>
+            <div class="amount">₹{{ bill_split.totals.sgst }}</div>
+        </div>
+        <div class="summary-item grand-total">
+            <h3>Grand Total</h3>
+            <div class="amount">₹{{ bill_split.totals.grand_total }}</div>
+        </div>
+    </div>
+
+    <h3 style="color: #333; margin-bottom: 15px; font-size: 16px;">💸 Individual Bill Bear</h3>
+    <table class="results-table">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Selected Items</th>
+                <th>Item Total</th>
+                <th>Share %</th>
+                <th>Final Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user, details in bill_split.user_breakdown.items() %}
+            <tr>
+                <td class="user-name">{{ user }}</td>
+                <td class="selected-items">
+                    {% if details.selected_items %}
+                        {{ details.selected_items | join(', ') }}
+                    {% else %}
+                        <em>No items selected</em>
+                    {% endif %}
+                </td>
+                <td class="amount">₹{{ details.item_total }}</td>
+                <td class="percentage">{{ details.percentage }}%</td>
+                <td class="amount">₹{{ details.final_amount }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="breakdown-section">
+        <h3 class="breakdown-title">📊 Detailed Breakdown</h3>
+        <div class="breakdown-grid">
+            {% for user, details in bill_split.user_breakdown.items() %}
+            <div class="breakdown-item">
+                <h4>{{ user }}</h4>
+                <div class="breakdown-row">
+                    <span>Item Total:</span>
+                    <span>₹{{ details.item_total }}</span>
+                </div>
+                <div class="breakdown-row">
+                    <span>Service Charge:</span>
+                    <span>₹{{ details.service_charge }}</span>
+                </div>
+                <div class="breakdown-row">
+                    <span>CGST:</span>
+                    <span>₹{{ details.cgst }}</span>
+                </div>
+                <div class="breakdown-row">
+                    <span>SGST:</span>
+                    <span>₹{{ details.sgst }}</span>
+                </div>
+                <div class="breakdown-row">
+                    <span>Discount:</span>
+                    <span>-₹{{ details.discount }}</span>
+                </div>
+                <div class="breakdown-row total">
+                    <span>Total:</span>
+                    <span>₹{{ details.final_amount }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>This Bill was generated using BillBear.</p>
+        <p>Room Code: {{ room_code }} | Generated on {{ current_date.strftime('%B %d, %Y at %I:%M %p') }}</p>
+    </div>
+</body>
+</html>

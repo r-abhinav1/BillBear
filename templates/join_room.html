@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join Room - Bill Bear</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <script>
+        // Form validation and enhancements
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const submitBtn = document.querySelector('.submit-btn');
+            const roomCodeInput = document.getElementById('room_code');
+            const userNameInput = document.getElementById('user_name');
+            
+            // Auto-uppercase room code
+            roomCodeInput.addEventListener('input', function() {
+                this.value = this.value.toUpperCase();
+            });
+            
+            // Form validation
+            function validateForm() {
+                const isValid = userNameInput.value.trim().length >= 2 && 
+                               roomCodeInput.value.trim().length >= 3;
+                submitBtn.disabled = !isValid;
+                return isValid;
+            }
+            
+            // Real-time validation
+            [userNameInput, roomCodeInput].forEach(input => {
+                input.addEventListener('input', validateForm);
+            });
+            
+            // Form submission with loading state
+            form.addEventListener('submit', function(e) {
+                if (!validateForm()) {
+                    e.preventDefault();
+                    return;
+                }
+                
+                submitBtn.innerHTML = '<span>Joining...</span>';
+                submitBtn.disabled = true;
+                
+                // Add loading animation
+                const loadingSpinner = document.createElement('div');
+                loadingSpinner.style.cssText = `
+                    display: inline-block;
+                    width: 20px;
+                    height: 20px;
+                    border: 2px solid rgba(255,255,255,0.3);
+                    border-radius: 50%;
+                    border-top-color: #ffffff;
+                    animation: spin 1s ease-in-out infinite;
+                    margin-left: 10px;
+                `;
+                
+                // Add spinner styles
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
+                `;
+                document.head.appendChild(style);
+                
+                submitBtn.appendChild(loadingSpinner);
+            });
+            
+            // Initial validation
+            validateForm();
+        });
+    </script>
+</body>
+</html>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #121212 0%, #1E1E1E 100%);
+            color: #FFFFFF;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .container {
+            background: rgba(30, 30, 30, 0.95);
+            border-radius: 20px;
+            padding: 2.5rem;
+            width: 100%;
+            max-width: 450px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+            border: 1px solid #333333;
+            animation: fadeInUp 0.8s ease-out;
+            backdrop-filter: blur(10px);
+        }
+
+        @keyframes fadeInUp {
+            from { 
+                opacity: 0; 
+                transform: translateY(30px) scale(0.95); 
+            }
+            to { 
+                opacity: 1; 
+                transform: translateY(0) scale(1); 
+            }
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: clamp(1.8rem, 5vw, 2.5rem);
+            font-weight: 700;
+            color: #FFFFFF;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #3F51B5 0%, #FF4081 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            color: #CCCCCC;
+            font-size: 1rem;
+            font-weight: 400;
+        }
+
+        .error {
+            background: rgba(244, 67, 54, 0.1);
+            border: 1px solid rgba(244, 67, 54, 0.3);
+            color: #FF6B6B;
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            animation: shake 0.5s ease-in-out;
+        }
+
+        .error::before {
+            content: "⚠️";
+            font-size: 1.2rem;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+
+        .form-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            color: #FFFFFF;
+            font-size: 0.9rem;
+        }
+
+        .form-group input {
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            color: #FFFFFF;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .form-group input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #3F51B5;
+            box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .form-group input:valid {
+            border-color: rgba(76, 175, 80, 0.5);
+        }
+
+        #room_code {
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+        }
+
+        .submit-btn {
+            padding: 1.2rem 2rem;
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            color: #FFFFFF;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(63, 81, 181, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .submit-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .submit-btn:hover::before {
+            left: 100%;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(63, 81, 181, 0.4);
+        }
+
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .back-link {
+            text-align: center;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .back-link a {
+            color: #3F51B5;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        .back-link a:hover {
+            color: #FF4081;
+            text-decoration: underline;
+        }
+
+        .input-icon {
+            position: relative;
+        }
+
+        .input-icon::before {
+            content: '';
+            position: absolute;
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 20px;
+            height: 20px;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="rgba(255,255,255,0.5)"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>') no-repeat center;
+            background-size: contain;
+            opacity: 0.7;
+        }
+
+        .code-input-icon::before {
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="rgba(255,255,255,0.5)"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9l-3 3 3 3M18 9l3 3-3 3" /></svg>') no-repeat center;
+            background-size: contain;
+        }
+
+        /* Accessibility improvements */
+        .submit-btn:focus {
+            outline: 3px solid #3F51B5;
+            outline-offset: 2px;
+        }
+
+        /* Reduced motion for users who prefer it */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 2rem 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Join Room</h1>
+            <p>Enter your details to join the Bill Bear</p>
+        </div>
+        
+        {% if error %}
+            <div class="error">{{ error }}</div>
+        {% endif %}
+        
+        <form method="POST" class="form-container">
+            <div class="form-group">
+                <label for="user_name">Your Name</label>
+                <div class="input-icon">
+                    <input type="text" id="user_name" name="user_name" required 
+                           placeholder="Enter your name" 
+                           value="{{ request.form.get('user_name', '') }}"
+                           autocomplete="name">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="room_code">Room Code</label>
+                <div class="input-icon code-input-icon">
+                    <input type="text" id="room_code" name="room_code" required 
+                           placeholder="Enter room code (e.g., ABC123)"
+                           value="{{ request.args.get('room_code', '') or request.form.get('room_code', '') }}"
+                           maxlength="10"
+                           pattern="[A-Z0-9]{3,10}"
+                           title="Room code should be 3-10 characters long (letters and numbers only)">
+                </div>
+            </div>
+            
+            <button type="submit" class="submit-btn">Join Room</button>
+        </form>
+        
+        <div class="back-link">
+            <a href="/">← Back to Home</a>
+        </div>
+    </div>
+</body>
+</html>

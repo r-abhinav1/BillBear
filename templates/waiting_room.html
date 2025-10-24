@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waiting Room - {{ room['room_name'] }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #121212;
+            color: #FFFFFF;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .trans-logo {
+            max-width: 150px;
+            height: auto;
+            display: block;
+            margin: 1rem auto;
+            opacity: 0.9;
+        }
+
+        .top-bar {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            padding: 1rem 0;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .top-bar h1 {
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            font-weight: 600;
+            color: #FFFFFF;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            background: #1E1E1E;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333333;
+        }
+
+        .room-info {
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+            text-align: center;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        .room-info h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .room-info p {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+
+        .share-section {
+            background: #1E1E1E;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            border: 1px solid #333333;
+            text-align: center;
+        }
+
+        .share-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+        }
+
+        .qr-container {
+            display: inline-block;
+            padding: 1rem;
+            background: #FFFFFF;
+            border-radius: 12px;
+            margin: 1rem 0;
+            box-shadow: 0 0 20px rgba(63, 81, 181, 0.3);
+            border: 3px solid #3F51B5;
+        }
+
+        .qr-code {
+            width: 150px;
+            height: 150px;
+            border-radius: 8px;
+        }
+
+        .join-url {
+            background: #2D2D2D;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #3F51B5;
+            border: 1px solid #333333;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .join-url-text {
+            flex: 1;
+        }
+
+        .copy-btn {
+            background: #333333;
+            color: #FFFFFF;
+            border: 2px solid #555555;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .copy-btn:hover {
+            background: #555555;
+            border-color: #777777;
+        }
+
+        .copy-btn.copied {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+
+        .status-section {
+            background: #1E1E1E;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            border: 1px solid #333333;
+        }
+
+        .status-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .status-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #FFFFFF;
+        }
+
+        .status-count {
+            background: #3F51B5;
+            color: #FFFFFF;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #333333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50 0%, #66BB6A 100%);
+            transition: width 0.5s ease;
+            border-radius: 10px;
+        }
+
+        .user-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            border: 2px solid #333333;
+            border-radius: 8px;
+            background: #2D2D2D;
+            transition: all 0.3s ease;
+        }
+
+        .user-item.submitted {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.1);
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+        }
+
+        .user-item.pending {
+            border-color: #FF9800;
+            background: rgba(255, 152, 0, 0.1);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .status-icon {
+            font-size: 1.5rem;
+            margin-right: 1rem;
+        }
+
+        .user-name {
+            font-weight: 600;
+            flex: 1;
+            color: #FFFFFF;
+        }
+
+        .user-status {
+            font-size: 0.9rem;
+            color: #CCCCCC;
+            text-transform: uppercase;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .host-controls {
+            background: linear-gradient(135deg, #FF4081 0%, #F06292 100%);
+            color: #FFFFFF;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin: 1.5rem 0;
+            border-left: 4px solid #AD1457;
+        }
+
+        .warning-message {
+            margin-bottom: 1rem;
+        }
+
+        .warning-message h4 {
+            color: #FFFFFF;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .warning-message p {
+            color: rgba(255, 255, 255, 0.9);
+            margin: 0.25rem 0;
+        }
+
+        .force-complete-btn {
+            background: linear-gradient(135deg, #FF5722 0%, #FF7043 100%);
+            color: #FFFFFF;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-height: 48px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .force-complete-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(255, 87, 34, 0.4);
+        }
+
+        .force-complete-btn:active {
+            transform: translateY(0);
+        }
+
+        .waiting-message {
+            text-align: center;
+            padding: 2rem;
+            background: #2D2D2D;
+            border-radius: 12px;
+            margin-top: 1.5rem;
+            border: 1px solid #333333;
+        }
+
+        .waiting-message h3 {
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .waiting-message p {
+            color: #CCCCCC;
+        }
+
+        .completion-message {
+            text-align: center;
+            padding: 2rem;
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+            border-radius: 12px;
+            margin-top: 1.5rem;
+            border: 2px solid #4CAF50;
+        }
+
+        .completion-message h3 {
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid #3F51B5;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .last-updated {
+            text-align: center;
+            color: #CCCCCC;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #333333;
+        }
+
+        .pulsing-dots {
+            display: inline-block;
+            animation: pulseDots 1.5s infinite;
+        }
+
+        @keyframes pulseDots {
+            0%, 20% { opacity: 1; }
+            50% { opacity: 0.5; }
+            80%, 100% { opacity: 1; }
+        }
+
+        @media (min-width: 768px) {
+            .container {
+                padding: 2rem;
+            }
+
+            .card {
+                padding: 2rem;
+            }
+
+            .user-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .status-header {
+                flex-wrap: nowrap;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .user-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        /* Accessibility improvements */
+        button:focus {
+            outline: 3px solid #3F51B5;
+            outline-offset: 2px;
+        }
+
+        /* Loading state */
+        .loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="logo-banner">
+        <img src="{{ url_for('static', filename='images/trans_logo.png') }}" alt="Transparent Logo" class="trans-logo">
+    </div>
+
+    <header class="top-bar">
+        <h1>⏳ Waiting Room</h1>
+    </header>
+
+    <main class="container">
+        <div class="room-info">
+            <h2>{{ room['room_name'] }}</h2>
+            <p>Host: {{ room['host_name'] }}</p>
+            {% if is_host %}
+            <p><strong>✨ You are the host - you can proceed early if needed</strong></p>
+            {% endif %}
+        </div>
+
+        <div class="share-section">
+            <h3 class="share-title">📱 Share Room</h3>
+            <p style="color: #CCCCCC; margin-bottom: 1rem;">Others can join using this QR code or link:</p>
+            
+            <div class="qr-container">
+                <img src="{{ qr_b64 }}" alt="QR Code for joining room" class="qr-code">
+            </div>
+            
+            <div class="join-url">
+                <span class="join-url-text" id="joinUrl">{{ join_url }}</span>
+                <button type="button" class="copy-btn" onclick="copyToClipboard()" id="copyBtn">
+                    📋 Copy
+                </button>
+            </div>
+        </div>
+
+        <div class="status-section">
+            <div class="status-header">
+                <span class="status-title">Submission Status</span>
+                <span class="status-count" id="statusCount">0 / 0 submitted</span>
+            </div>
+            
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+            
+            <div class="user-grid" id="userList">
+                <!-- Users will be populated by JavaScript -->
+            </div>
+            
+            <div class="last-updated">
+                <span class="spinner" id="spinner"></span>
+                Last updated: <span id="lastUpdated">Loading<span class="pulsing-dots">...</span></span>
+            </div>
+        </div>
+
+        <!-- Host Controls -->
+        {% if is_host %}
+        <div class="host-controls" id="hostControls" style="display: none;">
+            <div class="warning-message">
+                <h4>⚠️ Not everyone has joined or submitted</h4>
+                <p>Expected: <span id="expectedPeople">0</span> people | Joined: <span id="joinedCount">0</span> | Submitted: <span id="submittedCount">0</span></p>
+                <p>You can wait for others or proceed with the current submissions.</p>
+            </div>
+            
+            <form method="POST" action="/room/{{ room_code }}/force-complete/{{ user_name }}" id="forceCompleteForm">
+                <button type="submit" class="force-complete-btn" onclick="return confirm('Are you sure you want to proceed? Users who haven\'t submitted will be marked as having no selections.')">
+                    🚀 Proceed Anyway
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        <div class="waiting-message" id="waitingMessage">
+            <h3>Waiting for everyone to submit their selections<span class="pulsing-dots">...</span></h3>
+            <p>Once all users have submitted, you'll be redirected to the final Bill Bear.</p>
+        </div>
+        
+        <div class="completion-message" id="completionMessage" style="display: none;">
+            <h3>✅ Everyone has submitted!</h3>
+            <p>Redirecting to the final Bill Bear<span class="pulsing-dots">...</span></p>
+        </div>
+    </main>
+
+    <script>
+        const roomCode = '{{ room_code }}';
+        const hostName = '{{ room.host_name }}';
+        const currentUser = '{{ user_name }}';
+        const isHost = {% if is_host %}true{% else %}false{% endif %};
+        
+        function updateStatus() {
+            fetch(`/room/${roomCode}/status`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error:', data.error);
+                        return;
+                    }
+                    
+                    const users = data.users;
+                    const submittedUsers = data.submitted_users;
+                    const readyToProceed = data.ready_to_proceed;
+                    const enoughUsersJoined = data.enough_users_joined;
+                    const expectedPeople = data.expected_people;
+                    
+                    // Update status count
+                    document.getElementById('statusCount').textContent = 
+                        `${submittedUsers.length} / ${users.length} submitted`;
+                    
+                    // Update progress bar
+                    const progressPercentage = users.length > 0 ? (submittedUsers.length / users.length) * 100 : 0;
+                    document.getElementById('progressFill').style.width = progressPercentage + '%';
+                    
+                    // Update user list
+                    const userList = document.getElementById('userList');
+                    userList.innerHTML = '';
+                    
+                    users.forEach(user => {
+                        const userItem = document.createElement('div');
+                        const isSubmitted = submittedUsers.includes(user);
+                        const isCurrentHost = user === hostName;
+                        
+                        userItem.className = `user-item ${isSubmitted ? 'submitted' : 'pending'}`;
+                        userItem.innerHTML = `
+                            <span class="status-icon">${isSubmitted ? '✅' : '⏳'}</span>
+                            <span class="user-name">
+                                ${user}
+                                ${isCurrentHost ? ' 👑' : ''}
+                            </span>
+                            <span class="user-status">${isSubmitted ? 'submitted' : 'pending'}</span>
+                        `;
+                        
+                        userList.appendChild(userItem);
+                    });
+                    
+                    // Update host controls (only if user is host)
+                    const hostControls = document.getElementById('hostControls');
+                    if (hostControls && isHost) {
+                        document.getElementById('expectedPeople').textContent = expectedPeople;
+                        document.getElementById('joinedCount').textContent = users.length;
+                        document.getElementById('submittedCount').textContent = submittedUsers.length;
+                        
+                        // Show host controls if not ready to proceed and users have joined
+                        if (!readyToProceed && users.length > 0) {
+                            hostControls.style.display = 'block';
+                        } else {
+                            hostControls.style.display = 'none';
+                        }
+                    }
+                    
+                    // Update last updated time
+                    document.getElementById('lastUpdated').innerHTML = 
+                        new Date().toLocaleTimeString() + '<span class="pulsing-dots">...</span>';
+                    
+                    // Show completion message if ready to proceed
+                    if (readyToProceed) {
+                        document.getElementById('waitingMessage').style.display = 'none';
+                        document.getElementById('completionMessage').style.display = 'block';
+                        document.getElementById('spinner').style.display = 'none';
+                        if (hostControls) hostControls.style.display = 'none';
+                        
+                        // Redirect after 3 seconds
+                        setTimeout(() => {
+                            window.location.href = `/room/${roomCode}/results`;
+                        }, 3000);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching status:', error);
+                    document.getElementById('lastUpdated').textContent = 'Error loading status';
+                });
+        }
+        
+        // Initial load
+        updateStatus();
+        
+        // Poll every 3 seconds for updates
+        setInterval(updateStatus, 3000);
+    </script>
+</body>
+</html>

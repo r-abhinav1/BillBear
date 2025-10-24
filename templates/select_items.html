@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Items - {{ room['room_name'] }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #121212;
+            color: #FFFFFF;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .top-bar {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            padding: 1rem 0;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .top-bar h1 {
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            font-weight: 600;
+            color: #FFFFFF;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            background: #1E1E1E;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333333;
+        }
+
+        .room-info {
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+            text-align: center;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        .room-info h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .user-info {
+            background: linear-gradient(135deg, #FF4081 0%, #F06292 100%);
+            color: #FFFFFF;
+            text-align: center;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .user-info h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .instructions {
+            background: #2D2D2D;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid #3F51B5;
+        }
+
+        .instructions p {
+            margin: 0;
+            color: #CCCCCC;
+            font-weight: 500;
+        }
+
+        .items-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+
+        .item-row {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            background: #2D2D2D;
+            border: 2px solid #333333;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-height: 60px;
+        }
+
+        .item-row:hover {
+            border-color: #3F51B5;
+            background: #333333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(63, 81, 181, 0.2);
+        }
+
+        .item-row.selected {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.1);
+            box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
+        }
+
+        .item-checkbox {
+            width: 20px;
+            height: 20px;
+            margin-right: 1rem;
+            accent-color: #4CAF50;
+            transform: scale(1.2);
+        }
+
+        .item-details {
+            flex: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .item-name {
+            font-weight: 600;
+            color: #FFFFFF;
+            font-size: 1rem;
+        }
+
+        .item-price {
+            font-weight: 700;
+            color: #4CAF50;
+            font-size: 1.1rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-decoration: none;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-height: 48px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            color: #FFFFFF;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(63, 81, 181, 0.4);
+        }
+
+        .btn-primary:disabled {
+            background: #555555;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: #FFFFFF;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .selected-count {
+            background: #3F51B5;
+            color: #FFFFFF;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            text-align: center;
+            display: inline-block;
+        }
+
+        .floating-summary {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #1E1E1E;
+            border: 2px solid #3F51B5;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            display: none;
+        }
+
+        .floating-summary.show {
+            display: block;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .no-items {
+            text-align: center;
+            padding: 3rem;
+            color: #CCCCCC;
+        }
+
+        .no-items h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #FFFFFF;
+        }
+
+        @media (min-width: 768px) {
+            .container {
+                padding: 2rem;
+            }
+
+            .card {
+                padding: 2rem;
+            }
+
+            .items-container {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .actions {
+                justify-content: flex-end;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .items-container {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        /* Loading animation */
+        .loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        .loading .btn-primary {
+            position: relative;
+            color: transparent;
+        }
+
+        .loading .btn-primary::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #FFFFFF;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            transform: translate(-50%, -50%);
+        }
+
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        /* Accessibility improvements */
+        input:focus, button:focus, a:focus {
+            outline: 3px solid #3F51B5;
+            outline-offset: 2px;
+        }
+
+        /* Custom checkbox styling */
+        .item-checkbox {
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #555555;
+            border-radius: 4px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .item-checkbox:checked {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+
+        .item-checkbox:checked::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #FFFFFF;
+            font-size: 12px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header class="top-bar">
+        <h1>🛒 Select Your Items</h1>
+    </header>
+
+    <main class="container">
+        <div class="room-info">
+            <h2>{{ room['room_name'] }}</h2>
+            <p>Host: {{ room['host_name'] }}</p>
+        </div>
+
+        <div class="user-info">
+            <h3>👋 Welcome, {{ user_name }}!</h3>
+        </div>
+
+        <div class="instructions">
+            <p>🎯 Select the items you consumed from the bill. You'll be charged proportionally for shared items.</p>
+        </div>
+
+        <form method="POST" id="selectionForm">
+            <div class="card">
+                <div class="selected-count" id="selectedCount">
+                    0 items selected
+                </div>
+                
+                <h3 class="section-title">Available Items</h3>
+                
+                {% if room['items'] %}
+                <div class="items-container">
+                    {% for item in room['items'] %}
+                    <label class="item-row" for="item_{{ loop.index }}">
+                        <input type="checkbox" 
+                               id="item_{{ loop.index }}" 
+                               name="selected_items" 
+                               value="{{ item.name }}" 
+                               class="item-checkbox"
+                               onchange="updateSelection()">
+                        <div class="item-details">
+                            <span class="item-name">{{ item.name }}</span>
+                            <span class="item-price">{{ item.price }}</span>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="no-items">
+                    <h3>No Items Available</h3>
+                    <p>The host hasn't added any items yet.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="actions">
+                <button type="submit" class="btn btn-success" id="submitBtn">
+                    ✅ Submit Selection
+                </button>
+                <button type="button" class="btn btn-primary" onclick="selectAll()">
+                    ☑️ Select All
+                </button>
+                <button type="button" class="btn btn-primary" onclick="clearAll()">
+                    ❌ Clear All
+                </button>
+            </div>
+        </form>
+
+        <div class="floating-summary" id="floatingSummary">
+            <div class="selected-count" id="floatingCount">
+                0 items selected
+            </div>
+            <button type="button" class="btn btn-success" onclick="document.getElementById('submitBtn').click()">
+                Submit
+            </button>
+        </div>
+    </main>
+
+    <script>
+        function updateSelection() {
+            const checkboxes = document.querySelectorAll('input[name="selected_items"]:checked');
+            const count = checkboxes.length;
+            const countText = `${count} item${count !== 1 ? 's' : ''} selected`;
+            
+            document.getElementById('selectedCount').textContent = countText;
+            document.getElementById('floatingCount').textContent = countText;
+            
+            // Update item row styling
+            document.querySelectorAll('.item-row').forEach(row => {
+                const checkbox = row.querySelector('.item-checkbox');
+                if (checkbox.checked) {
+                    row.classList.add('selected');
+                } else {
+                    row.classList.remove('selected');
+                }
+            });
+            
+            // Show/hide floating summary
+            const floatingSummary = document.getElementById('floatingSummary');
+            if (count > 0) {
+                floatingSummary.classList.add('show');
+            } else {
+                floatingSummary.classList.remove('show');
+            }
+            
+            // Enable/disable submit button
+            document.getElementById('submitBtn').disabled = count === 0;
+        }
+        
+        function selectAll() {
+            const checkboxes = document.querySelectorAll('input[name="selected_items"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = true;
+            });
+            updateSelection();
+        }
+        
+        function clearAll() {
+            const checkboxes = document.querySelectorAll('input[name="selected_items"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            updateSelection();
+        }
+        
+        // Form submission with loading state
+        document.getElementById('selectionForm').addEventListener('submit', function(e) {
+            const form = e.target;
+            const submitBtn = document.getElementById('submitBtn');
+            
+            form.classList.add('loading');
+            submitBtn.disabled = true;
+            
+            // Re-enable if form fails to submit for some reason
+            setTimeout(() => {
+                form.classList.remove('loading');
+                updateSelection();
+            }, 5000);
+        });
+        
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            updateSelection();
+        });
+    </script>
+</body>
+</html>
+  

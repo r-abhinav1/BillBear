@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join {{ room.room_name if room else 'Room' }} - Bill Bear</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #121212 0%, #1E1E1E 100%);
+            color: #FFFFFF;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .container {
+            background: rgba(30, 30, 30, 0.95);
+            border-radius: 20px;
+            padding: 2.5rem;
+            width: 100%;
+            max-width: 500px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+            border: 1px solid #333;
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #3F51B5, #FF4081);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .room-info {
+            background: rgba(63, 81, 181, 0.1);
+            border: 1px solid rgba(63, 81, 181, 0.2);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .room-code {
+            font-size: 1.6rem;
+            font-weight: bold;
+            color: #3F51B5;
+            border: 2px solid rgba(63, 81, 181, 0.3);
+            border-radius: 12px;
+            padding: 0.6rem 1.2rem;
+            margin: 1rem 0;
+            display: inline-block;
+        }
+
+        .room-stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 1rem;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #FF4081;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+
+        .error {
+            background: rgba(244, 67, 54, 0.1);
+            border: 1px solid rgba(244, 67, 54, 0.3);
+            color: #FF6B6B;
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .form-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .form-group input {
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1rem;
+            transition: 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #3F51B5;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .submit-btn {
+            padding: 1rem;
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+            transition: 0.3s;
+        }
+
+        .submit-btn:hover {
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .back-link {
+            text-align: center;
+            margin-top: 2rem;
+        }
+
+        .back-link a {
+            color: #3F51B5;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            border: 2px solid #3F51B5;
+            border-radius: 8px;
+        }
+
+        .back-link a:hover {
+            background: rgba(63, 81, 181, 0.1);
+        }
+
+        @media (max-width: 600px) {
+            .room-stats {
+                flex-direction: column;
+                gap: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% if not room %}
+            <div class="header">
+                <h1>Room Not Found</h1>
+            </div>
+            <p>The room code "{{ room_code }}" does not exist or has expired.</p>
+            <div class="back-link">
+                <a href="{{ url_for('index') }}">← Back to Home</a>
+            </div>
+        {% else %}
+            <div class="header">
+                <h1>Join Room</h1>
+            </div>
+
+            <div class="room-info">
+                <h2>{{ room.room_name }}</h2>
+                <p>Host: {{ room.host_name }}</p>
+                <div class="room-code">{{ room_code }}</div>
+                <div class="room-stats">
+                    <div class="stat">
+                        <div class="stat-value">{{ room.users | length }}</div>
+                        <div class="stat-label">Joined</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value">{{ room.num_people }}</div>
+                        <div class="stat-label">Expected</div>
+                    </div>
+                </div>
+            </div>
+
+            {% if error %}
+                <div class="error">{{ error }}</div>
+            {% endif %}
+
+            <form method="POST" class="form-container">
+                <div class="form-group">
+                    <label for="user_name">Your Name</label>
+                    <input type="text" id="user_name" name="user_name" placeholder="Enter your name" value="{{ request.form.get('user_name', '') }}" required>
+                </div>
+                <button type="submit" class="submit-btn">Join {{ room.room_name }}</button>
+            </form>
+
+            <div class="back-link">
+                <a href="{{ url_for('index') }}">← Back to Home</a>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

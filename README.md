@@ -20,8 +20,6 @@ Repository: https://github.com/r-abhinav1/BillBear
 
 ## Screenshot
 
-_(Replace `screenshot.png` once uploaded to the repo)_
-
 ---<img width="1920" height="1080" alt="Screenshot 2025-10-24 105641" src="https://github.com/user-attachments/assets/18540920-57b6-45eb-8316-e94577d4dccc" />
 
 
@@ -59,7 +57,6 @@ _(Replace `screenshot.png` once uploaded to the repo)_
 | Database | MongoDB Atlas |
 | OCR | Google Gemini Flash 2.0 |
 | Deployment | Vercel |
-| Other | PWA, QR Code generation |
 
 ---
 

@@ -297,11 +297,7 @@
         }
 
         .breakdown-details {
-            background: #1E1E1E;
-            border-radius: 12px;
-            padding: 1.5rem;
             margin-top: 2rem;
-            border: 1px solid #333333;
         }
 
         .breakdown-title {
@@ -313,37 +309,89 @@
 
         .breakdown-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 1rem;
         }
 
         .breakdown-item {
-            background: #2D2D2D;
-            padding: 1rem;
-            border-radius: 8px;
+            background: #1E1E1E;
+            border-radius: 12px;
             border: 1px solid #333333;
+            overflow: hidden;
         }
 
-        .breakdown-item h4 {
+        .breakdown-item-header {
+            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
+            padding: 0.75rem 1rem;
+            font-weight: 700;
+            font-size: 1rem;
             color: #FFFFFF;
-            margin-bottom: 0.5rem;
+        }
+
+        .breakdown-item-body {
+            padding: 0.75rem 1rem;
+        }
+
+        /* Item-by-item split rows */
+        .item-split-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 0.35rem 0;
+            border-bottom: 1px solid #2D2D2D;
+            font-size: 0.88rem;
+            gap: 0.5rem;
+        }
+
+        .item-split-row:last-of-type {
+            border-bottom: none;
+        }
+
+        .item-split-name {
+            color: #CCCCCC;
+            flex: 1;
+        }
+
+        .item-split-calc {
+            color: #777;
+            font-size: 0.8rem;
+            white-space: nowrap;
+        }
+
+        .item-split-amount {
+            color: #FFFFFF;
             font-weight: 600;
+            white-space: nowrap;
+        }
+
+        /* Charges / taxes section */
+        .breakdown-divider {
+            border: none;
+            border-top: 1px solid #333333;
+            margin: 0.6rem 0;
         }
 
         .breakdown-row {
             display: flex;
             justify-content: space-between;
-            margin: 0.3rem 0;
-            font-size: 0.9rem;
+            padding: 0.25rem 0;
+            font-size: 0.88rem;
+            color: #AAAAAA;
         }
 
+        .breakdown-row .label { flex: 1; }
+        .breakdown-row .val { color: #CCCCCC; }
+
         .breakdown-row.total {
-            font-weight: 600;
+            font-weight: 700;
             color: #4CAF50;
-            border-top: 1px solid #333333;
+            font-size: 1rem;
             padding-top: 0.5rem;
-            margin-top: 0.5rem;
+            margin-top: 0.25rem;
+            border-top: 1px solid #333333;
         }
+
+        .breakdown-row.total .val { color: #4CAF50; }
 
         @media (max-width: 768px) {
             .container {
@@ -405,8 +453,8 @@
                 <div class="amount">₹{{ bill_split.totals.discount }}</div>
             </div>
             <div class="summary-item">
-                <h3>Taxes (CGST + SGST)</h3>
-                <div class="amount">₹{{ bill_split.totals.cgst + bill_split.totals.sgst }}</div>
+                <h3>Taxes (CGST + SGST{% if bill_split.totals.igst > 0 %} + IGST{% endif %})</h3>
+                <div class="amount">₹{{ bill_split.totals.cgst + bill_split.totals.sgst + bill_split.totals.igst }}</div>
             </div>
             <div class="summary-item grand-total">
                 <h3>Grand Total</h3>
@@ -451,30 +499,60 @@
             <div class="breakdown-grid">
                 {% for user, details in bill_split.user_breakdown.items() %}
                 <div class="breakdown-item">
-                    <h4>{{ user }}</h4>
-                    <div class="breakdown-row">
-                        <span>Item Total:</span>
-                        <span>₹{{ details.item_total }}</span>
-                    </div>
-                    <div class="breakdown-row">
-                        <span>Service Charge:</span>
-                        <span>₹{{ details.service_charge }}</span>
-                    </div>
-                    <div class="breakdown-row">
-                        <span>CGST:</span>
-                        <span>₹{{ details.cgst }}</span>
-                    </div>
-                    <div class="breakdown-row">
-                        <span>SGST:</span>
-                        <span>₹{{ details.sgst }}</span>
-                    </div>
-                    <div class="breakdown-row">
-                        <span>Discount:</span>
-                        <span>-₹{{ details.discount }}</span>
-                    </div>
-                    <div class="breakdown-row total">
-                        <span>Total:</span>
-                        <span>₹{{ details.final_amount }}</span>
+                    <div class="breakdown-item-header">{{ user }}</div>
+                    <div class="breakdown-item-body">
+
+                        {% if details.item_details %}
+                            {% for item in details.item_details %}
+                            <div class="item-split-row">
+                                <span class="item-split-name">{{ item.name }}</span>
+                                {% if item.shared_by > 1 %}
+                                <span class="item-split-calc">₹{{ "%.2f"|format(item.full_price) }} ÷ {{ item.shared_by }}</span>
+                                {% endif %}
+                                <span class="item-split-amount">₹{{ "%.2f"|format(item.your_share) }}</span>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <p style="color:#777; font-size:0.9rem; padding:0.5rem 0;">No items selected</p>
+                        {% endif %}
+
+                        <hr class="breakdown-divider">
+
+                        {% if details.service_charge > 0 %}
+                        <div class="breakdown-row">
+                            <span class="label">Service Charge (split)</span>
+                            <span class="val">₹{{ "%.2f"|format(details.service_charge) }}</span>
+                        </div>
+                        {% endif %}
+                        {% if details.cgst > 0 %}
+                        <div class="breakdown-row">
+                            <span class="label">CGST (split)</span>
+                            <span class="val">₹{{ "%.2f"|format(details.cgst) }}</span>
+                        </div>
+                        {% endif %}
+                        {% if details.sgst > 0 %}
+                        <div class="breakdown-row">
+                            <span class="label">SGST (split)</span>
+                            <span class="val">₹{{ "%.2f"|format(details.sgst) }}</span>
+                        </div>
+                        {% endif %}
+                        {% if details.igst > 0 %}
+                        <div class="breakdown-row">
+                            <span class="label">IGST (split)</span>
+                            <span class="val">₹{{ "%.2f"|format(details.igst) }}</span>
+                        </div>
+                        {% endif %}
+                        {% if details.discount > 0 %}
+                        <div class="breakdown-row">
+                            <span class="label">Discount</span>
+                            <span class="val">-₹{{ "%.2f"|format(details.discount) }}</span>
+                        </div>
+                        {% endif %}
+
+                        <div class="breakdown-row total">
+                            <span class="label">Amount Due</span>
+                            <span class="val">₹{{ "%.2f"|format(details.final_amount) }}</span>
+                        </div>
                     </div>
                 </div>
                 {% endfor %}
@@ -506,63 +584,22 @@
 
     <script>
         function copyShareLink() {
-            const shareUrl = document.getElementById('shareUrl').textContent;
+            const text = document.getElementById('shareUrl').textContent.trim();
             const copyBtn = document.getElementById('copyBtn');
             const shareBtn = document.getElementById('shareBtn');
-            
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(shareUrl).then(() => {
-                    copyBtn.textContent = '✅ Copied!';
-                    shareBtn.textContent = '✅ Copied!';
-                    copyBtn.classList.add('copied');
-                    
-                    setTimeout(() => {
-                        copyBtn.textContent = '📋 Copy';
-                        shareBtn.textContent = '📋 Copy Share Link';
-                        copyBtn.classList.remove('copied');
-                    }, 2000);
-                }).catch(err => {
-                    console.error('Failed to copy: ', err);
-                    fallbackCopyTextToClipboard(shareUrl, copyBtn, shareBtn);
-                });
-            } else {
-                fallbackCopyTextToClipboard(shareUrl, copyBtn, shareBtn);
-            }
-        }
 
-        function fallbackCopyTextToClipboard(text, copyBtn, shareBtn) {
-            const textArea = document.createElement('textarea');
-            textArea.value = text;
-            textArea.style.top = '0';
-            textArea.style.left = '0';
-            textArea.style.position = 'fixed';
-            
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            
-            try {
-                const successful = document.execCommand('copy');
-                if (successful) {
-                    copyBtn.textContent = '✅ Copied!';
-                    shareBtn.textContent = '✅ Copied!';
-                    copyBtn.classList.add('copied');
-                    
-                    setTimeout(() => {
-                        copyBtn.textContent = '📋 Copy';
-                        shareBtn.textContent = '📋 Copy Share Link';
-                        copyBtn.classList.remove('copied');
-                    }, 2000);
-                } else {
-                    copyBtn.textContent = '❌ Failed';
-                    shareBtn.textContent = '❌ Failed';
-                    setTimeout(() => {
-                        copyBtn.textContent = '📋 Copy';
-                        shareBtn.textContent = '📋 Copy Share Link';
-                    }, 2000);
-                }
-            } catch (err) {
-                console.error('Fallback: Oops, unable to copy', err);
+            function showSuccess() {
+                copyBtn.textContent = '✅ Copied!';
+                shareBtn.textContent = '✅ Copied!';
+                copyBtn.classList.add('copied');
+                setTimeout(() => {
+                    copyBtn.textContent = '📋 Copy';
+                    shareBtn.textContent = '📋 Copy Share Link';
+                    copyBtn.classList.remove('copied');
+                }, 2000);
+            }
+
+            function showFailure() {
                 copyBtn.textContent = '❌ Failed';
                 shareBtn.textContent = '❌ Failed';
                 setTimeout(() => {
@@ -570,8 +607,27 @@
                     shareBtn.textContent = '📋 Copy Share Link';
                 }, 2000);
             }
-            
-            document.body.removeChild(textArea);
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(showSuccess).catch(() => execFallback());
+            } else {
+                execFallback();
+            }
+
+            function execFallback() {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try {
+                    document.execCommand('copy') ? showSuccess() : showFailure();
+                } catch (e) {
+                    showFailure();
+                }
+                document.body.removeChild(ta);
+            }
         }
     </script>
 </body>

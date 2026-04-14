@@ -517,65 +517,44 @@
     </template>
 
     <script>
-        // Copy to clipboard functionality
         function copyToClipboard() {
-            const joinUrl = document.getElementById('joinUrl').textContent;
-            const copyBtn = document.getElementById('copyBtn');
-            
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(joinUrl).then(() => {
-                    copyBtn.textContent = '✅ Copied!';
-                    copyBtn.classList.add('copied');
-                    
-                    setTimeout(() => {
-                        copyBtn.textContent = '📋 Copy';
-                        copyBtn.classList.remove('copied');
-                    }, 2000);
-                }).catch(err => {
-                    console.error('Failed to copy: ', err);
-                    fallbackCopyTextToClipboard(joinUrl, copyBtn);
-                });
-            } else {
-                fallbackCopyTextToClipboard(joinUrl, copyBtn);
-            }
-        }
+            const text = document.getElementById('joinUrl').textContent.trim();
+            const btn = document.getElementById('copyBtn');
 
-        function fallbackCopyTextToClipboard(text, copyBtn) {
-            const textArea = document.createElement('textarea');
-            textArea.value = text;
-            textArea.style.top = '0';
-            textArea.style.left = '0';
-            textArea.style.position = 'fixed';
-            
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            
-            try {
-                const successful = document.execCommand('copy');
-                if (successful) {
-                    copyBtn.textContent = '✅ Copied!';
-                    copyBtn.classList.add('copied');
-                    
-                    setTimeout(() => {
-                        copyBtn.textContent = '📋 Copy';
-                        copyBtn.classList.remove('copied');
-                    }, 2000);
-                } else {
-                    copyBtn.textContent = '❌ Failed';
-                    setTimeout(() => {
-                        copyBtn.textContent = '📋 Copy';
-                    }, 2000);
-                }
-            } catch (err) {
-                console.error('Fallback: Oops, unable to copy', err);
-                copyBtn.textContent = '❌ Failed';
+            function showSuccess() {
+                btn.textContent = '✅ Copied!';
+                btn.classList.add('copied');
                 setTimeout(() => {
-                    copyBtn.textContent = '📋 Copy';
+                    btn.textContent = '📋 Copy';
+                    btn.classList.remove('copied');
                 }, 2000);
             }
-            
-            document.body.removeChild(textArea);
+
+            function showFailure() {
+                btn.textContent = '❌ Failed';
+                setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
+            }
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(showSuccess).catch(() => execFallback());
+            } else {
+                execFallback();
+            }
+
+            function execFallback() {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try {
+                    document.execCommand('copy') ? showSuccess() : showFailure();
+                } catch (e) {
+                    showFailure();
+                }
+                document.body.removeChild(ta);
+            }
         }
     </script>
 </body>

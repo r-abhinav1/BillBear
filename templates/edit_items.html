@@ -396,6 +396,17 @@
                                placeholder="₹0.00" aria-label="SGST amount">
                     </div>
 
+                    {% if items.igst and items.igst != 'N/A' and items.igst != '₹0.00' %}
+                    <div class="financial-item">
+                        <label for="igst">IGST:</label>
+                        <input type="text" id="igst" name="igst"
+                               value="{{ items.igst }}"
+                               placeholder="₹0.00" aria-label="IGST amount">
+                    </div>
+                    {% else %}
+                    <input type="hidden" name="igst" value="N/A">
+                    {% endif %}
+
                     <div class="financial-item">
                         <label for="total">Total:</label>
                         <input type="text" id="total" name="total" 

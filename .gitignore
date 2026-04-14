@@ -1,0 +1,37 @@
+# Environment & secrets
+.env
+textapi
+sample
+
+# Local documentation (not for the repo)
+CODEBASE.md
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Uploads (local dev only — Vercel uses /tmp)
+static/uploads/
+
+# Reference/scratch images in project root
+billbear_ref2.jpeg
+billref_3.png
+reference_bill.jpeg
+
+# Test screenshots from Playwright
+*.png
+!static/images/*.png
+
+# Playwright session data
+.playwright-mcp/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

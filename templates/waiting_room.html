@@ -499,10 +499,10 @@
     </main>
 
     <script>
-        const roomCode = '{{ room_code }}';
-        const hostName = '{{ room.host_name }}';
-        const currentUser = '{{ user_name }}';
-        const isHost = {% if is_host %}true{% else %}false{% endif %};
+        const roomCode = {{ room_code | tojson }};
+        const hostName = {{ room.host_name | tojson }};
+        const currentUser = {{ user_name | tojson }};
+        const isHost = {{ is_host | tojson }};
         
         function updateStatus() {
             fetch(`/room/${roomCode}/status`)
@@ -589,9 +589,49 @@
         
         // Initial load
         updateStatus();
-        
+
         // Poll every 3 seconds for updates
         setInterval(updateStatus, 3000);
+
+        function copyToClipboard() {
+            const text = document.getElementById('joinUrl').textContent.trim();
+            const btn = document.getElementById('copyBtn');
+
+            function showSuccess() {
+                btn.textContent = '✅ Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '📋 Copy';
+                    btn.classList.remove('copied');
+                }, 2000);
+            }
+
+            function showFailure() {
+                btn.textContent = '❌ Failed';
+                setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
+            }
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(showSuccess).catch(() => execFallback());
+            } else {
+                execFallback();
+            }
+
+            function execFallback() {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try {
+                    document.execCommand('copy') ? showSuccess() : showFailure();
+                } catch (e) {
+                    showFailure();
+                }
+                document.body.removeChild(ta);
+            }
+        }
     </script>
 </body>
 </html>

@@ -282,29 +282,48 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Create Room</h1>
-            <p>Create a room to split your bill with friends</p>
+            {% if mode == 'json' %}
+            <h1>Upload Saved Scan</h1>
+            <p>Resume with a previously saved bill scan (.billbear.json)</p>
+            {% else %}
+            <h1>Upload Bill</h1>
+            <p>Scan a new bill to create a room</p>
+            {% endif %}
         </div>
 
         <form method="POST" enctype="multipart/form-data" class="form-container" id="createForm">
             <div class="form-group">
                 <label for="host_name">Host Name</label>
-                <input type="text" id="host_name" name="host_name" class="form-input" 
+                <input type="text" id="host_name" name="host_name" class="form-input"
                        placeholder="Enter your name" required>
             </div>
 
             <div class="form-group">
                 <label for="room_name">Room Name</label>
-                <input type="text" id="room_name" name="room_name" class="form-input" 
+                <input type="text" id="room_name" name="room_name" class="form-input"
                        placeholder="Give your room a name" required>
             </div>
 
             <div class="form-group">
                 <label for="num_people">Number of People</label>
-                <input type="number" id="num_people" name="num_people" class="form-input" 
+                <input type="number" id="num_people" name="num_people" class="form-input"
                        placeholder="How many people will join?" min="1" max="20" required>
             </div>
 
+            {% if mode == 'json' %}
+            <div class="form-group">
+                <label for="scan_json">Saved Scan File</label>
+                <div class="file-input-wrapper">
+                    <input type="file" id="scan_json" accept=".json,application/json" required>
+                    <label for="scan_json" class="file-input-label" id="jsonLabel">
+                        Choose .billbear.json file
+                    </label>
+                </div>
+                <div id="ocrStatus" class="ocr-status"></div>
+            </div>
+            <!-- dummy disabled image input so existing JS that references it doesn't crash -->
+            <input type="file" id="bill_image" name="bill_image" accept="image/*" style="display:none;">
+            {% else %}
             <div class="form-group">
                 <label for="bill_image">Bill Image</label>
                 <div class="file-input-wrapper">
@@ -315,15 +334,29 @@
                 </div>
                 <div id="ocrStatus" class="ocr-status"></div>
             </div>
+            {% endif %}
             <input type="hidden" id="ocr_payload" name="ocr_payload">
+            <input type="hidden" id="mode" name="mode" value="{{ mode }}">
 
             <button type="submit" class="submit-btn" id="submitBtn">
-                Create Room
+                {% if mode == 'json' %}Continue to Edit{% else %}Create Room{% endif %}
             </button>
+            {% if mode != 'json' %}
             <button type="button" class="skip-ocr-btn" id="skipOcrBtn" style="display:none;">
                 Skip OCR — enter items manually
             </button>
+            {% endif %}
             <input type="hidden" id="skip_ocr" name="skip_ocr" value="">
+
+            <div class="mode-switch" style="text-align:center; margin-top:1rem; font-size:0.9rem; color:#B0BEC5;">
+                {% if mode == 'json' %}
+                Want to scan a new bill instead?
+                <a href="/create?mode=image" style="color:#3F51B5; font-weight:600; text-decoration:none;">Upload Bill</a>
+                {% else %}
+                Have a saved scan?
+                <a href="/create?mode=json" style="color:#FF4081; font-weight:600; text-decoration:none;">Upload Saved JSON</a>
+                {% endif %}
+            </div>
 
             <!-- Vision fallback removed to avoid paid API calls -->
         </form>
@@ -339,6 +372,7 @@
     <script>
         const clientOcrEnabled = {{ (client_ocr_enabled or false) | tojson }};
         const legacyImageOcrEnabled = {{ (legacy_image_ocr_enabled or false) | tojson }};
+        const mode = {{ mode | tojson }};
         let submissionLocked = false;
 
         const form = document.getElementById('createForm');
@@ -349,6 +383,8 @@
         const ocrStatus = document.getElementById('ocrStatus');
         const skipOcrBtn = document.getElementById('skipOcrBtn');
         const skipOcrInput = document.getElementById('skip_ocr');
+        const jsonInput = document.getElementById('scan_json');
+        const jsonLabel = document.getElementById('jsonLabel');
         // Vision fallback removed — no elements to bind
 
         function setLoading(isLoading) {
@@ -371,20 +407,22 @@
             // Vision fallback disabled — no-op
         }
 
-        fileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                fileLabel.textContent = `${file.name}`;
-                fileLabel.classList.add('has-file');
-                ocrPayloadInput.value = '';
-                setOcrStatus('');
-                showVisionButton(true);
-            } else {
-                fileLabel.textContent = 'Choose bill image';
-                fileLabel.classList.remove('has-file');
-                showVisionButton(false);
-            }
-        });
+        if (fileLabel) {
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    fileLabel.textContent = `${file.name}`;
+                    fileLabel.classList.add('has-file');
+                    ocrPayloadInput.value = '';
+                    setOcrStatus('');
+                    showVisionButton(true);
+                } else {
+                    fileLabel.textContent = 'Choose bill image';
+                    fileLabel.classList.remove('has-file');
+                    showVisionButton(false);
+                }
+            });
+        }
 
         /* ------------------------------------------------------------------ */
         /* Image preprocessing                                                 */
@@ -601,7 +639,86 @@
         function setVisionStatus() {}
         function triggerVisionFallback() {}
 
-        skipOcrBtn.addEventListener('click', function() {
+        /* ------------------------------------------------------------------ */
+        /* JSON-mode handler: parse the saved scan file into ocr_payload     */
+        /* ------------------------------------------------------------------ */
+
+        function validateSavedScan(obj) {
+            if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON root');
+            if (!Array.isArray(obj.items) || obj.items.length === 0) {
+                throw new Error('Scan file has no items');
+            }
+            for (const it of obj.items) {
+                if (!it || typeof it.name !== 'string' || !it.name.trim()) {
+                    throw new Error('An item is missing a name');
+                }
+            }
+            return true;
+        }
+
+        function savedScanToOcrPayload(obj) {
+            // Use the server's _vision_receipt short-circuit in
+            // extract_receipt_from_text_payload — it skips raw_text validation
+            // and trusts a pre-extracted receipt, which is exactly our case.
+            return {
+                _vision_receipt: {
+                    items: obj.items,
+                    subtotal: obj.subtotal || 'N/A',
+                    serviceCharge: obj.serviceCharge || 'N/A',
+                    discount: obj.discount || 'N/A',
+                    cgst: obj.cgst || 'N/A',
+                    sgst: obj.sgst || 'N/A',
+                    igst: obj.igst || 'N/A',
+                    total: obj.total || 'N/A',
+                    restaurant_name: obj.restaurant_name || 'N/A',
+                    parser_meta: {
+                        source: 'user_saved_json',
+                        used_fallback: false,
+                        fallback_provider: 'none',
+                        confidence: 1.0,
+                    },
+                    extraction_meta: {
+                        mode: 'saved_json',
+                        source: 'user_saved_json',
+                        provider: 'none',
+                    },
+                },
+            };
+        }
+
+        if (jsonInput) {
+            jsonInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) {
+                    jsonLabel.textContent = 'Choose .billbear.json file';
+                    jsonLabel.classList.remove('has-file');
+                    ocrPayloadInput.value = '';
+                    setOcrStatus('');
+                    return;
+                }
+                jsonLabel.textContent = file.name;
+                jsonLabel.classList.add('has-file');
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const parsed = JSON.parse(reader.result);
+                        validateSavedScan(parsed);
+                        ocrPayloadInput.value = JSON.stringify(savedScanToOcrPayload(parsed));
+                        setOcrStatus(`Loaded ${parsed.items.length} item(s) — continue to edit.`, 'success');
+                    } catch (err) {
+                        ocrPayloadInput.value = '';
+                        setOcrStatus(`Invalid scan file: ${err.message}`, 'error');
+                    }
+                };
+                reader.onerror = () => {
+                    ocrPayloadInput.value = '';
+                    setOcrStatus('Could not read file.', 'error');
+                };
+                reader.readAsText(file);
+            });
+        }
+
+        if (skipOcrBtn) skipOcrBtn.addEventListener('click', function() {
             const hostName = document.getElementById('host_name').value.trim();
             const roomName = document.getElementById('room_name').value.trim();
             const numPeople = document.getElementById('num_people').value.trim();

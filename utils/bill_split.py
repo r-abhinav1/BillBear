@@ -55,30 +55,43 @@ def calculate_bill_split(room: Dict[str, Any]) -> Dict[str, Any]:
         user_item_totals[user] = total
 
     subtotal = sum(item_prices.values())
-    num_users = len(all_users)
+    # Users who actually picked something split the tax/service among themselves.
+    # A user with an empty selection (e.g. force-completed) doesn't owe tax,
+    # because they didn't order anything. This keeps the math intuitive: if you
+    # picked nothing you pay nothing.
+    paying_users = [u for u, picks in selections.items() if picks]
+    num_paying = len(paying_users)
 
-    # Split fixed charges equally
-    cgst_per_user = cgst / num_users if num_users else 0.0
-    sgst_per_user = sgst / num_users if num_users else 0.0
-    igst_per_user = igst / num_users if num_users else 0.0
-    service_charge_per_user = service_charge / num_users if num_users else 0.0
+    cgst_per_user = cgst / num_paying if num_paying else 0.0
+    sgst_per_user = sgst / num_paying if num_paying else 0.0
+    igst_per_user = igst / num_paying if num_paying else 0.0
+    service_charge_per_user = service_charge / num_paying if num_paying else 0.0
 
-    # Discount is proportional to each user's share of the subtotal
+    # Discount is proportional to each user's share of the FULL bill subtotal
+    # (not the "ordered" subtotal). This mirrors how the bill itself applied
+    # the discount to every item, so unselected items "carry" their share.
     discount_rate = (discount / subtotal) if subtotal > 0 else 0.0
 
     user_breakdown: Dict[str, Any] = {}
     grand_total = 0.0
 
     for user, item_total in user_item_totals.items():
+        is_paying = user in paying_users
         user_discount = item_total * discount_rate
-        final_amount = (
-            item_total
-            + service_charge_per_user
-            + cgst_per_user
-            + sgst_per_user
-            + igst_per_user
-            - user_discount
-        )
+        if is_paying:
+            final_amount = (
+                item_total
+                + service_charge_per_user
+                + cgst_per_user
+                + sgst_per_user
+                + igst_per_user
+                - user_discount
+            )
+        else:
+            # No selection → owe nothing. Keep the row so they appear in the
+            # breakdown (shows "No items selected" + ₹0.00).
+            final_amount = 0.0
+            user_discount = 0.0
 
         # Per-item split detail — shows each item's full price, how many people
         # share it, and what this user's portion works out to.
@@ -99,11 +112,11 @@ def calculate_bill_split(room: Dict[str, Any]) -> Dict[str, Any]:
             "item_details": item_details,
             "item_total": round(item_total, 2),
             "percentage": round((item_total / subtotal) * 100, 1) if subtotal > 0 else 0,
-            "service_charge": round(service_charge_per_user, 2),
+            "service_charge": round(service_charge_per_user if is_paying else 0.0, 2),
             "discount": round(user_discount, 2),
-            "cgst": round(cgst_per_user, 2),
-            "sgst": round(sgst_per_user, 2),
-            "igst": round(igst_per_user, 2),
+            "cgst": round(cgst_per_user if is_paying else 0.0, 2),
+            "sgst": round(sgst_per_user if is_paying else 0.0, 2),
+            "igst": round(igst_per_user if is_paying else 0.0, 2),
             "final_amount": round(final_amount, 2),
         }
 

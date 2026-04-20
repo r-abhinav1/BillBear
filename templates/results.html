@@ -439,6 +439,18 @@
             <p>Room Code: {{ room_code }} | Host: {{ room['host_name'] }}</p>
         </div>
 
+        {% if caller_is_host %}
+        <div id="hostRevertRow" style="display:flex; justify-content:flex-end; margin-bottom:1rem;">
+            <button id="revertCalcBtn" type="button"
+                    style="padding:0.7rem 1.25rem; border:2px solid #FF9800; background:transparent;
+                           color:#FFCC80; border-radius:8px; font-weight:700; cursor:pointer;
+                           box-shadow:0 2px 10px rgba(0,0,0,0.2);"
+                    title="Send everyone back to the selections page so they can edit their picks">
+                ⏪ Revert & Re-edit Selections
+            </button>
+        </div>
+        {% endif %}
+
         <div class="total-summary">
             <div class="summary-item">
                 <h3>Subtotal</h3>
@@ -461,6 +473,25 @@
                 <div class="amount">₹{{ bill_split.totals.grand_total }}</div>
             </div>
         </div>
+
+        {% if audit_warnings %}
+        <div class="card" style="padding:1rem 1.25rem;">
+            <h3 style="color:#FFFFFF; margin-bottom:0.75rem; font-size:1.1rem;">🧮 Math check</h3>
+            {% for w in audit_warnings %}
+            <div style="display:flex; gap:0.75rem; align-items:flex-start; padding:0.6rem 0; border-top:1px solid #2A2A2A;">
+                <span style="font-size:1.1rem; flex-shrink:0;">
+                    {% if w.severity == 'ok' %}✅{% elif w.severity == 'warn' %}⚠️{% elif w.severity == 'error' %}🔴{% else %}ℹ️{% endif %}
+                </span>
+                <div>
+                    <div style="font-weight:600; color:{% if w.severity == 'ok' %}#81C784{% elif w.severity == 'warn' %}#FFB74D{% elif w.severity == 'error' %}#EF5350{% else %}#90CAF9{% endif %};">
+                        {{ w.title }}
+                    </div>
+                    <div style="color:#CFD8DC; font-size:0.9rem; margin-top:0.2rem;">{{ w.detail }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
 
         <div class="card">
             <h2 style="color: #FFFFFF; margin-bottom: 1.5rem; font-size: 1.3rem;">💸 Individual Bill Bear</h2>
@@ -629,6 +660,93 @@
                 document.body.removeChild(ta);
             }
         }
+
+        /* ------------------------------------------------------------------ */
+        /* Host revert: take everyone back to the selections stage             */
+        /* ------------------------------------------------------------------ */
+        const ROOM_CODE = {{ room_code | tojson }};
+        const CALLER_NAME = {{ caller_name | tojson }};
+        const CALLER_IS_HOST = {{ caller_is_host | tojson }};
+
+        const revertBtn = document.getElementById('revertCalcBtn');
+        if (revertBtn) {
+            revertBtn.addEventListener('click', async () => {
+                if (!confirm(
+                    'Send everyone back to the selections page? Each user\'s current picks will be pre-checked but editable.'
+                )) return;
+                revertBtn.disabled = true;
+                revertBtn.textContent = '⏳ Reverting…';
+                try {
+                    const resp = await fetch(`/room/${ROOM_CODE}/host/reopen-selections`, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'fetch',
+                        },
+                        body: '{}',
+                    });
+                    const data = await resp.json().catch(() => null);
+                    if (!resp.ok) {
+                        alert((data && data.message) || 'Could not revert.');
+                        revertBtn.disabled = false;
+                        revertBtn.textContent = '⏪ Revert & Re-edit Selections';
+                        return;
+                    }
+                    // Host goes to their own select-items; everyone else will be
+                    // picked up by the live refresh below within ~5s.
+                    if (CALLER_NAME) {
+                        window.location.href =
+                            `/room/${ROOM_CODE}/user/${encodeURIComponent(CALLER_NAME)}/select-items`;
+                    } else {
+                        window.location.reload();
+                    }
+                } catch (err) {
+                    alert('Network error while reverting.');
+                    revertBtn.disabled = false;
+                    revertBtn.textContent = '⏪ Revert & Re-edit Selections';
+                }
+            });
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Live refresh: react to host actions (revoke / remove / revert)      */
+        /* ------------------------------------------------------------------ */
+        (function liveResultsRefresh() {
+            let lastSig = null;
+            async function tick() {
+                try {
+                    const r = await fetch(`/room/${ROOM_CODE}/status`, { credentials: 'same-origin' });
+                    if (!r.ok) return;
+                    const d = await r.json();
+
+                    // If the host triggered a "revert & re-edit", everyone's
+                    // submission is cleared. Take this client back to their
+                    // own select-items page (with prior picks pre-checked).
+                    if (lastSig !== null && d.submitted_count === 0 && d.users.length > 0) {
+                        if (CALLER_NAME) {
+                            window.location.href =
+                                `/room/${ROOM_CODE}/user/${encodeURIComponent(CALLER_NAME)}/select-items`;
+                            return;
+                        }
+                        window.location.reload();
+                        return;
+                    }
+
+                    const sig = JSON.stringify({
+                        users: d.users,
+                        submitted: d.submitted_users,
+                    });
+                    if (lastSig === null) { lastSig = sig; return; }
+                    if (sig !== lastSig) {
+                        // Something changed (revoke / remove / re-submit) — reload
+                        // so the computed split reflects the new state.
+                        window.location.reload();
+                    }
+                } catch (_e) { /* ignore transient errors */ }
+            }
+            setInterval(tick, 5000);
+        })();
     </script>
 </body>
 </html>

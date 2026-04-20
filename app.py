@@ -14,9 +14,16 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 from storage import get_room, room_exists, save_room
+from utils.bill_audit import audit_bill
 from utils.bill_split import calculate_bill_split
 from utils.receipt_contracts import normalize_receipt_payload
 from utils.receipt_pipeline import extract_receipt_from_text_payload
+from utils.session import (
+    clear_session_cookie,
+    issue_user_id,
+    read_session_cookie,
+    set_session_cookie,
+)
 
 load_dotenv()
 
@@ -141,6 +148,63 @@ def process_uploaded_image(file) -> dict:
             print(f"Temp file cleanup failed: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# Identity & room-shape helpers (added for session-resilience + host controls)
+# ---------------------------------------------------------------------------
+
+def ensure_room_shape(room: dict) -> dict:
+    """
+    Guarantee a room dict has the fields the new features rely on.
+    Old rooms created before these features don't have them — we fill defaults
+    in-place so routes can read them without .get() everywhere.
+    """
+    room.setdefault("users", [])
+    room.setdefault("selections", {})
+    if not isinstance(room.get("submitted_users"), set):
+        room["submitted_users"] = set(room.get("submitted_users", []))
+    room.setdefault("user_ids", {})
+    room.setdefault("submission_ids", {})
+    room.setdefault("last_selections", {})
+    room.setdefault("host_user_id", None)
+    room.setdefault("schema_version", 1)
+    return room
+
+
+def current_user(room_code: str, room: dict):
+    """
+    Returns the (user_id, user_name) of the caller for this room, based on
+    the cookie. Verifies the user_id is still present in room.user_ids.
+    Returns (None, None) if no valid session.
+    """
+    payload = read_session_cookie(request, room_code)
+    if not payload:
+        return None, None
+    uid = payload.get("uid")
+    name = payload.get("name")
+    # Cookie must map to a user still registered in this room
+    if room.get("user_ids", {}).get(name) != uid:
+        return None, None
+    return uid, name
+
+
+def is_host(room: dict, user_name: str) -> bool:
+    return bool(user_name) and user_name == room.get("host_name")
+
+
+def require_host(room_code: str, room: dict) -> bool:
+    """True if the caller's cookie identifies them as the room's host."""
+    uid, name = current_user(room_code, room)
+    if not uid or not name:
+        return False
+    if not is_host(room, name):
+        return False
+    # Extra belt-and-braces: host_user_id must match if it was recorded.
+    host_uid = room.get("host_user_id")
+    if host_uid and host_uid != uid:
+        return False
+    return True
+
+
 def generate_pdf_response(room: dict, room_code: str) -> tuple:
     """
     Render results_pdf.html and return (response, status_code).
@@ -259,7 +323,29 @@ def create_room():
             skip_ocr = request.form.get("skip_ocr", "").strip().lower() == "true"
 
             text_payload = parse_text_payload_from_form() if OCR_TEXT_INGESTION_ENABLED else None
-            if text_payload:
+            saved_scan = (
+                text_payload.get("_vision_receipt") if isinstance(text_payload, dict) else None
+            )
+            if (
+                isinstance(saved_scan, dict)
+                and saved_scan.get("items")
+                and saved_scan.get("extraction_meta", {}).get("source") == "user_saved_json"
+            ):
+                # Saved-JSON short-circuit: trust the user's uploaded scan.
+                # Missing subtotal/total are allowed here — edit_items lets the
+                # user fix them before proceeding.
+                ocr_result = normalize_receipt_payload(saved_scan)
+                ocr_result["parser_meta"] = saved_scan.get("parser_meta", {
+                    "source": "user_saved_json",
+                    "used_fallback": False,
+                })
+                ocr_result["extraction_meta"] = saved_scan.get("extraction_meta", {
+                    "mode": "saved_json",
+                    "source": "user_saved_json",
+                    "provider": "none",
+                })
+                extraction_source = "user_saved_json"
+            elif text_payload:
                 ocr_result = extract_receipt_from_text_payload(text_payload)
                 ocr_result = normalize_receipt_payload(ocr_result)
                 extraction_source = ocr_result.get("extraction_meta", {}).get("source", "ocr_text")
@@ -294,6 +380,7 @@ def create_room():
             )
 
             room_code = generate_room_code()
+            host_uid = issue_user_id()
             room_data = {
                 "host_name": host_name,
                 "room_name": room_name,
@@ -305,12 +392,22 @@ def create_room():
                 "users": [host_name],
                 "selections": {},
                 "submitted_users": set(),
+                # Session-resilience fields (schema v2)
+                "user_ids": {host_name: host_uid},
+                "host_user_id": host_uid,
+                "submission_ids": {},
+                "last_selections": {},
+                "schema_version": 2,
             }
 
             if not save_room(room_code, room_data):
                 return "Error saving room data", 500
 
-            return render_template("edit_items.html", room_code=room_code, items=ocr_result)
+            response = make_response(
+                render_template("edit_items.html", room_code=room_code, items=ocr_result)
+            )
+            set_session_cookie(response, room_code, host_uid, host_name)
+            return response
 
         except ValueError as exc:
             return f"Invalid request: {exc}", 400
@@ -318,10 +415,14 @@ def create_room():
             print(f"Error processing file: {exc}")
             return f"Error processing uploaded file: {exc}", 500
 
+    mode = (request.args.get("mode") or "image").lower()
+    if mode not in {"image", "json"}:
+        mode = "image"
     return render_template(
         "create_room.html",
         client_ocr_enabled=CLIENT_OCR_ENABLED and OCR_TEXT_INGESTION_ENABLED,
         legacy_image_ocr_enabled=LEGACY_IMAGE_OCR_ENABLED,
+        mode=mode,
     )
 
 
@@ -398,12 +499,18 @@ def room_status(room_code):
     room = get_room(room_code)
     if not room:
         return jsonify({"error": "Room not found"}), 404
+    ensure_room_shape(room)
 
     users = room.get("users", [])
     submitted_users = list(room.get("submitted_users", set()))
     expected_people = int(room.get("num_people", 1))
     enough_joined = len(users) >= expected_people
     all_submitted = len(submitted_users) == len(users) > 0
+
+    # Caller identity (for kicked-user detection on the client)
+    _, caller_name = current_user(room_code, room)
+    caller_in_room = bool(caller_name) and caller_name in users
+    caller_is_host = is_host(room, caller_name) if caller_name else False
 
     return jsonify({
         "status": "success",
@@ -416,6 +523,9 @@ def room_status(room_code):
         "expected_people": expected_people,
         "submitted_count": len(submitted_users),
         "host_name": room.get("host_name", ""),
+        "caller_name": caller_name,
+        "caller_in_room": caller_in_room,
+        "caller_is_host": caller_is_host,
     })
 
 
@@ -439,16 +549,35 @@ def join():
         room = get_room(room_code)
         if not room:
             return render_template("join_room.html", error="Room not found. Please check the room code.")
+        ensure_room_shape(room)
+
+        # Cookie reclaim: if the caller already has a valid session for this
+        # room, send them back to their existing state instead of creating a
+        # duplicate entry. This is the primary fix for the "submit appeared
+        # to fail, user rejoined and got a duplicate" bug.
+        _, cookie_name = current_user(room_code, room)
+        if cookie_name and cookie_name in room.get("users", []):
+            return redirect(url_for("user_room", room_code=room_code, user_name=cookie_name))
+
         if user_name in room.get("users", []):
-            return render_template("join_room.html", error=f"'{user_name}' already joined. Choose a different name.")
+            return render_template(
+                "join_room.html",
+                error=f"'{user_name}' already joined from another device. Open that device's original link to resume, or pick a different name.",
+            )
         if len(room.get("users", [])) >= int(room.get("num_people", 1)):
             return render_template("join_room.html", error="Room is full.")
 
+        uid = issue_user_id()
         room.setdefault("users", []).append(user_name)
+        room["user_ids"][user_name] = uid
         if not save_room(room_code, room):
             return render_template("join_room.html", error="Error joining room. Please try again.")
 
-        return redirect(url_for("user_room", room_code=room_code, user_name=user_name))
+        response = make_response(
+            redirect(url_for("user_room", room_code=room_code, user_name=user_name))
+        )
+        set_session_cookie(response, room_code, uid, user_name)
+        return response
 
     return render_template("join_room.html")
 
@@ -459,6 +588,14 @@ def join_room(room_code):
     room = get_room(room_code)
     if not room:
         return render_template("join_room_direct.html", error="Room not found", room_code=room_code)
+    ensure_room_shape(room)
+
+    # Cookie reclaim: if the user already holds a valid session for this room,
+    # jump them straight back to their current state (select-items / waiting)
+    # regardless of whether this is a GET or POST.
+    _, cookie_name = current_user(room_code, room)
+    if cookie_name and cookie_name in room.get("users", []):
+        return redirect(url_for("user_room", room_code=room_code, user_name=cookie_name))
 
     if request.method == "POST":
         user_name = request.form.get("user_name", "").strip()
@@ -466,16 +603,27 @@ def join_room(room_code):
         if not user_name:
             return render_template("join_room_direct.html", error="Please enter your name", room=room, room_code=room_code)
         if user_name in room.get("users", []):
-            return render_template("join_room_direct.html", error=f"'{user_name}' already joined. Choose a different name.", room=room, room_code=room_code)
+            return render_template(
+                "join_room_direct.html",
+                error=f"'{user_name}' already joined from another device. Open that device's original link to resume, or pick a different name.",
+                room=room,
+                room_code=room_code,
+            )
         if len(room.get("users", [])) >= int(room.get("num_people", 1)):
             return render_template("join_room_direct.html", error="Room is full.", room=room, room_code=room_code)
 
+        uid = issue_user_id()
         room.setdefault("users", []).append(user_name)
+        room["user_ids"][user_name] = uid
         if not save_room(room_code, room):
             return render_template("join_room_direct.html", error="Error joining room. Please try again.", room=room, room_code=room_code)
 
         print(f"User '{user_name}' joined room '{room_code}' ({room['room_name']})")
-        return redirect(url_for("user_room", room_code=room_code, user_name=user_name))
+        response = make_response(
+            redirect(url_for("user_room", room_code=room_code, user_name=user_name))
+        )
+        set_session_cookie(response, room_code, uid, user_name)
+        return response
 
     return render_template("join_room_direct.html", room=room, room_code=room_code)
 
@@ -501,23 +649,122 @@ def select_items(room_code, user_name):
     room = get_room(room_code)
     if not room:
         return "Room not found", 404
+    ensure_room_shape(room)
 
-    if user_name in room.get("submitted_users", set()):
-        return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
+    # Cookie > URL: if a session exists for a different name, redirect to
+    # that user's own URL. Prevents accidental spoofing via URL-editing and
+    # also recovers users who landed on the wrong URL.
+    _, cookie_name = current_user(room_code, room)
+    if cookie_name and cookie_name != user_name:
+        return redirect(url_for("select_items", room_code=room_code, user_name=cookie_name))
+
+    # Pre-fill previous selections so revoke-and-reselect doesn't wipe state.
+    prev_selections = list(
+        room.get("selections", {}).get(user_name)
+        or room.get("last_selections", {}).get(user_name)
+        or []
+    )
+
+    wants_json = (
+        request.accept_mimetypes.best == "application/json"
+        or request.headers.get("X-Requested-With") == "fetch"
+        or request.form.get("ajax") == "1"
+    )
 
     if request.method == "POST":
         selected_items = request.form.getlist("selected_items")
+        submission_id = request.form.get("submission_id", "").strip()
 
-        room.setdefault("selections", {})[user_name] = selected_items
-        room.setdefault("submitted_users", set()).add(user_name)
+        existing_submission_id = room.get("submission_ids", {}).get(user_name)
+        if submission_id and existing_submission_id == submission_id:
+            # Idempotent retry: server already has this exact submission.
+            # Treat as success without re-writing state.
+            print(f"Idempotent submit no-op for {user_name} (submission_id={submission_id[:8]}…)")
+            if wants_json:
+                return jsonify({
+                    "status": "success",
+                    "idempotent": True,
+                    "redirect": url_for("waiting_room", room_code=room_code, user_name=user_name),
+                })
+            return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
+
+        room["selections"][user_name] = selected_items
+        room["submitted_users"].add(user_name)
+        if submission_id:
+            room["submission_ids"][user_name] = submission_id
+        # Also stash into last_selections so a future revoke→edit has a draft
+        room["last_selections"][user_name] = list(selected_items)
 
         if not save_room(room_code, room):
+            if wants_json:
+                return jsonify({"status": "error", "message": "Error saving selections."}), 500
             return "Error saving selections. Please try again.", 500
 
         print(f"User {user_name} selected: {selected_items}")
+        if wants_json:
+            return jsonify({
+                "status": "success",
+                "idempotent": False,
+                "redirect": url_for("waiting_room", room_code=room_code, user_name=user_name),
+            })
         return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
 
-    return render_template("select_items.html", room=room, room_code=room_code, user_name=user_name)
+    # GET: if already submitted AND there's no cookie session asking to edit,
+    # send them to the waiting room. The revoke flow clears submitted_users
+    # before sending them here, so users who landed here intentionally edit.
+    if user_name in room.get("submitted_users", set()):
+        return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
+
+    return render_template(
+        "select_items.html",
+        room=room,
+        room_code=room_code,
+        user_name=user_name,
+        pre_selected=prev_selections,
+    )
+
+
+@app.route("/api/room/<room_code>/my-status")
+def my_status(room_code):
+    """
+    Client-side resilience endpoint. After a submit whose response was lost
+    (flaky network, backgrounded mobile tab), the client calls this to check
+    whether the server actually persisted its submission — rather than
+    showing a confusing error and driving the user to rejoin with a new name.
+    """
+    room = get_room(room_code)
+    if not room:
+        return jsonify({"status": "error", "message": "Room not found"}), 404
+    ensure_room_shape(room)
+
+    uid, name = current_user(room_code, room)
+    if not uid or not name:
+        return jsonify({
+            "status": "success",
+            "authenticated": False,
+            "in_room": False,
+            "submitted": False,
+        })
+
+    in_room = name in room.get("users", [])
+    submitted = name in room.get("submitted_users", set())
+    selections = room.get("selections", {}).get(name, [])
+    submission_id = room.get("submission_ids", {}).get(name, "")
+
+    return jsonify({
+        "status": "success",
+        "authenticated": True,
+        "user_name": name,
+        "in_room": in_room,
+        "submitted": submitted,
+        "selections": selections,
+        "submission_id": submission_id,
+        "redirect": (
+            url_for("waiting_room", room_code=room_code, user_name=name) if submitted
+            else url_for("select_items", room_code=room_code, user_name=name) if in_room
+            else url_for("index")
+        ),
+    })
 
 
 @app.route("/room/<room_code>/waiting")
@@ -575,19 +822,188 @@ def force_complete(room_code, user_name):
     return redirect(url_for("results_page", room_code=room_code))
 
 
+# ---------------------------------------------------------------------------
+# Routes — self-service revoke, host controls (added for session-resilience)
+# ---------------------------------------------------------------------------
+
+@app.route("/room/<room_code>/user/<user_name>/revoke", methods=["POST"])
+def revoke_own_selection(room_code, user_name):
+    """
+    Let a guest un-submit their own selection so they can re-pick items.
+    Must come from the same cookie that originally submitted.
+    """
+    room = get_room(room_code)
+    if not room:
+        return jsonify({"status": "error", "message": "Room not found"}), 404
+    ensure_room_shape(room)
+
+    _, cookie_name = current_user(room_code, room)
+    if cookie_name != user_name:
+        return jsonify({"status": "error", "message": "Not your session."}), 403
+    if user_name not in room.get("users", []):
+        return jsonify({"status": "error", "message": "You are no longer in this room."}), 404
+
+    # Preserve the user's last selection so the edit screen can pre-check it.
+    if user_name in room.get("selections", {}):
+        room["last_selections"][user_name] = list(room["selections"][user_name])
+    room.get("submitted_users", set()).discard(user_name)
+    room.get("selections", {}).pop(user_name, None)
+    # Clear the submission_id so the resubmit doesn't collide with the prior one.
+    room.get("submission_ids", {}).pop(user_name, None)
+
+    if not save_room(room_code, room):
+        return jsonify({"status": "error", "message": "Save failed. Try again."}), 500
+
+    print(f"User {user_name} revoked own selection in {room_code}")
+    return jsonify({
+        "status": "success",
+        "redirect": url_for("select_items", room_code=room_code, user_name=user_name),
+    })
+
+
+@app.route("/room/<room_code>/host/remove-user", methods=["POST"])
+def host_remove_user(room_code):
+    """Host removes another participant (e.g. accidental duplicate)."""
+    room = get_room(room_code)
+    if not room:
+        return jsonify({"status": "error", "message": "Room not found"}), 404
+    ensure_room_shape(room)
+
+    if not require_host(room_code, room):
+        return jsonify({"status": "error", "message": "Host only."}), 403
+
+    target = (request.get_json(silent=True) or request.form).get("target_user", "").strip()
+    if not target:
+        return jsonify({"status": "error", "message": "Missing target_user"}), 400
+    if target == room.get("host_name"):
+        return jsonify({"status": "error", "message": "Cannot remove the host."}), 400
+    if target not in room.get("users", []):
+        return jsonify({"status": "error", "message": "User not in room."}), 404
+
+    room["users"] = [u for u in room["users"] if u != target]
+    room.get("selections", {}).pop(target, None)
+    room.get("submitted_users", set()).discard(target)
+    room.get("user_ids", {}).pop(target, None)
+    room.get("submission_ids", {}).pop(target, None)
+    room.get("last_selections", {}).pop(target, None)
+
+    if not save_room(room_code, room):
+        return jsonify({"status": "error", "message": "Save failed."}), 500
+
+    print(f"Host removed user {target} from {room_code}")
+    return jsonify({"status": "success", "removed": target})
+
+
+@app.route("/room/<room_code>/host/num-people", methods=["POST"])
+def host_update_num_people(room_code):
+    """Host adjusts the expected headcount for the room."""
+    room = get_room(room_code)
+    if not room:
+        return jsonify({"status": "error", "message": "Room not found"}), 404
+    ensure_room_shape(room)
+
+    if not require_host(room_code, room):
+        return jsonify({"status": "error", "message": "Host only."}), 403
+
+    data = request.get_json(silent=True) or request.form
+    try:
+        new_value = int(str(data.get("num_people", "")).strip())
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "num_people must be an integer"}), 400
+
+    if new_value < 1 or new_value > 50:
+        return jsonify({"status": "error", "message": "num_people must be between 1 and 50"}), 400
+    if new_value < len(room.get("users", [])):
+        return jsonify({
+            "status": "error",
+            "message": f"Cannot set below current joined count ({len(room.get('users', []))}). Remove users first.",
+        }), 400
+
+    room["num_people"] = new_value
+    if not save_room(room_code, room):
+        return jsonify({"status": "error", "message": "Save failed."}), 500
+
+    print(f"Host set num_people={new_value} on {room_code}")
+    return jsonify({"status": "success", "num_people": new_value})
+
+
+@app.route("/room/<room_code>/host/reopen-selections", methods=["POST"])
+def host_reopen_selections(room_code):
+    """
+    Revert the computed split: move everyone back to the selections stage so
+    they can modify their picks. Preserves each user's prior selection into
+    last_selections so their boxes start pre-checked.
+    """
+    room = get_room(room_code)
+    if not room:
+        return jsonify({"status": "error", "message": "Room not found"}), 404
+    ensure_room_shape(room)
+
+    if not require_host(room_code, room):
+        return jsonify({"status": "error", "message": "Host only."}), 403
+
+    # Snapshot each user's selections into last_selections before clearing.
+    for user, picks in list(room.get("selections", {}).items()):
+        room["last_selections"][user] = list(picks or [])
+
+    room["selections"] = {}
+    room["submitted_users"] = set()
+    room["submission_ids"] = {}
+
+    if not save_room(room_code, room):
+        return jsonify({"status": "error", "message": "Save failed."}), 500
+
+    print(f"Host reopened selections on {room_code}")
+    return jsonify({"status": "success"})
+
+
+@app.route("/room/<room_code>/host/revoke/<target_user>", methods=["POST"])
+def host_revoke_user(room_code, target_user):
+    """Host forces another user back to unsubmitted so they can re-pick."""
+    room = get_room(room_code)
+    if not room:
+        return jsonify({"status": "error", "message": "Room not found"}), 404
+    ensure_room_shape(room)
+
+    if not require_host(room_code, room):
+        return jsonify({"status": "error", "message": "Host only."}), 403
+    if target_user not in room.get("users", []):
+        return jsonify({"status": "error", "message": "User not in room."}), 404
+
+    if target_user in room.get("selections", {}):
+        room["last_selections"][target_user] = list(room["selections"][target_user])
+    room.get("submitted_users", set()).discard(target_user)
+    room.get("selections", {}).pop(target_user, None)
+    room.get("submission_ids", {}).pop(target_user, None)
+
+    if not save_room(room_code, room):
+        return jsonify({"status": "error", "message": "Save failed."}), 500
+
+    print(f"Host revoked submission for {target_user} in {room_code}")
+    return jsonify({"status": "success", "revoked": target_user})
+
+
 @app.route("/room/<room_code>/results")
 def results_page(room_code):
     room = get_room(room_code)
     if not room:
         return "Room not found", 404
+    ensure_room_shape(room)
+
+    _, caller_name = current_user(room_code, room)
+    caller_is_host = is_host(room, caller_name) if caller_name else False
 
     bill_split = calculate_bill_split(room)
+    audit_warnings = audit_bill(room, bill_split)
     return render_template(
         "results.html",
         room=room,
         room_code=room_code,
         bill_split=bill_split,
         pdf_available=PDF_AVAILABLE,
+        caller_name=caller_name or "",
+        caller_is_host=caller_is_host,
+        audit_warnings=audit_warnings,
     )
 
 

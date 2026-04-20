@@ -383,11 +383,12 @@
                 <div class="items-container">
                     {% for item in room['items'] %}
                     <label class="item-row" for="item_{{ loop.index }}">
-                        <input type="checkbox" 
-                               id="item_{{ loop.index }}" 
-                               name="selected_items" 
-                               value="{{ item.name }}" 
+                        <input type="checkbox"
+                               id="item_{{ loop.index }}"
+                               name="selected_items"
+                               value="{{ item.name }}"
                                class="item-checkbox"
+                               {% if item.name in (pre_selected or []) %}checked{% endif %}
                                onchange="updateSelection()">
                         <div class="item-details">
                             <span class="item-name">{{ item.name }}</span>
@@ -404,6 +405,9 @@
                 {% endif %}
             </div>
 
+            <input type="hidden" name="submission_id" id="submission_id" value="">
+            <input type="hidden" name="ajax" value="1">
+
             <div class="actions">
                 <button type="submit" class="btn btn-success" id="submitBtn">
                     ✅ Submit Selection
@@ -415,6 +419,7 @@
                     ❌ Clear All
                 </button>
             </div>
+            <div id="submitStatus" style="margin-top:1rem; text-align:center; min-height:1.4rem; color:#B0BEC5;"></div>
         </form>
 
         <div class="floating-summary" id="floatingSummary">
@@ -474,23 +479,132 @@
             updateSelection();
         }
         
-        // Form submission with loading state
-        document.getElementById('selectionForm').addEventListener('submit', function(e) {
-            const form = e.target;
-            const submitBtn = document.getElementById('submitBtn');
-            
-            form.classList.add('loading');
-            submitBtn.disabled = true;
-            
-            // Re-enable if form fails to submit for some reason
-            setTimeout(() => {
+        /* ------------------------------------------------------------------ */
+        /* Idempotent, resilient submit                                        */
+        /* ------------------------------------------------------------------ */
+
+        const ROOM_CODE = {{ room_code | tojson }};
+        const USER_NAME = {{ user_name | tojson }};
+
+        // One submission_id per (room, user) lives in localStorage so that a
+        // retry after a lost response is dedup'd server-side. A successful
+        // submit clears it so the next edit mints a fresh one.
+        function submissionStorageKey() {
+            return `bb_submission:${ROOM_CODE}:${USER_NAME}`;
+        }
+
+        function ensureSubmissionId() {
+            const key = submissionStorageKey();
+            let sid = localStorage.getItem(key);
+            if (!sid) {
+                sid = (self.crypto && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : 'sid-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+                localStorage.setItem(key, sid);
+            }
+            document.getElementById('submission_id').value = sid;
+            return sid;
+        }
+
+        function clearSubmissionId() {
+            localStorage.removeItem(submissionStorageKey());
+        }
+
+        function setStatus(text, type) {
+            const el = document.getElementById('submitStatus');
+            el.textContent = text || '';
+            el.style.color = type === 'error' ? '#EF5350'
+                           : type === 'success' ? '#66BB6A'
+                           : '#B0BEC5';
+        }
+
+        function setLoading(on) {
+            const form = document.getElementById('selectionForm');
+            const btn = document.getElementById('submitBtn');
+            if (on) {
+                form.classList.add('loading');
+                btn.disabled = true;
+            } else {
                 form.classList.remove('loading');
-                updateSelection();
-            }, 5000);
+                btn.disabled = document.querySelectorAll('input[name="selected_items"]:checked').length === 0;
+            }
+        }
+
+        async function checkMyStatus() {
+            try {
+                const resp = await fetch(`/api/room/${ROOM_CODE}/my-status`, {
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'fetch' },
+                });
+                if (!resp.ok) return null;
+                return await resp.json();
+            } catch (_err) {
+                return null;
+            }
+        }
+
+        document.getElementById('selectionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const sid = ensureSubmissionId();
+            const form = e.target;
+            const data = new FormData(form);
+
+            setLoading(true);
+            setStatus('Submitting…');
+
+            try {
+                const resp = await fetch(form.action || window.location.pathname, {
+                    method: 'POST',
+                    body: data,
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'fetch' },
+                });
+
+                let json = null;
+                try { json = await resp.json(); } catch (_err) { /* non-JSON */ }
+
+                if (resp.ok && json && json.status === 'success') {
+                    clearSubmissionId();
+                    setStatus('Submitted. Redirecting…', 'success');
+                    window.location.href = json.redirect;
+                    return;
+                }
+
+                // Unexpected response — before telling the user it failed,
+                // ask the server whether our submission landed anyway.
+                setStatus('Checking whether your submission was saved…');
+                const my = await checkMyStatus();
+                if (my && my.status === 'success' && my.submitted
+                    && my.submission_id && my.submission_id === sid) {
+                    clearSubmissionId();
+                    setStatus('Your submission was saved. Redirecting…', 'success');
+                    window.location.href = my.redirect;
+                    return;
+                }
+
+                setLoading(false);
+                const msg = (json && json.message) || `Submit failed (HTTP ${resp.status}). Tap Submit to retry.`;
+                setStatus(msg, 'error');
+            } catch (netErr) {
+                // True network error (offline, CORS, DNS). Check status before
+                // alarming the user — the POST may have reached the server.
+                setStatus('Network hiccup — verifying with server…');
+                const my = await checkMyStatus();
+                if (my && my.status === 'success' && my.submitted
+                    && my.submission_id && my.submission_id === sid) {
+                    clearSubmissionId();
+                    setStatus('Your submission was saved. Redirecting…', 'success');
+                    window.location.href = my.redirect;
+                    return;
+                }
+                setLoading(false);
+                setStatus('Could not reach the server. Check your connection and tap Submit again.', 'error');
+            }
         });
-        
+
         // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
+            ensureSubmissionId();
             updateSelection();
         });
     </script>

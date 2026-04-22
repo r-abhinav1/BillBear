@@ -2,313 +2,424 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Bill Bear Results - {{ room['room_name'] }}</title>
+    <title>Bill Bear — {{ room['room_name'] }}</title>
     <style>
         @page {
             size: A4;
-            margin: 20mm;
+            margin: 15mm 18mm;
         }
-        
+
         body {
             font-family: Arial, sans-serif;
-            font-size: 12px;
-            line-height: 1.4;
-            color: #333;
+            font-size: 11px;
+            color: #1a1a1a;
             margin: 0;
             padding: 0;
+            line-height: 1.5;
         }
-        
+
+        /* ── Header ── */
         .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
             border-bottom: 2px solid #3F51B5;
+            padding-bottom: 10px;
+            margin-bottom: 14px;
         }
-        
-        .header h1 {
-            color: #3F51B5;
-            font-size: 24px;
-            margin: 0 0 10px 0;
-        }
-        
-        .header p {
-            color: #666;
-            margin: 5px 0;
-        }
-        
-        .room-info {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 30px;
-            text-align: center;
-        }
-        
-        .room-info h2 {
-            color: #2e7d32;
-            margin: 0 0 10px 0;
-            font-size: 18px;
-        }
-        
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        
-        .summary-item {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            text-align: center;
-            border: 1px solid #dee2e6;
-        }
-        
-        .summary-item h3 {
-            color: #666;
-            font-size: 11px;
-            margin: 0 0 5px 0;
-            text-transform: uppercase;
-        }
-        
-        .summary-item .amount {
-            font-size: 16px;
-            font-weight: bold;
-            color: #333;
-        }
-        
-        .grand-total {
-            background-color: #3F51B5 !important;
-            color: white !important;
-        }
-        
-        .grand-total h3 {
-            color: white !important;
-        }
-        
-        .grand-total .amount {
-            color: white !important;
-        }
-        
-        .results-table {
+
+        .header-table {
             width: 100%;
             border-collapse: collapse;
-            margin: 20px 0;
-            font-size: 11px;
         }
-        
-        .results-table th {
-            background-color: #f8f9fa;
-            color: #333;
-            padding: 10px;
-            text-align: left;
+
+        .header-title {
+            font-size: 20px;
             font-weight: bold;
-            border: 1px solid #dee2e6;
+            color: #3F51B5;
+            letter-spacing: 1px;
         }
-        
-        .results-table td {
-            padding: 10px;
-            border: 1px solid #dee2e6;
+
+        .header-sub {
+            font-size: 10px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        .header-meta {
+            text-align: right;
+            font-size: 10px;
+            color: #555;
             vertical-align: top;
         }
-        
-        .results-table tr:nth-child(even) {
-            background-color: #f8f9fa;
-        }
-        
-        .user-name {
+
+        /* ── Section headings ── */
+        .section-heading {
+            background-color: #3F51B5;
+            color: #ffffff;
+            font-size: 11px;
             font-weight: bold;
-            color: #333;
+            padding: 5px 8px;
+            margin: 14px 0 6px 0;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
         }
-        
-        .amount {
-            font-weight: bold;
-            color: #2e7d32;
+
+        /* ── Info strip ── */
+        .info-strip {
+            width: 100%;
+            border-collapse: collapse;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            margin-bottom: 14px;
         }
-        
-        .percentage {
-            color: #3F51B5;
-            font-weight: bold;
-        }
-        
-        .selected-items {
+
+        .info-strip td {
+            padding: 7px 10px;
             font-size: 10px;
+        }
+
+        .info-strip .label {
             color: #666;
-            max-width: 200px;
-            word-wrap: break-word;
-        }
-        
-        .breakdown-section {
-            margin-top: 30px;
-            page-break-inside: avoid;
-        }
-        
-        .breakdown-title {
-            font-size: 16px;
             font-weight: bold;
-            color: #333;
-            margin-bottom: 15px;
-            border-bottom: 1px solid #dee2e6;
-            padding-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            font-size: 9px;
+            width: 30%;
         }
-        
-        .breakdown-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-        
-        .breakdown-item {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            border: 1px solid #dee2e6;
-            page-break-inside: avoid;
-        }
-        
-        .breakdown-item h4 {
-            color: #333;
-            margin: 0 0 10px 0;
-            font-size: 13px;
+
+        .info-strip .value {
+            color: #1a1a1a;
+            font-size: 11px;
             font-weight: bold;
         }
-        
-        .breakdown-row {
-            display: flex;
-            justify-content: space-between;
-            margin: 3px 0;
+
+        /* ── Generic data table ── */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10.5px;
+        }
+
+        .data-table th {
+            background-color: #ECEFF1;
+            color: #333;
+            padding: 7px 8px;
+            text-align: left;
+            border: 1px solid #ccc;
+            font-weight: bold;
             font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
-        
-        .breakdown-row.total {
-            font-weight: bold;
-            color: #2e7d32;
-            border-top: 1px solid #dee2e6;
-            padding-top: 5px;
-            margin-top: 10px;
+
+        .data-table td {
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            vertical-align: top;
         }
-        
-        .footer {
-            margin-top: 30px;
+
+        .data-table tr:nth-child(even) td {
+            background-color: #fafafa;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-center {
             text-align: center;
-            font-size: 10px;
-            color: #666;
-            border-top: 1px solid #dee2e6;
-            padding-top: 10px;
         }
-        
-        .page-break {
-            page-break-before: always;
+
+        .bold {
+            font-weight: bold;
+        }
+
+        /* ── Bill totals summary ── */
+        .totals-table {
+            width: 50%;
+            border-collapse: collapse;
+            margin-left: auto;
+            font-size: 10.5px;
+        }
+
+        .totals-table td {
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+        }
+
+        .totals-table .label-col {
+            color: #555;
+            width: 60%;
+        }
+
+        .totals-table .amount-col {
+            text-align: right;
+            font-weight: bold;
+            color: #1a1a1a;
+        }
+
+        .totals-table .grand-row td {
+            background-color: #3F51B5;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: bold;
+            border-color: #3F51B5;
+        }
+
+        /* ── Per-person breakdown ── */
+        .person-block {
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            page-break-inside: avoid;
+        }
+
+        .person-header {
+            background-color: #ECEFF1;
+            padding: 5px 8px;
+            font-weight: bold;
+            font-size: 11px;
+            color: #3F51B5;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .person-detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+        }
+
+        .person-detail-table td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .person-detail-table .detail-label {
+            color: #555;
+            width: 45%;
+        }
+
+        .person-detail-table .detail-amount {
+            text-align: right;
+            color: #1a1a1a;
+            width: 27.5%;
+        }
+
+        .person-detail-table .total-row td {
+            background-color: #E8F5E9;
+            font-weight: bold;
+            color: #2e7d32;
+            border-top: 1px solid #c8e6c9;
+        }
+
+        .person-items {
+            font-size: 9.5px;
+            color: #666;
+            padding: 3px 8px 4px 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        /* ── Footer ── */
+        .footer {
+            margin-top: 20px;
+            border-top: 1px solid #ddd;
+            padding-top: 8px;
+            text-align: center;
+            font-size: 9px;
+            color: #888;
         }
     </style>
 </head>
 <body>
+
+    <!-- ── Header ── -->
     <div class="header">
-        <h1>💰 Bill Bear Results</h1>
-        <p>Generated on {{ current_date.strftime('%B %d, %Y at %I:%M %p') }}</p>
+        <table class="header-table">
+            <tr>
+                <td>
+                    <div class="header-title">BILL BEAR</div>
+                    <div class="header-sub">Bill Splitting Receipt</div>
+                </td>
+                <td class="header-meta">
+                    <strong>{{ room['room_name'] }}</strong><br>
+                    Room Code: {{ room_code }}<br>
+                    Host: {{ room['host_name'] }}<br>
+                    {{ current_date.strftime('%d %b %Y, %I:%M %p') }}
+                </td>
+            </tr>
+        </table>
     </div>
 
-    <div class="room-info">
-        <h2>{{ room['room_name'] }}</h2>
-        <p><strong>Room Code:</strong> {{ room_code }} | <strong>Host:</strong> {{ room['host_name'] }}</p>
-    </div>
-
-    <div class="summary-grid">
-        <div class="summary-item">
-            <h3>Subtotal</h3>
-            <div class="amount">₹{{ bill_split.totals.subtotal }}</div>
-        </div>
-        <div class="summary-item">
-            <h3>Service Charge</h3>
-            <div class="amount">₹{{ bill_split.totals.service_charge }}</div>
-        </div>
-        <div class="summary-item">
-            <h3>Discount</h3>
-            <div class="amount">₹{{ bill_split.totals.discount }}</div>
-        </div>
-        <div class="summary-item">
-            <h3>CGST</h3>
-            <div class="amount">₹{{ bill_split.totals.cgst }}</div>
-        </div>
-        <div class="summary-item">
-            <h3>SGST</h3>
-            <div class="amount">₹{{ bill_split.totals.sgst }}</div>
-        </div>
-        <div class="summary-item grand-total">
-            <h3>Grand Total</h3>
-            <div class="amount">₹{{ bill_split.totals.grand_total }}</div>
-        </div>
-    </div>
-
-    <h3 style="color: #333; margin-bottom: 15px; font-size: 16px;">💸 Individual Bill Bear</h3>
-    <table class="results-table">
+    <!-- ── Bill Items ── -->
+    <div class="section-heading">Bill Items</div>
+    <table class="data-table">
         <thead>
             <tr>
-                <th>User</th>
-                <th>Selected Items</th>
-                <th>Item Total</th>
-                <th>Share %</th>
-                <th>Final Amount</th>
+                <th style="width:60%">Item</th>
+                <th class="text-right" style="width:40%">Price</th>
             </tr>
         </thead>
         <tbody>
-            {% for user, details in bill_split.user_breakdown.items() %}
+            {% for item in room['items'] %}
             <tr>
-                <td class="user-name">{{ user }}</td>
-                <td class="selected-items">
-                    {% if details.selected_items %}
-                        {{ details.selected_items | join(', ') }}
-                    {% else %}
-                        <em>No items selected</em>
-                    {% endif %}
-                </td>
-                <td class="amount">₹{{ details.item_total }}</td>
-                <td class="percentage">{{ details.percentage }}%</td>
-                <td class="amount">₹{{ details.final_amount }}</td>
+                <td>{{ item.name }}</td>
+                <td class="text-right">Rs. {{ item.price | replace('₹','') }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 
-    <div class="breakdown-section">
-        <h3 class="breakdown-title">📊 Detailed Breakdown</h3>
-        <div class="breakdown-grid">
+    <!-- ── Bill Summary ── -->
+    <div class="section-heading">Bill Summary</div>
+    <table class="totals-table">
+        <tr>
+            <td class="label-col">Subtotal</td>
+            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.subtotal) }}</td>
+        </tr>
+        {% if bill_split.totals.service_charge > 0 %}
+        <tr>
+            <td class="label-col">Service Charge</td>
+            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.service_charge) }}</td>
+        </tr>
+        {% endif %}
+        {% if bill_split.totals.cgst > 0 %}
+        <tr>
+            <td class="label-col">CGST</td>
+            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.cgst) }}</td>
+        </tr>
+        {% endif %}
+        {% if bill_split.totals.sgst > 0 %}
+        <tr>
+            <td class="label-col">SGST</td>
+            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.sgst) }}</td>
+        </tr>
+        {% endif %}
+        {% if bill_split.totals.igst > 0 %}
+        <tr>
+            <td class="label-col">IGST</td>
+            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.igst) }}</td>
+        </tr>
+        {% endif %}
+        {% if bill_split.totals.discount > 0 %}
+        <tr>
+            <td class="label-col">Discount</td>
+            <td class="amount-col">- Rs. {{ "%.2f"|format(bill_split.totals.discount) }}</td>
+        </tr>
+        {% endif %}
+        <tr class="grand-row">
+            <td class="label-col">Grand Total</td>
+            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.grand_total) }}</td>
+        </tr>
+    </table>
+
+    <!-- ── Split Summary Table ── -->
+    <div class="section-heading">Split Summary</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width:18%">Person</th>
+                <th style="width:38%">Items Selected</th>
+                <th class="text-right" style="width:15%">Item Total</th>
+                <th class="text-right" style="width:10%">Share</th>
+                <th class="text-right" style="width:19%">Amount Due</th>
+            </tr>
+        </thead>
+        <tbody>
             {% for user, details in bill_split.user_breakdown.items() %}
-            <div class="breakdown-item">
-                <h4>{{ user }}</h4>
-                <div class="breakdown-row">
-                    <span>Item Total:</span>
-                    <span>₹{{ details.item_total }}</span>
-                </div>
-                <div class="breakdown-row">
-                    <span>Service Charge:</span>
-                    <span>₹{{ details.service_charge }}</span>
-                </div>
-                <div class="breakdown-row">
-                    <span>CGST:</span>
-                    <span>₹{{ details.cgst }}</span>
-                </div>
-                <div class="breakdown-row">
-                    <span>SGST:</span>
-                    <span>₹{{ details.sgst }}</span>
-                </div>
-                <div class="breakdown-row">
-                    <span>Discount:</span>
-                    <span>-₹{{ details.discount }}</span>
-                </div>
-                <div class="breakdown-row total">
-                    <span>Total:</span>
-                    <span>₹{{ details.final_amount }}</span>
-                </div>
-            </div>
+            <tr>
+                <td class="bold">{{ user }}</td>
+                <td>
+                    {% if details.selected_items %}
+                        {{ details.selected_items | join(', ') }}
+                    {% else %}
+                        <em style="color:#999">No items</em>
+                    {% endif %}
+                </td>
+                <td class="text-right">Rs. {{ "%.2f"|format(details.item_total) }}</td>
+                <td class="text-right">{{ details.percentage }}%</td>
+                <td class="text-right bold" style="color:#2e7d32">Rs. {{ "%.2f"|format(details.final_amount) }}</td>
+            </tr>
             {% endfor %}
-        </div>
+        </tbody>
+    </table>
+
+    <!-- ── Per-person Detailed Breakdown ── -->
+    <div class="section-heading">Detailed Breakdown</div>
+    {% for user, details in bill_split.user_breakdown.items() %}
+    <div class="person-block">
+        <div class="person-header">{{ user }}</div>
+        <table class="person-detail-table">
+            <!-- Item-by-item rows -->
+            <tr style="background:#f0f4ff;">
+                <td class="detail-label" style="color:#3F51B5; font-weight:bold; font-size:9px; text-transform:uppercase; letter-spacing:0.3px;">Item</td>
+                <td class="detail-amount" style="color:#3F51B5; font-weight:bold; font-size:9px; text-transform:uppercase;">Calculation</td>
+                <td class="detail-amount" style="color:#3F51B5; font-weight:bold; font-size:9px; text-transform:uppercase;">Your Share</td>
+            </tr>
+            {% if details.item_details %}
+                {% for item in details.item_details %}
+                <tr>
+                    <td class="detail-label">{{ item.name }}</td>
+                    <td class="detail-amount" style="color:#888; font-size:9px;">
+                        {% if item.shared_by > 1 %}Rs. {{ "%.2f"|format(item.full_price) }} &divide; {{ item.shared_by }}{% endif %}
+                    </td>
+                    <td class="detail-amount">Rs. {{ "%.2f"|format(item.your_share) }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="3" class="detail-label" style="color:#999; font-style:italic;">No items selected</td></tr>
+            {% endif %}
+            <!-- Subtotal row -->
+            <tr style="background:#fafafa;">
+                <td class="detail-label" style="font-weight:bold;">Item Subtotal</td>
+                <td></td>
+                <td class="detail-amount" style="font-weight:bold;">Rs. {{ "%.2f"|format(details.item_total) }}</td>
+            </tr>
+            <!-- Charges -->
+            {% if details.service_charge > 0 %}
+            <tr>
+                <td class="detail-label">+ Service Charge (split)</td>
+                <td></td>
+                <td class="detail-amount">Rs. {{ "%.2f"|format(details.service_charge) }}</td>
+            </tr>
+            {% endif %}
+            {% if details.cgst > 0 %}
+            <tr>
+                <td class="detail-label">+ CGST (split)</td>
+                <td></td>
+                <td class="detail-amount">Rs. {{ "%.2f"|format(details.cgst) }}</td>
+            </tr>
+            {% endif %}
+            {% if details.sgst > 0 %}
+            <tr>
+                <td class="detail-label">+ SGST (split)</td>
+                <td></td>
+                <td class="detail-amount">Rs. {{ "%.2f"|format(details.sgst) }}</td>
+            </tr>
+            {% endif %}
+            {% if details.igst > 0 %}
+            <tr>
+                <td class="detail-label">+ IGST (split)</td>
+                <td></td>
+                <td class="detail-amount">Rs. {{ "%.2f"|format(details.igst) }}</td>
+            </tr>
+            {% endif %}
+            {% if details.discount > 0 %}
+            <tr>
+                <td class="detail-label">- Discount</td>
+                <td></td>
+                <td class="detail-amount">- Rs. {{ "%.2f"|format(details.discount) }}</td>
+            </tr>
+            {% endif %}
+            <tr class="total-row">
+                <td class="detail-label">Amount Due</td>
+                <td></td>
+                <td class="detail-amount">Rs. {{ "%.2f"|format(details.final_amount) }}</td>
+            </tr>
+        </table>
+    </div>
+    {% endfor %}
+
+    <!-- ── Footer ── -->
+    <div class="footer">
+        Generated by BillBear &nbsp;|&nbsp; Room: {{ room_code }} &nbsp;|&nbsp; {{ current_date.strftime('%d %b %Y at %I:%M %p') }}
     </div>
 
-    <div class="footer">
-        <p>This Bill was generated using BillBear.</p>
-        <p>Room Code: {{ room_code }} | Generated on {{ current_date.strftime('%B %d, %Y at %I:%M %p') }}</p>
-    </div>
 </body>
 </html>

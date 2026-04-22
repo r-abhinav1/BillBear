@@ -229,6 +229,18 @@
             border-color: #3F51B5;
         }
 
+        .scan-btn {
+            background: linear-gradient(135deg, #FF4081 0%, #F06292 100%);
+            color: #FFFFFF;
+            box-shadow: 0 4px 15px rgba(255, 64, 129, 0.3);
+        }
+
+        .scan-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 64, 129, 0.4);
+            border-color: #FF4081;
+        }
+
         .button:active {
             transform: translateY(0);
         }
@@ -326,12 +338,13 @@
         </div>
 
         <div class="buttons-container">
-            <a href="/create" class="button create-btn">
-                <!-- <span class="icon">🏠</span> -->
-                <span>Create Room</span>
+            <a href="/create?mode=image" class="button create-btn">
+                <span>Upload Bill</span>
+            </a>
+            <a href="/create?mode=json" class="button scan-btn">
+                <span>Upload Saved Scan</span>
             </a>
             <a href="/join" class="button join-btn">
-                <!-- <span class="icon">🚪</span> -->
                 <span>Join Room</span>
             </a>
         </div>

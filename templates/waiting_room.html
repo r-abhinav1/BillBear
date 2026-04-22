@@ -425,6 +425,20 @@
         <h1>⏳ Waiting Room</h1>
     </header>
 
+    <!-- Host-action notifications (kicked / re-pick asked) -->
+    <div id="hostNoticeBanner"
+         style="display:none; position:fixed; top:0; left:0; right:0; z-index:1000;
+                padding:1rem 1.25rem; text-align:center;
+                box-shadow:0 4px 20px rgba(0,0,0,0.5); color:#fff;">
+        <span id="hostNoticeText" style="font-weight:600; display:block; margin-bottom:0.75rem; font-size:1rem;"></span>
+        <button id="hostNoticeAction" type="button"
+                style="padding:0.6rem 1.4rem; border:none; border-radius:6px;
+                       background:#fff; color:#3F51B5; font-weight:700;
+                       cursor:pointer; font-size:1rem;">
+            Action
+        </button>
+    </div>
+
     <main class="container">
         <div class="room-info">
             <h2>{{ room['room_name'] }}</h2>
@@ -455,15 +469,29 @@
                 <span class="status-title">Submission Status</span>
                 <span class="status-count" id="statusCount">0 / 0 submitted</span>
             </div>
-            
+
+            {% if is_host %}
+            <div id="numPeopleControl" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap;">
+                <span style="color:#CCCCCC; font-weight:500;">Expected people:</span>
+                <input type="number" id="numPeopleInput" min="1" max="50"
+                       value="{{ room.num_people }}"
+                       style="width:80px; padding:0.4rem 0.6rem; background:#2D2D2D; border:2px solid #333; border-radius:6px; color:#fff; font-size:0.95rem;">
+                <button type="button" id="numPeopleSaveBtn"
+                        style="padding:0.4rem 0.8rem; background:#3F51B5; color:#fff; border:none; border-radius:6px; font-size:0.9rem; font-weight:600; cursor:pointer;">
+                    Save
+                </button>
+                <span id="numPeopleStatus" style="color:#B0BEC5; font-size:0.85rem;"></span>
+            </div>
+            {% endif %}
+
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill" style="width: 0%"></div>
             </div>
-            
+
             <div class="user-grid" id="userList">
                 <!-- Users will be populated by JavaScript -->
             </div>
-            
+
             <div class="last-updated">
                 <span class="spinner" id="spinner"></span>
                 Last updated: <span id="lastUpdated">Loading<span class="pulsing-dots">...</span></span>
@@ -499,83 +527,225 @@
     </main>
 
     <script>
-        const roomCode = '{{ room_code }}';
-        const hostName = '{{ room.host_name }}';
-        const currentUser = '{{ user_name }}';
-        const isHost = {% if is_host %}true{% else %}false{% endif %};
-        
+        const roomCode = {{ room_code | tojson }};
+        const hostName = {{ room.host_name | tojson }};
+        const currentUser = {{ user_name | tojson }};
+        const isHost = {{ is_host | tojson }};
+
+        let seenMeInRoomOnce = false;      // kicked detection anchor
+        let prevMeSubmitted = null;        // tracks transitions for "host revoked me" notification
+        let kickedBannerShown = false;     // fire the kicked banner at most once
+        let repickBannerShown = false;     // one re-pick banner per revoke cycle
+
+        function showHostBanner({ text, buttonLabel, onClick, background }) {
+            const banner = document.getElementById('hostNoticeBanner');
+            banner.style.background = background || '#3F51B5';
+            document.getElementById('hostNoticeText').textContent = text;
+            const btn = document.getElementById('hostNoticeAction');
+            if (buttonLabel) {
+                btn.textContent = buttonLabel;
+                btn.onclick = onClick;
+                btn.style.display = 'inline-block';
+            } else {
+                btn.style.display = 'none';
+            }
+            banner.style.display = 'block';
+            // Scroll so the banner is visible even if user was deep in the page
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function hideHostBanner() {
+            document.getElementById('hostNoticeBanner').style.display = 'none';
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+            }[c]));
+        }
+
+        async function postJson(url, body) {
+            const resp = await fetch(url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'fetch',
+                },
+                body: JSON.stringify(body || {}),
+            });
+            let data = null;
+            try { data = await resp.json(); } catch (_e) {}
+            return { ok: resp.ok, data, status: resp.status };
+        }
+
+        async function hostRemoveUser(target) {
+            if (!confirm(`Remove "${target}" from the room? Their selection will be discarded.`)) return;
+            const r = await postJson(`/room/${roomCode}/host/remove-user`, { target_user: target });
+            if (!r.ok) alert((r.data && r.data.message) || 'Could not remove user.');
+            updateStatus();
+        }
+
+        async function hostRevokeUser(target) {
+            if (!confirm(`Let "${target}" re-pick their items? Their current selection will be cleared.`)) return;
+            const r = await postJson(`/room/${roomCode}/host/revoke/${encodeURIComponent(target)}`, {});
+            if (!r.ok) alert((r.data && r.data.message) || 'Could not revoke submission.');
+            updateStatus();
+        }
+
+        async function selfRevoke() {
+            if (!confirm('Edit your selection? You will be taken back to the item picker.')) return;
+            const r = await postJson(`/room/${roomCode}/user/${encodeURIComponent(currentUser)}/revoke`, {});
+            if (r.ok && r.data && r.data.redirect) {
+                window.location.href = r.data.redirect;
+            } else {
+                alert((r.data && r.data.message) || 'Could not start editing.');
+            }
+        }
+
+        window.hostRemoveUser = hostRemoveUser;
+        window.hostRevokeUser = hostRevokeUser;
+        window.selfRevoke = selfRevoke;
+
+        async function saveNumPeople() {
+            const input = document.getElementById('numPeopleInput');
+            const status = document.getElementById('numPeopleStatus');
+            const val = parseInt(input.value, 10);
+            if (!Number.isFinite(val)) { status.textContent = 'Enter a number.'; return; }
+            status.textContent = 'Saving…';
+            const r = await postJson(`/room/${roomCode}/host/num-people`, { num_people: val });
+            if (r.ok) {
+                status.textContent = 'Saved.';
+                setTimeout(() => { status.textContent = ''; }, 1500);
+            } else {
+                status.textContent = (r.data && r.data.message) || 'Failed.';
+            }
+            updateStatus();
+        }
+
+        const numPeopleSaveBtn = document.getElementById('numPeopleSaveBtn');
+        if (numPeopleSaveBtn) numPeopleSaveBtn.addEventListener('click', saveNumPeople);
+
+        function renderUserRow(user, submittedUsers) {
+            const isSubmitted = submittedUsers.includes(user);
+            const isTheHost = user === hostName;
+            const isSelf = user === currentUser;
+
+            const controls = [];
+            if (isSelf && isSubmitted) {
+                controls.push(`<button type="button" onclick="selfRevoke()" style="padding:0.35rem 0.7rem; border:1px solid #3F51B5; background:transparent; color:#CFD8DC; border-radius:6px; font-size:0.8rem; cursor:pointer;">✏️ Edit my selection</button>`);
+            }
+            if (isHost && !isTheHost) {
+                if (isSubmitted) {
+                    controls.push(`<button type="button" onclick="hostRevokeUser('${escapeHtml(user).replace(/'/g, '&#39;')}')" style="padding:0.35rem 0.7rem; border:1px solid #FF9800; background:transparent; color:#FFCC80; border-radius:6px; font-size:0.8rem; cursor:pointer;">↺ Let re-pick</button>`);
+                }
+                controls.push(`<button type="button" onclick="hostRemoveUser('${escapeHtml(user).replace(/'/g, '&#39;')}')" style="padding:0.35rem 0.7rem; border:1px solid #EF5350; background:transparent; color:#EF9A9A; border-radius:6px; font-size:0.8rem; cursor:pointer;">🗑️ Remove</button>`);
+            }
+
+            const item = document.createElement('div');
+            item.className = `user-item ${isSubmitted ? 'submitted' : 'pending'}`;
+            item.innerHTML = `
+                <span class="status-icon">${isSubmitted ? '✅' : '⏳'}</span>
+                <span class="user-name">${escapeHtml(user)}${isTheHost ? ' 👑' : ''}${isSelf ? ' <small style="color:#B0BEC5;">(you)</small>' : ''}</span>
+                <span class="user-status">${isSubmitted ? 'submitted' : 'pending'}</span>
+                <div style="display:flex; gap:0.4rem; flex-wrap:wrap; margin-left:auto;">${controls.join('')}</div>
+            `;
+            return item;
+        }
+
         function updateStatus() {
-            fetch(`/room/${roomCode}/status`)
+            fetch(`/room/${roomCode}/status`, { credentials: 'same-origin' })
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
                         console.error('Error:', data.error);
                         return;
                     }
-                    
+
                     const users = data.users;
                     const submittedUsers = data.submitted_users;
                     const readyToProceed = data.ready_to_proceed;
-                    const enoughUsersJoined = data.enough_users_joined;
                     const expectedPeople = data.expected_people;
-                    
-                    // Update status count
-                    document.getElementById('statusCount').textContent = 
+
+                    const meInRoom = users.includes(currentUser);
+                    const meSubmitted = submittedUsers.includes(currentUser);
+                    // Host view never shows itself a kicked banner (we never
+                    // remove the host), and treating the host as "not in
+                    // users" (e.g. during page refresh edge cases) must not
+                    // redirect them away.
+                    const amHost = currentUser === hostName;
+
+                    // --- Kicked detection -------------------------------------
+                    // After host "Remove": the user_ids mapping for this user
+                    // is purged server-side, and the users list no longer
+                    // contains our name. Show the banner on the very first
+                    // poll that reports this — including after a refresh.
+                    if (!meInRoom && !amHost && !kickedBannerShown) {
+                        kickedBannerShown = true;
+                        showHostBanner({
+                            text: '👋 The host removed you from this room. Your selection was discarded.',
+                            buttonLabel: 'Back to home',
+                            onClick: () => { window.location.href = '/'; },
+                            background: '#EF5350',
+                        });
+                        // Stop polling — there's nothing more to update for a removed user.
+                        if (window._bbPollTimer) {
+                            clearInterval(window._bbPollTimer);
+                            window._bbPollTimer = null;
+                        }
+                        return;
+                    }
+                    if (meInRoom) seenMeInRoomOnce = true;
+
+                    // --- Host-revoke detection --------------------------------
+                    // Transition submitted: true -> false while we're still in
+                    // the room means the host (or a forced state change) wants
+                    // us to re-pick our items. Show a banner with a CTA.
+                    if (prevMeSubmitted === true && !meSubmitted && meInRoom && !repickBannerShown) {
+                        repickBannerShown = true;
+                        showHostBanner({
+                            text: '✏️ The host asked you to re-pick your items.',
+                            buttonLabel: 'Re-pick now',
+                            onClick: () => {
+                                window.location.href = `/room/${roomCode}/user/${encodeURIComponent(currentUser)}/select-items`;
+                            },
+                            background: '#FF9800',
+                        });
+                    }
+                    // Reset the repick flag when we come back from a submit so
+                    // a second host-revoke later in the session can fire again.
+                    if (prevMeSubmitted === false && meSubmitted) {
+                        repickBannerShown = false;
+                        hideHostBanner();
+                    }
+                    prevMeSubmitted = meSubmitted;
+
+                    document.getElementById('statusCount').textContent =
                         `${submittedUsers.length} / ${users.length} submitted`;
-                    
-                    // Update progress bar
+
                     const progressPercentage = users.length > 0 ? (submittedUsers.length / users.length) * 100 : 0;
                     document.getElementById('progressFill').style.width = progressPercentage + '%';
-                    
-                    // Update user list
+
                     const userList = document.getElementById('userList');
                     userList.innerHTML = '';
-                    
-                    users.forEach(user => {
-                        const userItem = document.createElement('div');
-                        const isSubmitted = submittedUsers.includes(user);
-                        const isCurrentHost = user === hostName;
-                        
-                        userItem.className = `user-item ${isSubmitted ? 'submitted' : 'pending'}`;
-                        userItem.innerHTML = `
-                            <span class="status-icon">${isSubmitted ? '✅' : '⏳'}</span>
-                            <span class="user-name">
-                                ${user}
-                                ${isCurrentHost ? ' 👑' : ''}
-                            </span>
-                            <span class="user-status">${isSubmitted ? 'submitted' : 'pending'}</span>
-                        `;
-                        
-                        userList.appendChild(userItem);
-                    });
-                    
-                    // Update host controls (only if user is host)
+                    users.forEach(user => userList.appendChild(renderUserRow(user, submittedUsers)));
+
                     const hostControls = document.getElementById('hostControls');
                     if (hostControls && isHost) {
                         document.getElementById('expectedPeople').textContent = expectedPeople;
                         document.getElementById('joinedCount').textContent = users.length;
                         document.getElementById('submittedCount').textContent = submittedUsers.length;
-                        
-                        // Show host controls if not ready to proceed and users have joined
-                        if (!readyToProceed && users.length > 0) {
-                            hostControls.style.display = 'block';
-                        } else {
-                            hostControls.style.display = 'none';
-                        }
+                        hostControls.style.display = (!readyToProceed && users.length > 0) ? 'block' : 'none';
                     }
-                    
-                    // Update last updated time
-                    document.getElementById('lastUpdated').innerHTML = 
+
+                    document.getElementById('lastUpdated').innerHTML =
                         new Date().toLocaleTimeString() + '<span class="pulsing-dots">...</span>';
-                    
-                    // Show completion message if ready to proceed
+
                     if (readyToProceed) {
                         document.getElementById('waitingMessage').style.display = 'none';
                         document.getElementById('completionMessage').style.display = 'block';
                         document.getElementById('spinner').style.display = 'none';
                         if (hostControls) hostControls.style.display = 'none';
-                        
-                        // Redirect after 3 seconds
                         setTimeout(() => {
                             window.location.href = `/room/${roomCode}/results`;
                         }, 3000);
@@ -586,12 +756,52 @@
                     document.getElementById('lastUpdated').textContent = 'Error loading status';
                 });
         }
-        
+
         // Initial load
         updateStatus();
-        
-        // Poll every 3 seconds for updates
-        setInterval(updateStatus, 3000);
+
+        // Poll every 3 seconds for updates (stored on window so kick handler can stop it)
+        window._bbPollTimer = setInterval(updateStatus, 3000);
+
+        function copyToClipboard() {
+            const text = document.getElementById('joinUrl').textContent.trim();
+            const btn = document.getElementById('copyBtn');
+
+            function showSuccess() {
+                btn.textContent = '✅ Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '📋 Copy';
+                    btn.classList.remove('copied');
+                }, 2000);
+            }
+
+            function showFailure() {
+                btn.textContent = '❌ Failed';
+                setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
+            }
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(showSuccess).catch(() => execFallback());
+            } else {
+                execFallback();
+            }
+
+            function execFallback() {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try {
+                    document.execCommand('copy') ? showSuccess() : showFailure();
+                } catch (e) {
+                    showFailure();
+                }
+                document.body.removeChild(ta);
+            }
+        }
     </script>
 </body>
 </html>

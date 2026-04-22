@@ -66,6 +66,54 @@ Repository: https://github.com/r-abhinav1/BillBear
 git clone https://github.com/r-abhinav1/BillBear.git
 cd BillBear
 pip install -r requirements.txt
+cp .env.example .env
+# edit .env once with your API keys
 python app.py
 # or
 flask run
+```
+
+## OCR Extraction Architecture (Current)
+
+BillBear now runs **OCR-text-first extraction**:
+
+1. Browser OCR (`tesseract.js`) extracts raw text on the create-room page.
+2. Backend deterministic parser normalizes receipt structure (`parse_receipt_text`).
+3. By default, backend then runs LLM normalization on OCR text (`ALWAYS_USE_LLM_NORMALIZATION=true`):
+   - Primary: Gemini
+   - Automatic fallback: OpenRouter
+4. Legacy image OCR path is available behind a feature flag for rollback (disabled by default).
+
+Core modules:
+- `utils/receipt_contracts.py`
+- `utils/receipt_rules.py`
+- `utils/receipt_parser.py`
+- `utils/receipt_llm.py`
+- `utils/receipt_pipeline.py`
+
+## Environment Variables
+
+Use a local `.env` file (copied from `.env.example`) so keys are loaded automatically on startup.
+
+### Feature flags
+- `OCR_TEXT_INGESTION_ENABLED` (default: `true`)
+- `CLIENT_OCR_ENABLED` (default: `true`)
+- `LEGACY_IMAGE_OCR_ENABLED` (default: `false`)
+- `ALWAYS_USE_LLM_NORMALIZATION` (default: `true`; set `false` to allow confidence-based fallback)
+
+### Parser / provider behavior
+- `PARSER_CONFIDENCE_THRESHOLD` (default: `0.72`)
+- `OCR_PROVIDER_TIMEOUT_SECONDS` (default: `20`)
+- `OCR_PROVIDER_MAX_ATTEMPTS` (default: `2`)
+
+### Gemini (primary)
+- `GEMINI_API_KEYS` (comma-separated; preferred)
+- `GEMINI_API_KEY` (single key; fallback)
+- `GEMINI_TEXT_MODEL` (default: `gemini-2.0-flash`)
+- `GEMINI_IMAGE_MODEL` (default: `gemini-2.0-flash`)
+
+### OpenRouter (fallback)
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL` (default: `openai/gpt-4o-mini`)
+- `OPENROUTER_SITE_URL` (optional)
+- `OPENROUTER_SITE_NAME` (optional, default: `BillBear`)

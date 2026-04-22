@@ -201,6 +201,43 @@
             pointer-events: none;
         }
 
+        .ocr-status {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: #B0BEC5;
+            min-height: 1.2rem;
+        }
+
+        .ocr-status.error {
+            color: #EF5350;
+        }
+
+        .ocr-status.success {
+            color: #66BB6A;
+        }
+
+        /* Vision fallback removed — OCR-only mode to avoid paid vision API calls */
+
+        .skip-ocr-btn {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            color: #B0BEC5;
+            border: 1px solid #555555;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+
+        .skip-ocr-btn:hover {
+            border-color: #B0BEC5;
+            color: #FFFFFF;
+            background: #2D2D2D;
+        }
+
         .loading .submit-btn {
             position: relative;
             color: transparent;
@@ -245,29 +282,48 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Create Room</h1>
-            <p>Create a room to split your bill with friends</p>
+            {% if mode == 'json' %}
+            <h1>Upload Saved Scan</h1>
+            <p>Resume with a previously saved bill scan (.billbear.json)</p>
+            {% else %}
+            <h1>Upload Bill</h1>
+            <p>Scan a new bill to create a room</p>
+            {% endif %}
         </div>
 
         <form method="POST" enctype="multipart/form-data" class="form-container" id="createForm">
             <div class="form-group">
                 <label for="host_name">Host Name</label>
-                <input type="text" id="host_name" name="host_name" class="form-input" 
+                <input type="text" id="host_name" name="host_name" class="form-input"
                        placeholder="Enter your name" required>
             </div>
 
             <div class="form-group">
                 <label for="room_name">Room Name</label>
-                <input type="text" id="room_name" name="room_name" class="form-input" 
+                <input type="text" id="room_name" name="room_name" class="form-input"
                        placeholder="Give your room a name" required>
             </div>
 
             <div class="form-group">
                 <label for="num_people">Number of People</label>
-                <input type="number" id="num_people" name="num_people" class="form-input" 
+                <input type="number" id="num_people" name="num_people" class="form-input"
                        placeholder="How many people will join?" min="1" max="20" required>
             </div>
 
+            {% if mode == 'json' %}
+            <div class="form-group">
+                <label for="scan_json">Saved Scan File</label>
+                <div class="file-input-wrapper">
+                    <input type="file" id="scan_json" accept=".json,application/json" required>
+                    <label for="scan_json" class="file-input-label" id="jsonLabel">
+                        Choose .billbear.json file
+                    </label>
+                </div>
+                <div id="ocrStatus" class="ocr-status"></div>
+            </div>
+            <!-- dummy disabled image input so existing JS that references it doesn't crash -->
+            <input type="file" id="bill_image" name="bill_image" accept="image/*" style="display:none;">
+            {% else %}
             <div class="form-group">
                 <label for="bill_image">Bill Image</label>
                 <div class="file-input-wrapper">
@@ -276,11 +332,33 @@
                         Choose bill image
                     </label>
                 </div>
+                <div id="ocrStatus" class="ocr-status"></div>
             </div>
+            {% endif %}
+            <input type="hidden" id="ocr_payload" name="ocr_payload">
+            <input type="hidden" id="mode" name="mode" value="{{ mode }}">
 
             <button type="submit" class="submit-btn" id="submitBtn">
-                Create Room
+                {% if mode == 'json' %}Continue to Edit{% else %}Create Room{% endif %}
             </button>
+            {% if mode != 'json' %}
+            <button type="button" class="skip-ocr-btn" id="skipOcrBtn" style="display:none;">
+                Skip OCR — enter items manually
+            </button>
+            {% endif %}
+            <input type="hidden" id="skip_ocr" name="skip_ocr" value="">
+
+            <div class="mode-switch" style="text-align:center; margin-top:1rem; font-size:0.9rem; color:#B0BEC5;">
+                {% if mode == 'json' %}
+                Want to scan a new bill instead?
+                <a href="/create?mode=image" style="color:#3F51B5; font-weight:600; text-decoration:none;">Upload Bill</a>
+                {% else %}
+                Have a saved scan?
+                <a href="/create?mode=json" style="color:#FF4081; font-weight:600; text-decoration:none;">Upload Saved JSON</a>
+                {% endif %}
+            </div>
+
+            <!-- Vision fallback removed to avoid paid API calls -->
         </form>
 
         <div class="back-link">
@@ -288,38 +366,429 @@
         </div>
     </div>
 
+    {% if client_ocr_enabled %}
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    {% endif %}
     <script>
-        // Handle file input styling
+        const clientOcrEnabled = {{ (client_ocr_enabled or false) | tojson }};
+        const legacyImageOcrEnabled = {{ (legacy_image_ocr_enabled or false) | tojson }};
+        const mode = {{ mode | tojson }};
+        let submissionLocked = false;
+
+        const form = document.getElementById('createForm');
+        const submitBtn = document.getElementById('submitBtn');
         const fileInput = document.getElementById('bill_image');
         const fileLabel = document.getElementById('fileLabel');
+        const ocrPayloadInput = document.getElementById('ocr_payload');
+        const ocrStatus = document.getElementById('ocrStatus');
+        const skipOcrBtn = document.getElementById('skipOcrBtn');
+        const skipOcrInput = document.getElementById('skip_ocr');
+        const jsonInput = document.getElementById('scan_json');
+        const jsonLabel = document.getElementById('jsonLabel');
+        // Vision fallback removed — no elements to bind
 
-        fileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                fileLabel.textContent = `${file.name}`;
-                fileLabel.classList.add('has-file');
+        function setLoading(isLoading) {
+            if (isLoading) {
+                form.classList.add('loading');
+                submitBtn.disabled = true;
             } else {
-                fileLabel.textContent = 'Choose bill image';
-                fileLabel.classList.remove('has-file');
+                form.classList.remove('loading');
+                submitBtn.disabled = false;
+            }
+        }
+
+        function setOcrStatus(message, type = '') {
+            ocrStatus.textContent = message || '';
+            ocrStatus.classList.remove('error', 'success');
+            if (type) ocrStatus.classList.add(type);
+        }
+
+        function showVisionButton(show) {
+            // Vision fallback disabled — no-op
+        }
+
+        if (fileLabel) {
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    fileLabel.textContent = `${file.name}`;
+                    fileLabel.classList.add('has-file');
+                    ocrPayloadInput.value = '';
+                    setOcrStatus('');
+                    showVisionButton(true);
+                } else {
+                    fileLabel.textContent = 'Choose bill image';
+                    fileLabel.classList.remove('has-file');
+                    showVisionButton(false);
+                }
+            });
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Image preprocessing                                                 */
+        /* ------------------------------------------------------------------ */
+
+        function loadImageFromFile(file) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load image'));
+                img.src = URL.createObjectURL(file);
+            });
+        }
+
+        function preprocessCanvas(sourceCanvas, rotationDeg) {
+            // Applies grayscale + contrast stretch + sharpen to a canvas.
+            // If rotationDeg is non-zero, rotates first.
+            const sw = sourceCanvas.width;
+            const sh = sourceCanvas.height;
+            const isRotated = (rotationDeg % 180 !== 0);
+            const outW = isRotated ? sh : sw;
+            const outH = isRotated ? sw : sh;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = outW;
+            canvas.height = outH;
+            const ctx = canvas.getContext('2d');
+
+            ctx.translate(outW / 2, outH / 2);
+            ctx.rotate((rotationDeg * Math.PI) / 180);
+            ctx.drawImage(sourceCanvas, -sw / 2, -sh / 2);
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+            // Grayscale
+            const imageData = ctx.getImageData(0, 0, outW, outH);
+            const data = imageData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const l = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+                data[i] = l; data[i + 1] = l; data[i + 2] = l;
+            }
+
+            // Contrast stretch with 2% cutoff
+            const hist = new Array(256).fill(0);
+            const totalPixels = outW * outH;
+            for (let i = 0; i < data.length; i += 4) hist[data[i]]++;
+
+            const cutoff = Math.floor(totalPixels * 0.02);
+            let cumLow = 0, cumHigh = 0, lo = 0, hi = 255;
+            for (let t = 0; t < 256; t++) { cumLow += hist[t]; if (cumLow > cutoff) { lo = t; break; } }
+            for (let t = 255; t >= 0; t--) { cumHigh += hist[t]; if (cumHigh > cutoff) { hi = t; break; } }
+            const range = hi - lo || 1;
+
+            for (let i = 0; i < data.length; i += 4) {
+                let v = Math.round(((data[i] - lo) / range) * 255);
+                v = Math.max(0, Math.min(255, v));
+                data[i] = v; data[i + 1] = v; data[i + 2] = v;
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            return canvas;
+        }
+
+        function scaleImage(img) {
+            // Scale up to ~3000px on longest side
+            const MAX_DIM = 3000;
+            let { width, height } = img;
+            const scale = Math.max(1, MAX_DIM / Math.max(width, height));
+            const w = Math.round(width * scale);
+            const h = Math.round(height * scale);
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            return c;
+        }
+
+        function canvasToBlob(canvas, type, quality) {
+            return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Quality check: does OCR text look like a real receipt?              */
+        /* ------------------------------------------------------------------ */
+
+        function ocrLooksUsable(text, confidence) {
+            if (!text || text.length < 20) return false;
+            // Must contain at least one number (receipts always have prices)
+            const hasNumbers = /\d+\.\d{2}/.test(text) || /\d{2,}/.test(text);
+            // Must have a few lines
+            const lineCount = text.split('\n').filter(l => l.trim().length > 2).length;
+            if (lineCount < 3) return false;
+            if (!hasNumbers) return false;
+            // Low confidence from Tesseract is a strong signal
+            if (confidence !== null && confidence < 40) return false;
+            return true;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* OCR runner: tries original, then 3 rotations if needed             */
+        /* ------------------------------------------------------------------ */
+
+        async function runOcrOnCanvas(canvas, worker) {
+            const blob = await canvasToBlob(canvas, 'image/png', 1.0);
+            const result = await worker.recognize(blob);
+            return result;
+        }
+
+        async function runClientOcr(file) {
+            if (typeof Tesseract === 'undefined') {
+                throw new Error('Browser OCR engine failed to load.');
+            }
+
+            const timings = {};
+            const t0 = performance.now();
+
+            // Load and scale
+            setOcrStatus('Preprocessing image...');
+            const img = await loadImageFromFile(file);
+            const scaled = scaleImage(img);
+            URL.revokeObjectURL(img.src);
+
+            timings.preprocess_ms = Math.round(performance.now() - t0);
+
+            // Create Tesseract worker once — reuse for rotation attempts
+            setOcrStatus('Loading OCR engine...');
+            const worker = await Tesseract.createWorker('eng', 1, {
+                logger: (m) => {
+                    if (m.status === 'recognizing text') {
+                        setOcrStatus(`OCR in progress... ${Math.round((m.progress || 0) * 100)}%`);
+                    } else if (m.status === 'loading language traineddata') {
+                        setOcrStatus('Loading language data...');
+                    }
+                }
+            });
+            await worker.setParameters({ tessedit_pageseg_mode: '6' });
+
+            // Try original orientation first, then 90, 180, 270 if needed
+            const rotations = [0, 90, 270, 180];
+            let bestResult = null;
+            let bestConfidence = -1;
+            let bestRotation = 0;
+
+            const tOcr = performance.now();
+
+            for (const deg of rotations) {
+                setOcrStatus(deg === 0
+                    ? 'Running OCR on original orientation...'
+                    : `Trying ${deg} rotation...`);
+
+                const processed = preprocessCanvas(scaled, deg);
+                const result = await runOcrOnCanvas(processed, worker);
+                const text = (result.data.text || '').trim();
+                const conf = result.data.confidence || 0;
+
+                if (ocrLooksUsable(text, conf)) {
+                    bestResult = result;
+                    bestConfidence = conf;
+                    bestRotation = deg;
+                    // Good enough — stop trying rotations
+                    if (conf > 60) break;
+                }
+
+                // Track best attempt even if not "usable"
+                if (conf > bestConfidence) {
+                    bestResult = result;
+                    bestConfidence = conf;
+                    bestRotation = deg;
+                }
+            }
+
+            await worker.terminate();
+
+            timings.ocr_ms = Math.round(performance.now() - tOcr);
+            timings.total_client_ms = Math.round(performance.now() - t0);
+
+            const rawText = bestResult ? (bestResult.data.text || '').trim() : '';
+
+            // Check if result is usable
+            if (!ocrLooksUsable(rawText, bestConfidence)) {
+                const err = new Error('OCR could not read this receipt (possibly rotated, blurry, or low contrast).');
+                err.showVisionFallback = true;
+                err.timings = timings;
+                throw err;
+            }
+
+            const lines = Array.isArray(bestResult.data.lines)
+                ? bestResult.data.lines.map(l => (l.text || '').trim()).filter(l => l.length > 0)
+                : [];
+
+            const rotMsg = bestRotation ? ` (rotated ${bestRotation} deg)` : '';
+            setOcrStatus(
+                `OCR done${rotMsg} — preprocess ${timings.preprocess_ms}ms, OCR ${timings.ocr_ms}ms`,
+                'success'
+            );
+
+            return {
+                raw_text: rawText,
+                lines,
+                confidence: typeof bestConfidence === 'number'
+                    ? Number(bestConfidence.toFixed ? bestConfidence.toFixed(2) : bestConfidence)
+                    : null,
+                metadata: {
+                    source: 'browser_tesseract',
+                    model: 'tesseract.js@5',
+                    file_name: file.name,
+                    preprocessed: true,
+                    rotation_applied: bestRotation,
+                    timings,
+                }
+            };
+        }
+
+        /* Vision AI fallback disabled — OCR-only mode to avoid paid API calls */
+        function setVisionStatus() {}
+        function triggerVisionFallback() {}
+
+        /* ------------------------------------------------------------------ */
+        /* JSON-mode handler: parse the saved scan file into ocr_payload     */
+        /* ------------------------------------------------------------------ */
+
+        function validateSavedScan(obj) {
+            if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON root');
+            if (!Array.isArray(obj.items) || obj.items.length === 0) {
+                throw new Error('Scan file has no items');
+            }
+            for (const it of obj.items) {
+                if (!it || typeof it.name !== 'string' || !it.name.trim()) {
+                    throw new Error('An item is missing a name');
+                }
+            }
+            return true;
+        }
+
+        function savedScanToOcrPayload(obj) {
+            // Use the server's _vision_receipt short-circuit in
+            // extract_receipt_from_text_payload — it skips raw_text validation
+            // and trusts a pre-extracted receipt, which is exactly our case.
+            return {
+                _vision_receipt: {
+                    items: obj.items,
+                    subtotal: obj.subtotal || 'N/A',
+                    serviceCharge: obj.serviceCharge || 'N/A',
+                    discount: obj.discount || 'N/A',
+                    cgst: obj.cgst || 'N/A',
+                    sgst: obj.sgst || 'N/A',
+                    igst: obj.igst || 'N/A',
+                    total: obj.total || 'N/A',
+                    restaurant_name: obj.restaurant_name || 'N/A',
+                    parser_meta: {
+                        source: 'user_saved_json',
+                        used_fallback: false,
+                        fallback_provider: 'none',
+                        confidence: 1.0,
+                    },
+                    extraction_meta: {
+                        mode: 'saved_json',
+                        source: 'user_saved_json',
+                        provider: 'none',
+                    },
+                },
+            };
+        }
+
+        if (jsonInput) {
+            jsonInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) {
+                    jsonLabel.textContent = 'Choose .billbear.json file';
+                    jsonLabel.classList.remove('has-file');
+                    ocrPayloadInput.value = '';
+                    setOcrStatus('');
+                    return;
+                }
+                jsonLabel.textContent = file.name;
+                jsonLabel.classList.add('has-file');
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const parsed = JSON.parse(reader.result);
+                        validateSavedScan(parsed);
+                        ocrPayloadInput.value = JSON.stringify(savedScanToOcrPayload(parsed));
+                        setOcrStatus(`Loaded ${parsed.items.length} item(s) — continue to edit.`, 'success');
+                    } catch (err) {
+                        ocrPayloadInput.value = '';
+                        setOcrStatus(`Invalid scan file: ${err.message}`, 'error');
+                    }
+                };
+                reader.onerror = () => {
+                    ocrPayloadInput.value = '';
+                    setOcrStatus('Could not read file.', 'error');
+                };
+                reader.readAsText(file);
+            });
+        }
+
+        if (skipOcrBtn) skipOcrBtn.addEventListener('click', function() {
+            const hostName = document.getElementById('host_name').value.trim();
+            const roomName = document.getElementById('room_name').value.trim();
+            const numPeople = document.getElementById('num_people').value.trim();
+            if (!hostName || !roomName || !numPeople) {
+                setOcrStatus('Please fill in your name, room name, and number of people first.', 'error');
+                return;
+            }
+            skipOcrInput.value = 'true';
+            fileInput.removeAttribute('required');
+            submissionLocked = true;
+            setLoading(true);
+            form.submit();
+        });
+
+        /* ------------------------------------------------------------------ */
+        /* Form submission handler                                             */
+        /* ------------------------------------------------------------------ */
+
+        form.addEventListener('submit', async function(e) {
+            if (submissionLocked) return;
+
+            setLoading(true);
+            setVisionStatus('');
+
+            if (!clientOcrEnabled || ocrPayloadInput.value.trim()) return;
+
+            const file = fileInput.files[0];
+            if (!file) {
+                e.preventDefault();
+                setLoading(false);
+                setOcrStatus('Please choose a bill image before submitting.', 'error');
+                return;
+            }
+
+            e.preventDefault();
+            setOcrStatus('Starting image preprocessing...');
+
+            try {
+                const payload = await runClientOcr(file);
+                ocrPayloadInput.value = JSON.stringify(payload);
+                setOcrStatus(
+                    `Done! Submitting to server... (client: ${payload.metadata.timings.total_client_ms}ms)`,
+                    'success'
+                );
+                submissionLocked = true;
+                form.submit();
+            } catch (error) {
+                setLoading(false);
+
+                if (error.showVisionFallback) {
+                    const t = error.timings || {};
+                    setOcrStatus(
+                        `OCR couldn't read this receipt (tried 4 orientations, ${t.total_client_ms || '?'}ms). Try a clearer photo or use the button below to enter items manually.`,
+                        'error'
+                    );
+                    skipOcrBtn.style.display = 'block';
+                    return;
+                }
+
+                if (legacyImageOcrEnabled) {
+                    setOcrStatus('Client OCR failed. Falling back to server OCR...', 'error');
+                    submissionLocked = true;
+                    form.submit();
+                    return;
+                }
+
+                setOcrStatus(`OCR failed: ${error.message}. Try a clearer photo or enter items manually.`, 'error');
             }
         });
 
-        // Handle form submission
-        document.getElementById('createForm').addEventListener('submit', function(e) {
-            const form = e.target;
-            const submitBtn = document.getElementById('submitBtn');
-            
-            form.classList.add('loading');
-            submitBtn.disabled = true;
-            
-            // Re-enable if form fails to submit for some reason
-            setTimeout(() => {
-                form.classList.remove('loading');
-                submitBtn.disabled = false;
-            }, 10000);
-        });
-
-        // Auto-focus first input
         document.getElementById('host_name').focus();
     </script>
 </body>

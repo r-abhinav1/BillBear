@@ -316,6 +316,20 @@
             <p>Review and edit the extracted bill items below. Make sure all items and prices are correct before proceeding.</p>
         </div>
 
+        <!-- Reconciliation banner: compares what the OCR pulled out vs the bill's own totals. -->
+        <div id="reconBanner" class="card" style="padding:1rem 1.25rem; border-left:4px solid #777; margin-bottom:1.5rem;">
+            <div id="reconHeadline" style="font-weight:700; font-size:1.05rem; margin-bottom:0.5rem;">Checking totals…</div>
+            <ul id="reconDetails" style="margin:0; padding-left:1.25rem; font-size:0.9rem; color:#CFD8DC; list-style: disc;"></ul>
+        </div>
+
+        <!-- Toast shown once when the user fixes a mismatch. -->
+        <div id="reconToast"
+             style="display:none; position:fixed; right:1rem; bottom:1rem; z-index:2000;
+                    background:#4CAF50; color:#fff; padding:0.9rem 1.2rem; border-radius:8px;
+                    box-shadow:0 6px 20px rgba(0,0,0,0.4); font-weight:600; max-width:320px;">
+            ✅ OCR totals match the bill!
+        </div>
+
         <form method="POST" id="editForm" action="/edit/{{room_code}}">
             <div class="card">
                 <h2 class="section-title">Bill Items</h2>
@@ -396,6 +410,17 @@
                                placeholder="₹0.00" aria-label="SGST amount">
                     </div>
 
+                    {% if items.igst and items.igst != 'N/A' and items.igst != '₹0.00' %}
+                    <div class="financial-item">
+                        <label for="igst">IGST:</label>
+                        <input type="text" id="igst" name="igst"
+                               value="{{ items.igst }}"
+                               placeholder="₹0.00" aria-label="IGST amount">
+                    </div>
+                    {% else %}
+                    <input type="hidden" name="igst" value="N/A">
+                    {% endif %}
+
                     <div class="financial-item">
                         <label for="total">Total:</label>
                         <input type="text" id="total" name="total" 
@@ -409,11 +434,220 @@
                 <button type="submit" class="btn btn-primary" id="submitBtn">
                      Update Items & Continue
                 </button>
+                <button type="button" class="btn btn-secondary" id="downloadScanBtn"
+                        title="Download this scan so you can reload it later without re-scanning">
+                    💾 Download Scan
+                </button>
             </div>
         </form>
     </main>
 
     <script>
+        /* ------------------------------------------------------------------ */
+        /* Download current scan as .billbear.json                             */
+        /* ------------------------------------------------------------------ */
+
+        function collectScan() {
+            const items = Array.from(document.querySelectorAll('.item-row'))
+                .map(row => {
+                    const nameInput = row.querySelector('input[name="item_name"]');
+                    const priceInput = row.querySelector('input[name="item_price"]');
+                    return {
+                        name: (nameInput?.value || '').trim(),
+                        price: (priceInput?.value || '').trim(),
+                    };
+                })
+                .filter(it => it.name.length > 0);
+
+            const val = id => (document.getElementById(id)?.value || '').trim() || 'N/A';
+
+            return {
+                version: 1,
+                saved_at: new Date().toISOString(),
+                source: 'billbear_edit_items',
+                restaurant_name: 'N/A',
+                items,
+                subtotal: val('subtotal'),
+                serviceCharge: val('serviceCharge'),
+                discount: val('discount'),
+                cgst: val('cgst'),
+                sgst: val('sgst'),
+                igst: val('igst') || 'N/A',
+                total: val('total'),
+            };
+        }
+
+        function downloadScan() {
+            const data = collectScan();
+            if (data.items.length === 0) {
+                alert('Add at least one item before downloading.');
+                return;
+            }
+            const blob = new Blob([JSON.stringify(data, null, 2)], {
+                type: 'application/json',
+            });
+            const url = URL.createObjectURL(blob);
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `billbear-${ts}.billbear.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        document.getElementById('downloadScanBtn')
+            .addEventListener('click', downloadScan);
+
+        /* ------------------------------------------------------------------ */
+        /* Live reconciliation: flag when items/taxes don't add up to total    */
+        /* ------------------------------------------------------------------ */
+
+        const RECON_TOLERANCE = 0.01; // rupee-level rounding
+
+        function parseRupees(v) {
+            if (v == null) return null;
+            const cleaned = String(v).replace(/[₹,]/g, '').trim();
+            if (!cleaned || /^n\/?a$/i.test(cleaned)) return null;
+            const n = parseFloat(cleaned);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        function reconCompute() {
+            const items = Array.from(document.querySelectorAll('.item-row')).map(r => ({
+                name: r.querySelector('input[name="item_name"]')?.value?.trim() || '',
+                price: parseRupees(r.querySelector('input[name="item_price"]')?.value),
+            }));
+            const priced = items.filter(i => i.price != null);
+            const itemsSum = priced.reduce((s, i) => s + i.price, 0);
+
+            const subtotal = parseRupees(document.getElementById('subtotal')?.value);
+            const service  = parseRupees(document.getElementById('serviceCharge')?.value) || 0;
+            const discount = parseRupees(document.getElementById('discount')?.value) || 0;
+            const cgst     = parseRupees(document.getElementById('cgst')?.value) || 0;
+            const sgst     = parseRupees(document.getElementById('sgst')?.value) || 0;
+            const igst     = parseRupees(document.getElementById('igst')?.value) || 0;
+            const total    = parseRupees(document.getElementById('total')?.value);
+
+            // If subtotal is filled, compute expected total from it; otherwise
+            // fall back to items sum as the base.
+            const subtotalBase = (subtotal != null) ? subtotal : itemsSum;
+            const expectedTotal = subtotalBase + service + cgst + sgst + igst - discount;
+
+            return { items, itemsSum, subtotal, total, expectedTotal, priced };
+        }
+
+        function rupee(n) {
+            if (n == null) return 'N/A';
+            return '₹' + n.toFixed(2);
+        }
+
+        let reconWasMismatched = false;
+        let reconToastShown = false;
+
+        function reconRender() {
+            const { items, itemsSum, subtotal, total, expectedTotal, priced } = reconCompute();
+            const banner = document.getElementById('reconBanner');
+            const headline = document.getElementById('reconHeadline');
+            const details = document.getElementById('reconDetails');
+            const rows = [];
+            let status = 'ok';
+
+            // Items without a price
+            const unpriced = items.filter(i => i.name && i.price == null);
+            if (unpriced.length) {
+                status = 'warn';
+                rows.push(`⚠️ ${unpriced.length} item${unpriced.length>1?'s':''} missing a price (${unpriced.map(i=>i.name).slice(0,3).join(', ')}${unpriced.length>3?'…':''})`);
+            }
+
+            // Items sum vs subtotal
+            if (subtotal != null && priced.length) {
+                const delta = itemsSum - subtotal;
+                if (Math.abs(delta) > RECON_TOLERANCE) {
+                    status = 'mismatch';
+                    const off = delta > 0 ? 'higher' : 'lower';
+                    rows.push(`🔴 Items add up to <strong>${rupee(itemsSum)}</strong>, but bill subtotal is <strong>${rupee(subtotal)}</strong> (${rupee(Math.abs(delta))} ${off}).`);
+                } else {
+                    rows.push(`✅ Items sum (${rupee(itemsSum)}) matches subtotal.`);
+                }
+            } else if (priced.length) {
+                rows.push(`ℹ️ Items sum: ${rupee(itemsSum)}. Subtotal not filled.`);
+            }
+
+            // Subtotal + charges - discount vs total
+            if (total != null && subtotal != null) {
+                const delta = expectedTotal - total;
+                if (Math.abs(delta) > RECON_TOLERANCE) {
+                    status = 'mismatch';
+                    const off = delta > 0 ? 'higher' : 'lower';
+                    rows.push(`🔴 Subtotal + taxes/service − discount = <strong>${rupee(expectedTotal)}</strong>, but bill total is <strong>${rupee(total)}</strong> (${rupee(Math.abs(delta))} ${off}). Please verify the numbers against your bill.`);
+                } else {
+                    rows.push(`✅ Subtotal + charges − discount (${rupee(expectedTotal)}) matches bill total.`);
+                }
+            } else if (total != null) {
+                rows.push(`ℹ️ Bill total: ${rupee(total)}. Fill subtotal to enable full reconciliation.`);
+            }
+
+            if (rows.length === 0) {
+                rows.push('Add items and totals to see reconciliation.');
+                status = 'neutral';
+            }
+
+            // Banner colour
+            if (status === 'mismatch') {
+                banner.style.borderLeftColor = '#FF9800';
+                banner.style.background = 'rgba(255, 152, 0, 0.08)';
+                headline.textContent = '⚠️ Totals don\'t match the bill';
+                headline.style.color = '#FFB74D';
+            } else if (status === 'warn') {
+                banner.style.borderLeftColor = '#FFB74D';
+                banner.style.background = 'rgba(255, 183, 77, 0.06)';
+                headline.textContent = '⚠️ Some items missing details';
+                headline.style.color = '#FFB74D';
+            } else if (status === 'ok') {
+                banner.style.borderLeftColor = '#4CAF50';
+                banner.style.background = 'rgba(76, 175, 80, 0.08)';
+                headline.textContent = '✅ OCR totals match the bill';
+                headline.style.color = '#81C784';
+            } else {
+                banner.style.borderLeftColor = '#777';
+                banner.style.background = '#1E1E1E';
+                headline.textContent = 'Reconciliation';
+                headline.style.color = '#CFD8DC';
+            }
+
+            details.innerHTML = rows.map(r => `<li>${r}</li>`).join('');
+
+            // One-shot toast the first time the user fixes a real mismatch.
+            if (status === 'mismatch') reconWasMismatched = true;
+            if (status === 'ok' && reconWasMismatched && !reconToastShown) {
+                reconToastShown = true;
+                const toast = document.getElementById('reconToast');
+                toast.style.display = 'block';
+                setTimeout(() => { toast.style.display = 'none'; }, 3500);
+            }
+        }
+
+        // Bind to every input + blur change in the form. Debounced.
+        let reconTimer = null;
+        function reconSchedule() {
+            clearTimeout(reconTimer);
+            reconTimer = setTimeout(reconRender, 120);
+        }
+        const editForm = document.getElementById('editForm');
+        editForm.addEventListener('input', reconSchedule);
+        editForm.addEventListener('blur', reconSchedule, true); // capture blur from descendants
+
+        // Row add/remove is a DOM mutation — observe the rows container.
+        const tbody = document.getElementById('itemsTable');
+        if (tbody) {
+            new MutationObserver(reconSchedule).observe(tbody, { childList: true });
+        }
+
+        // First render shortly after load (blur handlers format currency).
+        setTimeout(reconRender, 50);
+
         function addRow() {
             const table = document.getElementById('itemsTable');
             const newRow = document.createElement('tr');

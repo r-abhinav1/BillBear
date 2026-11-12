@@ -146,8 +146,8 @@ def _room_error(exc: RoomError):
     if exc.code == "NOT_FOUND" and not wants_json():
         return render_template(
             "message.html",
-            title="Room not found",
-            message="This room doesn't exist or has expired (rooms are deleted 24 hours after the last activity).",
+            title="Bear ate this room",
+            message="This room doesn't exist or has expired. Rooms are cleared 24 hours after the last activity, so check the code with your host or start a new split.",
         ), 404
     return error_response(exc.message, exc.status, exc.code, **exc.extra)
 
@@ -602,6 +602,9 @@ def room_status(room_code):
         "caller_name": me["name"] if me else None,
         "caller_in_room": bool(me),
         "caller_is_host": bool(me and me["is_host"]),
+        # What each person has sent, for the host's Manage sheet. Guests only
+        # see everyone's picks once the bill is final.
+        "picks": dict(room["selections"]) if me and me["is_host"] else None,
     })
 
 
@@ -667,7 +670,7 @@ def join_room(room_code):
     if room["finalized"]:
         return render_template(
             "join_room_direct.html",
-            error="This bill has already been finalized. If you were part of it, ask the host to reset your device, then join with the same name.",
+            error="This bill has already been finalized. If you were part of it, ask the host to move you to a new phone (Manage, next to your name), then join with the same name.",
             room=room,
             room_code=code,
         )
@@ -706,7 +709,7 @@ def _not_linked_page(room: dict):
     return render_template(
         "message.html",
         title="Rejoin this room",
-        message="This device isn't linked to that name. Join with your name; if it says the name is taken, ask the host to tap 'Reset device' next to it.",
+        message="This device isn't linked to that name. Join with your name; if it says the name is taken, ask the host to tap Manage next to it and choose 'Move them to a new phone'.",
         link=url_for("join_room", room_code=room["code"]),
         link_text="Join room",
     ), 403

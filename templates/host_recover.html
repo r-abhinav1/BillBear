@@ -1,34 +1,19 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="robots" content="noindex">
-    <title>Restore host access - Bill Bear</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #121212; color: #fff; min-height: 100vh;
-            display: flex; align-items: center; justify-content: center; padding: 1rem;
-        }
-        .card { background: #1E1E1E; border: 1px solid #333; border-radius: 16px; padding: 2rem; max-width: 480px; width: 100%; text-align: center; }
-        h1 { font-size: 1.5rem; margin-bottom: 0.75rem; }
-        p { color: #CFD8DC; line-height: 1.6; margin-bottom: 1.25rem; }
-        button { padding: 0.85rem 1.6rem; border: none; border-radius: 8px; background: #3F51B5; color: #fff; font-weight: 700; font-size: 1rem; cursor: pointer; }
-        small { display: block; color: #90A4AE; margin-top: 1rem; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>👑 Restore host access</h1>
-        <p>Make <strong>this device</strong> the host of <strong>{{ room.room_name }}</strong> ({{ room_code }}).</p>
-        <form method="POST" action="{{ url_for('host_recover', room_code=room_code) }}">
-            <input type="hidden" name="k" value="{{ token }}">
-            <button type="submit">Use this device as host</button>
-        </form>
-        <small>Host access will move here; the previous host device will lose it.</small>
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% block title %}Restore host access, BillBear{% endblock %}
+{% block content %}
+<main class="stack stack--lg">
+    <h1>Make this phone the host</h1>
+    <div>
+        <div class="bear-peek" style="width: 132px; height: 84px; margin-left: 24px">{{ ui.bear(132) }}</div>
+        <section class="receipt">
+            <form class="paper stack" method="POST" action="{{ url_for('host_recover', room_code=room_code) }}">
+                <p>Host controls for <strong>{{ room.room_name }}</strong> (<span class="mono">{{ room_code }}</span>) will move to this device. The previous host device loses them.</p>
+                <input type="hidden" name="k" value="{{ token }}">
+                <button type="submit" class="btn btn--primary btn--block">Use this device as host</button>
+            </form>
+            <div class="tear"></div>
+        </section>
     </div>
-</body>
-</html>
+</main>
+{% endblock %}

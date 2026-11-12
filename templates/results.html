@@ -1,555 +1,104 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bill Bear Results - {{ room['room_name'] }}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #121212;
-            color: #FFFFFF;
-            line-height: 1.6;
-            min-height: 100vh;
-        }
-
-        .trans-logo {
-            max-width: 150px;
-            height: auto;
-            display: block;
-            margin: 1rem auto;
-            opacity: 0.9;
-        }
-
-        .top-bar {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            padding: 1rem 0;
-            text-align: center;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .top-bar h1 {
-            font-size: clamp(1.5rem, 4vw, 2rem);
-            font-weight: 600;
-            color: #FFFFFF;
-            margin: 0;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 1rem;
-            animation: fadeIn 0.6s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .card {
-            background: #1E1E1E;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            border: 1px solid #333333;
-        }
-
-        .room-info {
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-            text-align: center;
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-        }
-
-        .room-info h2 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-        }
-
-        .room-info p {
-            font-size: 1rem;
-            opacity: 0.9;
-        }
-
-        .total-summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-
-        .summary-item {
-            background: #2D2D2D;
-            padding: 1.5rem;
-            border-radius: 12px;
-            text-align: center;
-            border: 1px solid #333333;
-        }
-
-        .summary-item h3 {
-            color: #CCCCCC;
-            font-size: 0.9rem;
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-            text-transform: uppercase;
-        }
-
-        .summary-item .amount {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #FFFFFF;
-        }
-
-        .summary-item.grand-total {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            color: #FFFFFF;
-        }
-
-        .summary-item.grand-total h3 {
-            color: #FFFFFF;
-            opacity: 0.9;
-        }
-
-        .results-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1.5rem 0;
-            background: #1E1E1E;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-        }
-
-        .results-table th {
-            background: #2D2D2D;
-            color: #FFFFFF;
-            padding: 1rem;
-            text-align: left;
-            font-weight: 600;
-            border-bottom: 2px solid #333333;
-        }
-
-        .results-table td {
-            padding: 1rem;
-            border-bottom: 1px solid #333333;
-            color: #CCCCCC;
-        }
-
-        .results-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .results-table tr:hover {
-            background: #252525;
-        }
-
-        .user-name {
-            font-weight: 600;
-            color: #FFFFFF;
-        }
-
-        .amount {
-            font-weight: 600;
-            color: #4CAF50;
-            font-size: 1.1rem;
-        }
-
-        .selected-items {
-            color: #CCCCCC;
-            font-size: 0.9rem;
-            max-width: 300px;
-            word-wrap: break-word;
-        }
-
-        .percentage {
-            color: #3F51B5;
-            font-weight: 600;
-        }
-
-        .action-buttons {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            margin-top: 2rem;
-            flex-wrap: wrap;
-        }
-
-        .btn {
-            padding: 0.8rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            transition: all 0.3s ease;
-            font-family: inherit;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            color: #FFFFFF;
-            box-shadow: 0 4px 15px rgba(63, 81, 181, 0.3);
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(63, 81, 181, 0.4);
-        }
-
-        .btn-secondary {
-            background: #333333;
-            color: #FFFFFF;
-            border: 2px solid #555555;
-        }
-
-        .btn-secondary:hover {
-            background: #555555;
-            border-color: #777777;
-            transform: translateY(-2px);
-        }
-
-        .btn-success {
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
-        }
-
-        .btn-success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
-        }
-
-
-        .breakdown-details {
-            margin-top: 2rem;
-        }
-
-        .breakdown-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-        }
-
-        .breakdown-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1rem;
-        }
-
-        .breakdown-item {
-            background: #1E1E1E;
-            border-radius: 12px;
-            border: 1px solid #333333;
-            overflow: hidden;
-        }
-
-        .breakdown-item-header {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            padding: 0.75rem 1rem;
-            font-weight: 700;
-            font-size: 1rem;
-            color: #FFFFFF;
-        }
-
-        .breakdown-item-body {
-            padding: 0.75rem 1rem;
-        }
-
-        /* Item-by-item split rows */
-        .item-split-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            padding: 0.35rem 0;
-            border-bottom: 1px solid #2D2D2D;
-            font-size: 0.88rem;
-            gap: 0.5rem;
-        }
-
-        .item-split-row:last-of-type {
-            border-bottom: none;
-        }
-
-        .item-split-name {
-            color: #CCCCCC;
-            flex: 1;
-        }
-
-        .item-split-calc {
-            color: #777;
-            font-size: 0.8rem;
-            white-space: nowrap;
-        }
-
-        .item-split-amount {
-            color: #FFFFFF;
-            font-weight: 600;
-            white-space: nowrap;
-        }
-
-        /* Charges / taxes section */
-        .breakdown-divider {
-            border: none;
-            border-top: 1px solid #333333;
-            margin: 0.6rem 0;
-        }
-
-        .breakdown-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.25rem 0;
-            font-size: 0.88rem;
-            color: #AAAAAA;
-        }
-
-        .breakdown-row .label { flex: 1; }
-        .breakdown-row .val { color: #CCCCCC; }
-
-        .breakdown-row.total {
-            font-weight: 700;
-            color: #4CAF50;
-            font-size: 1rem;
-            padding-top: 0.5rem;
-            margin-top: 0.25rem;
-            border-top: 1px solid #333333;
-        }
-
-        .breakdown-row.total .val { color: #4CAF50; }
-
-        @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
-            }
-
-            .total-summary {
-                grid-template-columns: 1fr;
-            }
-
-            .action-buttons {
-                flex-direction: column;
-                align-items: center;
-            }
-
-            .btn {
-                width: 100%;
-                max-width: 300px;
-                justify-content: center;
-            }
-
-            .results-table {
-                font-size: 0.9rem;
-            }
-
-            .results-table th,
-            .results-table td {
-                padding: 0.8rem;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="logo-banner">
-        <img src="{{ url_for('static', filename='images/trans_logo.png') }}" alt="Transparent Logo" class="trans-logo">
-    </div>
-
-    <div class="top-bar">
-        <h1>💰 Bill Bear Results</h1>
-    </div>
-
-    <div class="container">
-        <div class="room-info">
-            <h2>{{ room['room_name'] }}</h2>
-            <p>Room Code: {{ room_code }} | Host: {{ room['host_name'] }}</p>
-        </div>
-
-        {% if caller_is_host %}
-        <div id="hostRevertRow" style="display:flex; justify-content:flex-end; margin-bottom:1rem;">
-            <button id="revertCalcBtn" type="button"
-                    style="padding:0.7rem 1.25rem; border:2px solid #FF9800; background:transparent;
-                           color:#FFCC80; border-radius:8px; font-weight:700; cursor:pointer;
-                           box-shadow:0 2px 10px rgba(0,0,0,0.2);"
-                    title="Send everyone back to the selections page so they can edit their picks">
-                ⏪ Revert & Re-edit Selections
-            </button>
-        </div>
-        {% endif %}
-
-        <div class="total-summary">
-            <div class="summary-item">
-                <h3>Subtotal</h3>
-                <div class="amount">₹{{ bill_split.totals.subtotal }}</div>
-            </div>
-            <div class="summary-item">
-                <h3>Service Charge</h3>
-                <div class="amount">₹{{ bill_split.totals.service_charge }}</div>
-            </div>
-            <div class="summary-item">
-                <h3>Discount</h3>
-                <div class="amount">₹{{ bill_split.totals.discount }}</div>
-            </div>
-            <div class="summary-item">
-                <h3>Taxes (CGST + SGST{% if bill_split.totals.igst > 0 %} + IGST{% endif %})</h3>
-                <div class="amount">₹{{ bill_split.totals.cgst + bill_split.totals.sgst + bill_split.totals.igst }}</div>
-            </div>
-            <div class="summary-item grand-total">
-                <h3>Grand Total</h3>
-                <div class="amount">₹{{ bill_split.totals.grand_total }}</div>
-            </div>
-        </div>
-
-        {% if audit_warnings %}
-        <div class="card" style="padding:1rem 1.25rem;">
-            <h3 style="color:#FFFFFF; margin-bottom:0.75rem; font-size:1.1rem;">🧮 Math check</h3>
-            {% for w in audit_warnings %}
-            <div style="display:flex; gap:0.75rem; align-items:flex-start; padding:0.6rem 0; border-top:1px solid #2A2A2A;">
-                <span style="font-size:1.1rem; flex-shrink:0;">
-                    {% if w.severity == 'ok' %}✅{% elif w.severity == 'warn' %}⚠️{% elif w.severity == 'error' %}🔴{% else %}ℹ️{% endif %}
-                </span>
-                <div>
-                    <div style="font-weight:600; color:{% if w.severity == 'ok' %}#81C784{% elif w.severity == 'warn' %}#FFB74D{% elif w.severity == 'error' %}#EF5350{% else %}#90CAF9{% endif %};">
-                        {{ w.title }}
-                    </div>
-                    <div style="color:#CFD8DC; font-size:0.9rem; margin-top:0.2rem;">{{ w.detail }}</div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        <div class="card">
-            <h2 style="color: #FFFFFF; margin-bottom: 1.5rem; font-size: 1.3rem;">💸 Individual Bill Bear</h2>
-            <table class="results-table">
-                <thead>
-                    <tr>
-                        <th>User</th>
-                        <th>Selected Items</th>
-                        <th>Item Total</th>
-                        <th>Share %</th>
-                        <th>Final Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for user, details in bill_split.user_breakdown.items() %}
-                    <tr>
-                        <td class="user-name">{{ user }}</td>
-                        <td class="selected-items">
-                            {% if details.selected_items %}
-                                {{ details.selected_items | join(', ') }}
-                            {% else %}
-                                <em>No items selected</em>
-                            {% endif %}
-                        </td>
-                        <td class="amount">₹{{ details.item_total }}</td>
-                        <td class="percentage">{{ details.percentage }}%</td>
-                        <td class="amount">₹{{ details.final_amount }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        <div class="breakdown-details">
-            <h3 class="breakdown-title">📊 Detailed Breakdown</h3>
-            <div class="breakdown-grid">
-                {% for user, details in bill_split.user_breakdown.items() %}
-                <div class="breakdown-item">
-                    <div class="breakdown-item-header">{{ user }}</div>
-                    <div class="breakdown-item-body">
-
-                        {% if details.item_details %}
-                            {% for item in details.item_details %}
-                            <div class="item-split-row">
-                                <span class="item-split-name">{{ item.name }}</span>
-                                {% if item.shared_by > 1 %}
-                                <span class="item-split-calc">₹{{ "%.2f"|format(item.full_price) }} ÷ {{ item.shared_by }}</span>
-                                {% endif %}
-                                <span class="item-split-amount">₹{{ "%.2f"|format(item.your_share) }}</span>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <p style="color:#777; font-size:0.9rem; padding:0.5rem 0;">No items selected</p>
-                        {% endif %}
-
-                        <hr class="breakdown-divider">
-
-                        {% if details.service_charge > 0 %}
-                        <div class="breakdown-row">
-                            <span class="label">Service Charge (split)</span>
-                            <span class="val">₹{{ "%.2f"|format(details.service_charge) }}</span>
-                        </div>
-                        {% endif %}
-                        {% if details.cgst > 0 %}
-                        <div class="breakdown-row">
-                            <span class="label">CGST (split)</span>
-                            <span class="val">₹{{ "%.2f"|format(details.cgst) }}</span>
-                        </div>
-                        {% endif %}
-                        {% if details.sgst > 0 %}
-                        <div class="breakdown-row">
-                            <span class="label">SGST (split)</span>
-                            <span class="val">₹{{ "%.2f"|format(details.sgst) }}</span>
-                        </div>
-                        {% endif %}
-                        {% if details.igst > 0 %}
-                        <div class="breakdown-row">
-                            <span class="label">IGST (split)</span>
-                            <span class="val">₹{{ "%.2f"|format(details.igst) }}</span>
-                        </div>
-                        {% endif %}
-                        {% if details.discount > 0 %}
-                        <div class="breakdown-row">
-                            <span class="label">Discount</span>
-                            <span class="val">-₹{{ "%.2f"|format(details.discount) }}</span>
-                        </div>
-                        {% endif %}
-
-                        <div class="breakdown-row total">
-                            <span class="label">Amount Due</span>
-                            <span class="val">₹{{ "%.2f"|format(details.final_amount) }}</span>
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-
-        <div class="action-buttons">
-            {% if pdf_available %}
-            <a href="/room/{{ room_code }}/download" class="btn btn-primary">
-                ⬇️ Download PDF
-            </a>
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% set t = bill_split.totals %}
+{% set people = bill_split.user_breakdown %}
+{% set cats = {} %}
+{% for item in room['items'] %}{% set _ = cats.update({item.name: item.category}) %}{% endfor %}
+{% set problems = audit_warnings | rejectattr('severity', 'equalto', 'ok') | list %}
+{% block title %}The split, {{ room['room_name'] }}{% endblock %}
+{% block head %}
+<style>
+    .stub:nth-of-type(even) { margin-left: 10px; margin-right: -10px; transform: rotate(1.1deg); }
+    .stub:nth-of-type(3n) { transform: rotate(-0.8deg); }
+    .stub--me .paper, .stub--me .tear { --paper: #FFFDF4; }
+    .stub__total { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.55rem; font-weight: 600; white-space: nowrap; }
+    .check { display: flex; gap: 10px; align-items: flex-start; }
+    .check + .check { margin-top: 10px; padding-top: 10px; border-top: 2px dashed currentColor; }
+</style>
+{% endblock %}
+{% block content %}
+<main class="stack stack--lg">
+    <div class="row" style="align-items: flex-end">
+        <div class="grow">
+            <p class="eyebrow">{{ room['room_name'] }}</p>
+            {% if problems %}
+            <h1>Here's the split.</h1>
+            <p class="lede" style="margin-top: 8px">Something doesn't add up yet. See the note under the totals.</p>
+            {% else %}
+            <h1>All square.</h1>
+            <p class="lede" style="margin-top: 8px">
+                {{ people | length }} {{ 'share adds' if people | length == 1 else 'shares add' }} up to
+                <span class="mono" style="font-weight: 600">₹{{ "%.2f" | format(t.grand_total) }}</span>.
+            </p>
             {% endif %}
-            <a href="/" class="btn btn-success">
-                🏠 New Session
-            </a>
         </div>
-
+        <span class="bear-spot" style="flex-shrink: 0; transform: rotate(-5deg)">{{ ui.bear(104, 'Bill Bear holding the receipt') }}</span>
     </div>
 
+    <div class="stack" style="gap: 10px">
+        {% for user, d in people.items() %}
+        <section class="receipt stub{% if user == caller_name %} stub--me{% endif %}">
+            {% if not loop.first %}<div class="tear tear--top"></div>{% endif %}
+            <div class="paper stack" style="gap: 10px">
+                <div class="row row--between" style="align-items: baseline">
+                    <h2 style="font-size: 1.45rem; font-weight: 800; overflow-wrap: anywhere">{{ user }} pays</h2>
+                    <span class="stub__total">₹{{ "%.2f" | format(d.final_amount) }}</span>
+                </div>
+                <hr class="dash dash--ink">
+                <div class="lines">
+                    {% for item in d.item_details %}
+                    <div class="line">
+                        <span class="with-diet">{{ ui.diet(cats.get(item.name, 'other')) }}<span>{{ item.name }}
+                            {%- if item.shared_by > 1 %}<span class="line__calc">₹{{ "%.2f" | format(item.full_price) }} split {{ item.shared_by }} ways</span>{% endif %}</span></span>
+                        <span>{{ "%.2f" | format(item.your_share) }}</span>
+                    </div>
+                    {% else %}
+                    <p class="fineprint">Nothing picked.</p>
+                    {% endfor %}
+                    {% if d.service_charge > 0 %}<div class="line line--muted"><span>Service charge</span><span>{{ "%.2f" | format(d.service_charge) }}</span></div>{% endif %}
+                    {% if d.cgst > 0 %}<div class="line line--muted"><span>CGST</span><span>{{ "%.2f" | format(d.cgst) }}</span></div>{% endif %}
+                    {% if d.sgst > 0 %}<div class="line line--muted"><span>SGST</span><span>{{ "%.2f" | format(d.sgst) }}</span></div>{% endif %}
+                    {% if d.igst > 0 %}<div class="line line--muted"><span>IGST</span><span>{{ "%.2f" | format(d.igst) }}</span></div>{% endif %}
+                    {% if d.discount > 0 %}<div class="line line--muted"><span>Discount</span><span>-{{ "%.2f" | format(d.discount) }}</span></div>{% endif %}
+                </div>
+                <p class="fineprint">{% if user == caller_name %}Your share. {% endif %}{{ d.percentage }}% of the dishes</p>
+            </div>
+            <div class="tear"></div>
+        </section>
+        {% endfor %}
+    </div>
+
+    <section class="outline-box lines">
+        <div class="line line--muted"><span>Dishes</span><span>{{ "%.2f" | format(t.subtotal) }}</span></div>
+        {% if t.service_charge > 0 %}<div class="line line--muted"><span>Service charge</span><span>{{ "%.2f" | format(t.service_charge) }}</span></div>{% endif %}
+        {% if t.discount > 0 %}<div class="line line--muted"><span>Discount</span><span>-{{ "%.2f" | format(t.discount) }}</span></div>{% endif %}
+        {% if (t.cgst + t.sgst + t.igst) > 0 %}<div class="line line--muted"><span>{% if t.igst > 0 %}GST (CGST, SGST, IGST){% else %}CGST and SGST{% endif %}</span><span>{{ "%.2f" | format(t.cgst + t.sgst + t.igst) }}</span></div>{% endif %}
+        <hr class="dash" style="border-top-color: currentColor">
+        <div class="line line--total"><span>Bill total</span><span>₹{{ "%.2f" | format(t.grand_total) }}</span></div>
+    </section>
+
+    {% if problems %}
+    <section class="notice">
+        {% for w in problems %}
+        <div class="check"><div><strong>{{ w.title }}</strong><div>{{ w.detail }}</div></div></div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    <div class="actions actions--center">
+        {% if pdf_available %}
+        <a href="/room/{{ room_code }}/download" class="btn btn--primary btn--block">Download the split as PDF</a>
+        {% endif %}
+        <a href="/" class="btn btn--block">Split another bill</a>
+        {% if caller_is_host %}
+        <button id="revertCalcBtn" type="button" class="link-btn">Someone picked wrong? Reopen the picks</button>
+        {% endif %}
+    </div>
+</main>
+{% endblock %}
+{% block scripts %}
     <script>
-        /* ------------------------------------------------------------------ */
-        /* Host revert: take everyone back to the selections stage             */
-        /* ------------------------------------------------------------------ */
+        const REOPEN_LABEL = 'Someone picked wrong? Reopen the picks';
         const ROOM_CODE = {{ room_code | tojson }};
         const CALLER_NAME = {{ caller_name | tojson }};
         const CALLER_IS_HOST = {{ caller_is_host | tojson }};
@@ -558,10 +107,10 @@
         if (revertBtn) {
             revertBtn.addEventListener('click', async () => {
                 if (!confirm(
-                    'Send everyone back to the selections page? Each user\'s current picks will be pre-checked but editable.'
+                    'Send everyone back to pick again? Their current picks stay ticked and can be changed.'
                 )) return;
                 revertBtn.disabled = true;
-                revertBtn.textContent = '⏳ Reverting…';
+                revertBtn.textContent = 'Reopening…';
                 try {
                     const resp = await fetch(`/room/${ROOM_CODE}/host/reopen-selections`, {
                         method: 'POST',
@@ -574,9 +123,9 @@
                     });
                     const data = await resp.json().catch(() => null);
                     if (!resp.ok) {
-                        alert((data && data.message) || 'Could not revert.');
+                        alert((data && data.message) || 'Could not reopen the picks.');
                         revertBtn.disabled = false;
-                        revertBtn.textContent = '⏪ Revert & Re-edit Selections';
+                        revertBtn.textContent = REOPEN_LABEL;
                         return;
                     }
                     // Host goes to their own select-items; everyone else will be
@@ -588,9 +137,9 @@
                         window.location.reload();
                     }
                 } catch (err) {
-                    alert('Network error while reverting.');
+                    alert('Could not reach the server. Try again.');
                     revertBtn.disabled = false;
-                    revertBtn.textContent = '⏪ Revert & Re-edit Selections';
+                    revertBtn.textContent = REOPEN_LABEL;
                 }
             });
         }
@@ -624,5 +173,4 @@
             timer = setTimeout(tick, 10000);
         })();
     </script>
-</body>
-</html>
+{% endblock %}

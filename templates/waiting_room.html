@@ -1,567 +1,129 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Waiting Room - {{ room['room_name'] }}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% block title %}Waiting room, {{ room['room_name'] }}{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
+{% block content %}
+<div id="hostNoticeBanner" class="banner" style="display: none" role="alert">
+    <p id="hostNoticeText"></p>
+    <button id="hostNoticeAction" type="button" class="btn btn--small btn--honey">Action</button>
+</div>
 
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #121212;
-            color: #FFFFFF;
-            line-height: 1.6;
-            min-height: 100vh;
-        }
-
-        .trans-logo {
-            max-width: 150px;
-            height: auto;
-            display: block;
-            margin: 1rem auto;
-            opacity: 0.9;
-        }
-
-        .top-bar {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            padding: 1rem 0;
-            text-align: center;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .top-bar h1 {
-            font-size: clamp(1.5rem, 4vw, 2rem);
-            font-weight: 600;
-            color: #FFFFFF;
-            margin: 0;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 1rem;
-            animation: fadeIn 0.6s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .card {
-            background: #1E1E1E;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            border: 1px solid #333333;
-        }
-
-        .room-info {
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-            text-align: center;
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-        }
-
-        .room-info h2 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-        }
-
-        .room-info p {
-            font-size: 1rem;
-            opacity: 0.9;
-        }
-
-        .share-section {
-            background: #1E1E1E;
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-            border: 1px solid #333333;
-            text-align: center;
-        }
-
-        .share-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-        }
-
-        .qr-container {
-            display: inline-block;
-            padding: 1rem;
-            background: #FFFFFF;
-            border-radius: 12px;
-            margin: 1rem 0;
-            box-shadow: 0 0 20px rgba(63, 81, 181, 0.3);
-            border: 3px solid #3F51B5;
-        }
-
-        .qr-code {
-            width: 150px;
-            height: 150px;
-            border-radius: 8px;
-        }
-
-        .join-url {
-            background: #2D2D2D;
-            padding: 1rem;
-            border-radius: 8px;
-            margin: 1rem 0;
-            word-break: break-all;
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: #3F51B5;
-            border: 1px solid #333333;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .join-url-text {
-            flex: 1;
-        }
-
-        .copy-btn {
-            background: #333333;
-            color: #FFFFFF;
-            border: 2px solid #555555;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            cursor: pointer;
-            font-family: inherit;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        .copy-btn:hover {
-            background: #555555;
-            border-color: #777777;
-        }
-
-        .copy-btn.copied {
-            background: #4CAF50;
-            border-color: #4CAF50;
-        }
-
-        .status-section {
-            background: #1E1E1E;
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-            border: 1px solid #333333;
-        }
-
-        .status-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-
-        .status-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #FFFFFF;
-        }
-
-        .status-count {
-            background: #3F51B5;
-            color: #FFFFFF;
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 0.9rem;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: #333333;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 1.5rem;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #4CAF50 0%, #66BB6A 100%);
-            transition: width 0.5s ease;
-            border-radius: 10px;
-        }
-
-        .user-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 1rem;
-        }
-
-        .user-item {
-            display: flex;
-            align-items: center;
-            padding: 1rem;
-            border: 2px solid #333333;
-            border-radius: 8px;
-            background: #2D2D2D;
-            transition: all 0.3s ease;
-        }
-
-        .user-item.submitted {
-            border-color: #4CAF50;
-            background: rgba(76, 175, 80, 0.1);
-            box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
-        }
-
-        .user-item.pending {
-            border-color: #FF9800;
-            background: rgba(255, 152, 0, 0.1);
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
-
-        .status-icon {
-            font-size: 1.5rem;
-            margin-right: 1rem;
-        }
-
-        .user-name {
-            font-weight: 600;
-            flex: 1;
-            color: #FFFFFF;
-        }
-
-        .user-status {
-            font-size: 0.9rem;
-            color: #CCCCCC;
-            text-transform: uppercase;
-            font-weight: 500;
-            letter-spacing: 0.5px;
-        }
-
-        .host-controls {
-            background: linear-gradient(135deg, #FF4081 0%, #F06292 100%);
-            color: #FFFFFF;
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin: 1.5rem 0;
-            border-left: 4px solid #AD1457;
-        }
-
-        .warning-message {
-            margin-bottom: 1rem;
-        }
-
-        .warning-message h4 {
-            color: #FFFFFF;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-        }
-
-        .warning-message p {
-            color: rgba(255, 255, 255, 0.9);
-            margin: 0.25rem 0;
-        }
-
-        .force-complete-btn {
-            background: linear-gradient(135deg, #FF5722 0%, #FF7043 100%);
-            color: #FFFFFF;
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            min-height: 48px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        }
-
-        .force-complete-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(255, 87, 34, 0.4);
-        }
-
-        .force-complete-btn:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .force-complete-btn:active {
-            transform: translateY(0);
-        }
-
-        .waiting-message {
-            text-align: center;
-            padding: 2rem;
-            background: #2D2D2D;
-            border-radius: 12px;
-            margin-top: 1.5rem;
-            border: 1px solid #333333;
-        }
-
-        .waiting-message h3 {
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-            font-weight: 600;
-        }
-
-        .waiting-message p {
-            color: #CCCCCC;
-        }
-
-        .completion-message {
-            text-align: center;
-            padding: 2rem;
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-            border-radius: 12px;
-            margin-top: 1.5rem;
-            border: 2px solid #4CAF50;
-        }
-
-        .completion-message h3 {
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-            font-weight: 600;
-        }
-
-        .spinner {
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-top: 3px solid #3F51B5;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-right: 0.5rem;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .last-updated {
-            text-align: center;
-            color: #CCCCCC;
-            font-size: 0.9rem;
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid #333333;
-        }
-
-        .pulsing-dots {
-            display: inline-block;
-            animation: pulseDots 1.5s infinite;
-        }
-
-        @keyframes pulseDots {
-            0%, 20% { opacity: 1; }
-            50% { opacity: 0.5; }
-            80%, 100% { opacity: 1; }
-        }
-
-        @media (min-width: 768px) {
-            .container {
-                padding: 2rem;
-            }
-
-            .card {
-                padding: 2rem;
-            }
-
-            .user-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .status-header {
-                flex-wrap: nowrap;
-            }
-        }
-
-        @media (min-width: 1024px) {
-            .user-grid {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
-
-        /* Accessibility improvements */
-        button:focus {
-            outline: 3px solid #3F51B5;
-            outline-offset: 2px;
-        }
-
-        /* Loading state */
-        .loading {
-            opacity: 0.7;
-            pointer-events: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="logo-banner">
-        <img src="{{ url_for('static', filename='images/trans_logo.png') }}" alt="Transparent Logo" class="trans-logo">
+<main class="stack stack--lg">
+    <div>
+        <p class="eyebrow">{{ room['room_name'] }}</p>
+        <h1 id="headline">Waiting for everyone</h1>
+        <p class="lede" id="waitingDetail" style="margin-top: 8px">
+            {% if is_host %}When everyone has sent their picks, split the bill.{% else %}{{ room['host_name'] }} splits the bill once everyone has sent their picks. You'll be taken there automatically.{% endif %}
+        </p>
     </div>
 
-    <header class="top-bar">
-        <h1>⏳ Waiting Room</h1>
-    </header>
-
-    <!-- Host-action notifications (kicked / re-pick asked) -->
-    <div id="hostNoticeBanner"
-         style="display:none; position:fixed; top:0; left:0; right:0; z-index:1000;
-                padding:1rem 1.25rem; text-align:center;
-                box-shadow:0 4px 20px rgba(0,0,0,0.5); color:#fff;">
-        <span id="hostNoticeText" style="font-weight:600; display:block; margin-bottom:0.75rem; font-size:1rem;"></span>
-        <button id="hostNoticeAction" type="button"
-                style="padding:0.6rem 1.4rem; border:none; border-radius:6px;
-                       background:#fff; color:#3F51B5; font-weight:700;
-                       cursor:pointer; font-size:1rem;">
-            Action
-        </button>
+    {% set my_submitted = user_name in room.submitted_users %}
+    <div class="notice stack" id="pickCard" {% if my_submitted %}style="display: none"{% endif %}>
+        <strong>You haven't sent your picks yet.</strong>
+        <span>Tap what you had so the bill can be split{% if is_host %}. You can't split it until yours are in too{% endif %}.</span>
+        <a class="btn btn--honey" href="{{ url_for('select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
     </div>
 
-    <main class="container">
-        <div class="room-info">
-            <h2>{{ room['room_name'] }}</h2>
-            <p>Host: {{ room['host_name'] }}</p>
-            {% if is_host %}
-            <p><strong>👑 You are the host — finalize once everyone has submitted</strong></p>
-            {% endif %}
+    <div>
+        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
+        <section class="card ticket">
+            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
+            <div class="grow stack" style="gap: 6px">
+                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
+                <span class="ticket__code">{{ room_code }}</span>
+                <span id="joinUrl" hidden>{{ join_url }}</span>
+                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
+            </div>
+        </section>
+    </div>
+
+    <section class="stack">
+        <div class="row row--between">
+            <h2>At the table</h2>
+            <span class="small mono" id="statusCount"></span>
         </div>
-
-        {% set my_submitted = user_name in room.submitted_users %}
-        <div class="status-section" id="pickCard" style="border-left:4px solid #4CAF50;{% if my_submitted %} display:none;{% endif %}">
-            <h3 style="margin-bottom:0.5rem;">🛒 You haven't picked your items yet</h3>
-            <p style="color:#CFD8DC; margin-bottom:1rem;">Pick what you had so the bill can be split{% if is_host %} — you can't finalize until you've submitted too{% endif %}.</p>
-            <a href="{{ url_for('select_items', room_code=room_code, user_name=user_name) }}"
-               style="display:inline-block; padding:0.75rem 1.4rem; border-radius:8px; background:#4CAF50; color:#fff; font-weight:700; text-decoration:none;">
-                Pick my items
-            </a>
+        <div class="stack" id="userList" style="gap: 10px"></div>
+        <div class="seat" id="seatRow" hidden>
+            <span class="grow" id="seatText"></span>
+            {% if is_host %}<button type="button" class="link-btn" id="seatDropBtn">Not coming</button>{% endif %}
         </div>
-
-        <nav style="display:flex; gap:0.75rem; flex-wrap:wrap; justify-content:center; margin:0 0 1.5rem;">
-            <a href="{{ url_for('room_summary', room_code=room_code) }}"
-               style="padding:0.55rem 1rem; border:1px solid #555; border-radius:8px; color:#ECEFF1; text-decoration:none; font-size:0.9rem;">🏠 Room page</a>
-            {% if is_host %}
-            <a href="{{ url_for('edit_items', room_code=room_code) }}"
-               style="padding:0.55rem 1rem; border:1px solid #555; border-radius:8px; color:#ECEFF1; text-decoration:none; font-size:0.9rem;">✏️ Edit items</a>
-            {% endif %}
-        </nav>
-
-        <div class="share-section">
-            <h3 class="share-title">📱 Share Room</h3>
-            <p style="color: #CCCCCC; margin-bottom: 1rem;">Others can join using this QR code or link:</p>
-            
-            <div class="qr-container">
-                <img src="{{ qr_b64 }}" alt="QR Code for joining room" class="qr-code">
-            </div>
-            
-            <div class="join-url">
-                <span class="join-url-text" id="joinUrl">{{ join_url }}</span>
-                <button type="button" class="copy-btn" id="copyBtn">
-                    📋 Copy
-                </button>
-            </div>
-        </div>
-
-        <div class="status-section">
-            <div class="status-header">
-                <span class="status-title">Submission Status</span>
-                <span class="status-count" id="statusCount">0 / 0 submitted</span>
-            </div>
-
-            {% if is_host %}
-            <div id="numPeopleControl" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap;">
-                <span style="color:#CCCCCC; font-weight:500;">Expected people:</span>
-                <input type="number" id="numPeopleInput" min="1" max="50"
-                       value="{{ room.num_people }}"
-                       style="width:80px; padding:0.4rem 0.6rem; background:#2D2D2D; border:2px solid #333; border-radius:6px; color:#fff; font-size:0.95rem;">
-                <button type="button" id="numPeopleSaveBtn"
-                        style="padding:0.4rem 0.8rem; background:#3F51B5; color:#fff; border:none; border-radius:6px; font-size:0.9rem; font-weight:600; cursor:pointer;">
-                    Save
-                </button>
-                <span id="numPeopleStatus" style="color:#B0BEC5; font-size:0.85rem;"></span>
-            </div>
-            {% endif %}
-
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
-            </div>
-
-            <div class="user-grid" id="userList">
-                <!-- Users will be populated by JavaScript -->
-            </div>
-
-            <div class="last-updated">
-                <span class="spinner" id="spinner"></span>
-                Last updated: <span id="lastUpdated">Loading<span class="pulsing-dots">...</span></span>
-            </div>
-        </div>
-
-        <!-- Host Controls -->
         {% if is_host %}
+        <div class="row row--between">
+            <span style="font-weight: 600">People at the table</span>
+            <div class="stepper">
+                <button type="button" id="peopleLess" aria-label="One fewer person">-</button>
+                <output id="peopleCount" aria-live="polite">{{ room.num_people }}</output>
+                <button type="button" id="peopleMore" aria-label="One more person">+</button>
+            </div>
+        </div>
+        <p class="status-line small" id="numPeopleStatus" aria-live="polite"></p>
+        {% endif %}
+    </section>
+
+    {% if is_host %}
+    <section class="stack" id="hostControls">
+        <p class="notice" id="unclaimedWarning" style="display: none"></p>
+        <p id="finalizeDetail" style="font-weight: 600">Checking…</p>
+        <button type="button" class="btn btn--primary btn--block" id="finalizeBtn" disabled>Split the bill</button>
+        <p id="finalizeStatus" class="status-line" aria-live="polite"></p>
+        <div class="links">
+            <a class="textlink" href="{{ url_for('edit_items', room_code=room_code) }}">Edit dishes</a>
+        </div>
         {% if host_link %}
-        <div class="share-section" id="hostLinkBox">
-            <h3 class="share-title">🔑 Your host link</h3>
-            <p style="color:#CCCCCC; margin-bottom:0.75rem; font-size:0.9rem;">
-                Save this somewhere private (e.g. message it to yourself). If your phone dies or you switch
-                browsers, open it to get host controls back. Don't share it.
-            </p>
-            <div class="join-url">
-                <span class="join-url-text" id="hostLinkText" style="filter:blur(4px);" title="Tap Copy to copy">{{ host_link }}</span>
-                <button type="button" class="copy-btn" id="copyHostLinkBtn">📋 Copy</button>
+        <details class="fold outline-box" id="hostLinkBox">
+            <summary>Save your host link</summary>
+            <p class="small" style="margin-bottom: 10px">Keep this somewhere private, like a message to yourself. If your phone dies or you switch browsers, open it to get host controls back. Don't share it.</p>
+            <div class="row">
+                <span class="secret grow" id="hostLinkText">{{ host_link }}</span>
+                <button type="button" class="btn btn--small" id="copyHostLinkBtn">Copy</button>
             </div>
-        </div>
+        </details>
         {% endif %}
-        <div class="host-controls" id="hostControls">
-            <div class="warning-message">
-                <h4 id="finalizeHeadline">Finalize the bill</h4>
-                <p id="finalizeDetail">Checking…</p>
-                <p id="unclaimedWarning" style="display:none; color:#FFCC80;"></p>
-            </div>
-            <button type="button" class="force-complete-btn" id="finalizeBtn" disabled>
-                ✅ Finalize &amp; show split
-            </button>
-            <p id="finalizeStatus" style="margin-top:0.5rem; color:#FFCDD2; min-height:1.2rem;"></p>
-        </div>
-        {% endif %}
+    </section>
+    {% endif %}
 
-        <div class="waiting-message" id="waitingMessage">
-            <h3 id="waitingHeadline">Waiting for everyone to submit<span class="pulsing-dots">...</span></h3>
-            <p id="waitingDetail">{% if is_host %}When everyone has submitted, tap Finalize.{% else %}The host will finalize the bill once everyone has submitted. You'll be taken to the split automatically.{% endif %}</p>
-        </div>
+    <div id="completionMessage" class="notice" style="display: none">The bill is split. Opening it now.</div>
+    <p class="small soft center">Updated <span id="lastUpdated">just now</span></p>
+</main>
 
-        <div class="completion-message" id="completionMessage" style="display: none;">
-            <h3>✅ The bill is final!</h3>
-            <p>Opening the split<span class="pulsing-dots">...</span></p>
+{% if is_host %}
+<div class="scrim" id="sheetScrim" hidden></div>
+<div class="sheet" id="guestSheet" role="dialog" aria-modal="true" aria-labelledby="sheetName" hidden>
+    <div class="row" style="padding-bottom: 8px">
+        <div class="bear-avatar">{{ ui.bear(66) }}</div>
+        <div class="grow">
+            <h2 id="sheetName" style="font-size: 1.5rem; font-weight: 800"></h2>
+            <p class="small" id="sheetDetail" style="color: var(--ink-soft)"></p>
         </div>
-    </main>
+        <button type="button" class="icon-btn" id="sheetClose" aria-label="Close">{{ ui.icon('close') }}</button>
+    </div>
+    <button type="button" class="sheet__action" id="sheetRepick" data-action="revoke">
+        {{ ui.icon('repick', 26) }}
+        <span><b>Let them re-pick</b><span>Reopens their picks. Their phone asks them to choose again.</span></span>
+    </button>
+    <button type="button" class="sheet__action" data-action="reset">
+        {{ ui.icon('phone', 26) }}
+        <span><b>Move them to a new phone</b><span>Unlinks this device. They rejoin with the same name and keep their picks.</span></span>
+    </button>
+    <hr class="dash" style="margin: 6px 0">
+    <button type="button" class="sheet__action sheet__action--danger" id="sheetRemoveAsk">
+        {{ ui.icon('remove', 26) }}
+        <span><b>Remove from the room</b><span>Their picks are thrown away.</span></span>
+    </button>
+    <div class="sheet__confirm" id="sheetRemoveConfirm" hidden>
+        <span id="sheetRemoveText"></span>
+        <div class="row" style="gap: 10px">
+            <button type="button" class="btn btn--solid" data-action="remove">Remove</button>
+            <button type="button" class="btn btn--ghost" id="sheetRemoveCancel">Keep them</button>
+        </div>
+    </div>
+    <p class="status-line error" id="sheetStatus" aria-live="polite"></p>
+</div>
+{% endif %}
 
+<template id="pawTpl">{{ ui.paw(true) }}</template>
+{% endblock %}
+{% block scripts %}
     <script>
         const roomCode = {{ room_code | tojson }};
         const hostName = {{ room.host_name | tojson }};
@@ -573,20 +135,25 @@
         const SLOW_AFTER_MS = 10 * 60 * 1000;
         const STOP_AFTER_MS = 2 * 60 * 60 * 1000;
         const pageStart = Date.now();
+
         let pollTimer = null;
         let stopped = false;
         let prevMeSubmitted = null;
         let repickBannerShown = false;
+        let lastData = null;
+        let sheetUser = null;
 
-        function showHostBanner({ text, buttonLabel, onClick, background }) {
-            const banner = document.getElementById('hostNoticeBanner');
-            banner.style.background = background || '#3F51B5';
-            document.getElementById('hostNoticeText').textContent = text;
-            const btn = document.getElementById('hostNoticeAction');
+        const $ = (id) => document.getElementById(id);
+
+        function showHostBanner({ text, buttonLabel, onClick, danger }) {
+            const banner = $('hostNoticeBanner');
+            banner.classList.toggle('banner--danger', !!danger);
+            $('hostNoticeText').textContent = text;
+            const btn = $('hostNoticeAction');
             if (buttonLabel) {
                 btn.textContent = buttonLabel;
                 btn.onclick = onClick;
-                btn.style.display = 'inline-block';
+                btn.style.display = 'inline-flex';
             } else {
                 btn.style.display = 'none';
             }
@@ -595,7 +162,7 @@
         }
 
         function hideHostBanner() {
-            document.getElementById('hostNoticeBanner').style.display = 'none';
+            $('hostNoticeBanner').style.display = 'none';
         }
 
         async function postJson(url, body) {
@@ -610,114 +177,164 @@
             return { ok: resp.ok, data, status: resp.status };
         }
 
-        const ACTIONS = {
-            async remove(target) {
-                if (!confirm(`Remove "${target}" from the room? Their selection will be discarded.`)) return;
-                const r = await postJson(`/room/${roomCode}/host/remove-user`, { target_user: target });
-                if (!r.ok) alert((r.data && r.data.message) || 'Could not remove user.');
-            },
-            async revoke(target) {
-                if (!confirm(`Let "${target}" re-pick their items?`)) return;
-                const r = await postJson(`/room/${roomCode}/host/revoke/${encodeURIComponent(target)}`, {});
-                if (!r.ok) alert((r.data && r.data.message) || 'Could not revoke submission.');
-            },
-            async reset(target) {
-                if (!confirm(`Unlink "${target}"'s current device? They can then rejoin with the same name on a new phone and keep their picks.`)) return;
-                const r = await postJson(`/room/${roomCode}/host/reset-device`, { target_user: target });
-                if (!r.ok) alert((r.data && r.data.message) || 'Could not reset device.');
-            },
-            async edit() {
-                if (!confirm('Edit your selection? You will be taken back to the item picker.')) return;
-                const r = await postJson(`/room/${roomCode}/user/${encodeURIComponent(currentUser)}/revoke`, {});
-                if (r.ok && r.data && r.data.redirect) {
-                    window.location.href = r.data.redirect;
-                } else {
-                    alert((r.data && r.data.message) || 'Could not start editing.');
-                }
-            },
-        };
-
-        // Event delegation: user names are never interpolated into HTML or JS.
-        document.getElementById('userList').addEventListener('click', async (e) => {
-            const btn = e.target.closest('button[data-action]');
-            if (!btn) return;
-            const fn = ACTIONS[btn.dataset.action];
-            if (!fn) return;
-            btn.disabled = true;
-            try { await fn(btn.dataset.user); } finally { btn.disabled = false; updateStatus(); }
-        });
-
-        function makeButton(label, action, user, color) {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.textContent = label;
-            b.dataset.action = action;
-            b.dataset.user = user;
-            b.style.cssText = `padding:0.35rem 0.7rem; border:1px solid ${color}; background:transparent; color:#ECEFF1; border-radius:6px; font-size:0.8rem; cursor:pointer;`;
-            return b;
+        function joinNames(names) {
+            if (names.length <= 1) return names.join('');
+            return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
         }
 
-        function renderUserRow(user, submittedUsers, devices) {
-            const isSubmitted = submittedUsers.includes(user);
+        /* ------------------------------------------------------------------ */
+        /* People list. Names only ever go in through textContent.            */
+        /* ------------------------------------------------------------------ */
+
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text != null) node.textContent = text;
+            return node;
+        }
+
+        function renderUserRow(user, data) {
+            const isSubmitted = data.submitted_users.includes(user);
             const isTheHost = user === hostName;
             const isSelf = user === currentUser;
+            const row = el('div', 'person' + (isSubmitted ? '' : ' person--pending'));
 
-            const item = document.createElement('div');
-            item.className = `user-item ${isSubmitted ? 'submitted' : 'pending'}`;
-
-            const icon = document.createElement('span');
-            icon.className = 'status-icon';
-            icon.textContent = isSubmitted ? '✅' : '⏳';
-
-            const name = document.createElement('span');
-            name.className = 'user-name';
-            name.textContent = user + (isTheHost ? ' 👑' : '');
-            if (isSelf) {
-                const you = document.createElement('small');
-                you.style.color = '#B0BEC5';
-                you.textContent = ' (you)';
-                name.appendChild(you);
-            }
-            if (devices && devices[user] === false) {
-                const nd = document.createElement('small');
-                nd.style.color = '#FFCC80';
-                nd.textContent = ' (device reset — can rejoin)';
-                name.appendChild(nd);
+            if (isSubmitted) {
+                row.appendChild($('pawTpl').content.firstElementChild.cloneNode(true));
+            } else {
+                row.appendChild(el('span', 'paw paw--empty'));
             }
 
-            const status = document.createElement('span');
-            status.className = 'user-status';
-            status.textContent = isSubmitted ? 'submitted' : 'picking';
+            const who = el('div', 'grow');
+            who.appendChild(el('div', 'person__name', user));
+            const bits = [];
+            if (isSelf) bits.push('You');
+            if (isTheHost) bits.push(isSelf ? 'the host' : 'Host');
+            let meta = bits.length ? bits.join(', ') + '. ' : '';
+            meta += isSubmitted ? 'Picks sent.' : 'Still picking.';
+            if (data.devices && data.devices[user] === false) meta += ' Phone unlinked, can rejoin.';
+            who.appendChild(el('div', 'person__meta', meta));
+            row.appendChild(who);
 
-            const controls = document.createElement('div');
-            controls.style.cssText = 'display:flex; gap:0.4rem; flex-wrap:wrap; margin-left:auto;';
-            if (isSelf && isSubmitted) controls.appendChild(makeButton('✏️ Edit my selection', 'edit', user, '#3F51B5'));
-            if (isHost && !isTheHost) {
-                if (isSubmitted) controls.appendChild(makeButton('↺ Let re-pick', 'revoke', user, '#FF9800'));
-                controls.appendChild(makeButton('📱 Reset device', 'reset', user, '#90A4AE'));
-                controls.appendChild(makeButton('🗑️ Remove', 'remove', user, '#EF5350'));
+            if (isSelf && isSubmitted) {
+                const b = el('button', 'link-btn', 'Change');
+                b.type = 'button';
+                b.dataset.action = 'edit';
+                row.appendChild(b);
+            } else if (isHost && !isTheHost) {
+                const b = el('button', 'btn btn--small', 'Manage');
+                b.type = 'button';
+                b.dataset.manage = user;
+                row.appendChild(b);
             }
-
-            item.append(icon, name, status, controls);
-            return item;
+            return row;
         }
 
-        function renderFinalizePanel(data) {
-            const btn = document.getElementById('finalizeBtn');
-            if (!btn) return;
-            const detail = document.getElementById('finalizeDetail');
-            const unclaimed = document.getElementById('unclaimedWarning');
-            if (data.waiting_for > 0) {
-                detail.textContent = `Waiting for ${data.waiting_for} more ${data.waiting_for === 1 ? 'person' : 'people'} to join. ` +
-                    'If someone isn\'t coming, lower "Expected people" above.';
-            } else if (data.still_editing.length) {
-                detail.textContent = `${data.still_editing.join(', ')} ${data.still_editing.length === 1 ? 'is' : 'are'} still picking items.`;
+        $('userList').addEventListener('click', async (e) => {
+            const manage = e.target.closest('button[data-manage]');
+            if (manage) { openSheet(manage.dataset.manage); return; }
+            const edit = e.target.closest('button[data-action="edit"]');
+            if (!edit) return;
+            edit.disabled = true;
+            const r = await postJson(`/room/${roomCode}/user/${encodeURIComponent(currentUser)}/revoke`, {});
+            if (r.ok && r.data && r.data.redirect) {
+                window.location.href = r.data.redirect;
             } else {
-                detail.textContent = 'Everyone has submitted. Ready to finalize!';
+                edit.disabled = false;
+                alert((r.data && r.data.message) || 'Could not reopen your picks.');
             }
+        });
+
+        /* ------------------------------------------------------------------ */
+        /* Host: manage one guest                                              */
+        /* ------------------------------------------------------------------ */
+
+        const HOST_ACTIONS = {
+            remove: (target) => postJson(`/room/${roomCode}/host/remove-user`, { target_user: target }),
+            revoke: (target) => postJson(`/room/${roomCode}/host/revoke/${encodeURIComponent(target)}`, {}),
+            reset: (target) => postJson(`/room/${roomCode}/host/reset-device`, { target_user: target }),
+        };
+
+        function fillSheet() {
+            if (!sheetUser || !lastData) return;
+            if (!lastData.users.includes(sheetUser)) { closeSheet(); return; }
+            const sent = lastData.submitted_users.includes(sheetUser);
+            const picks = (lastData.picks && lastData.picks[sheetUser]) || [];
+            $('sheetName').textContent = sheetUser;
+            $('sheetDetail').textContent = !sent ? 'Joined, still picking.'
+                : picks.length ? 'Picks sent: ' + picks.join(', ')
+                : 'Picks sent: nothing picked.';
+            $('sheetRepick').hidden = !sent;
+            $('sheetRemoveText').textContent = `Remove ${sheetUser}? Their picks are thrown away.`;
+        }
+
+        function openSheet(user) {
+            sheetUser = user;
+            $('sheetRemoveAsk').hidden = false;
+            $('sheetRemoveConfirm').hidden = true;
+            $('sheetStatus').textContent = '';
+            fillSheet();
+            $('sheetScrim').hidden = false;
+            $('guestSheet').hidden = false;
+            $('sheetClose').focus();
+        }
+
+        function closeSheet() {
+            const sheet = $('guestSheet');
+            if (!sheet) return;
+            sheetUser = null;
+            sheet.hidden = true;
+            $('sheetScrim').hidden = true;
+        }
+
+        if (isHost) {
+            $('sheetClose').addEventListener('click', closeSheet);
+            $('sheetScrim').addEventListener('click', closeSheet);
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+            $('sheetRemoveAsk').addEventListener('click', () => {
+                $('sheetRemoveAsk').hidden = true;
+                $('sheetRemoveConfirm').hidden = false;
+            });
+            $('sheetRemoveCancel').addEventListener('click', () => {
+                $('sheetRemoveAsk').hidden = false;
+                $('sheetRemoveConfirm').hidden = true;
+            });
+            $('guestSheet').addEventListener('click', async (e) => {
+                const btn = e.target.closest('button[data-action]');
+                if (!btn || !sheetUser) return;
+                btn.disabled = true;
+                const r = await HOST_ACTIONS[btn.dataset.action](sheetUser);
+                btn.disabled = false;
+                if (r.ok) {
+                    closeSheet();
+                } else {
+                    $('sheetStatus').textContent = (r.data && r.data.message) || 'That did not work. Try again.';
+                }
+                updateStatus();
+            });
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Host: split the bill, change the head count                         */
+        /* ------------------------------------------------------------------ */
+
+        function renderFinalizePanel(data) {
+            const btn = $('finalizeBtn');
+            if (!btn) return;
+            const detail = $('finalizeDetail');
+            const unclaimed = $('unclaimedWarning');
+
+            if (data.waiting_for > 0) {
+                detail.textContent = `Waiting for ${data.waiting_for} more ${data.waiting_for === 1 ? 'person' : 'people'} to join.`;
+            } else if (data.still_editing.length) {
+                detail.textContent = `${joinNames(data.still_editing)} ${data.still_editing.length === 1 ? 'is' : 'are'} still picking.`;
+            } else {
+                detail.textContent = 'Everyone has sent their picks.';
+            }
+
             if (data.unclaimed_items.length) {
-                const list = data.unclaimed_items.slice(0, 6).join(', ') + (data.unclaimed_items.length > 6 ? '…' : '');
-                unclaimed.textContent = `⚠️ Nobody has picked: ${list}. Ask around before finalizing — unpicked items aren't charged to anyone.`;
+                const list = data.unclaimed_items.slice(0, 6).join(', ') + (data.unclaimed_items.length > 6 ? ' and more' : '');
+                unclaimed.textContent = `Nobody has picked: ${list}. Unpicked dishes aren't charged to anyone, so ask around first.`;
                 unclaimed.style.display = 'block';
             } else {
                 unclaimed.style.display = 'none';
@@ -726,37 +343,47 @@
         }
 
         async function finalizeBill() {
-            const btn = document.getElementById('finalizeBtn');
-            const status = document.getElementById('finalizeStatus');
-            const unclaimedVisible = document.getElementById('unclaimedWarning').style.display !== 'none';
-            if (unclaimedVisible && !confirm('Some items are not picked by anyone and will not be charged. Finalize anyway?')) return;
+            const btn = $('finalizeBtn');
+            const status = $('finalizeStatus');
+            const unclaimedVisible = $('unclaimedWarning').style.display !== 'none';
+            if (unclaimedVisible && !confirm('Some dishes are not picked by anyone and will not be charged. Split the bill anyway?')) return;
             btn.disabled = true;
-            status.textContent = 'Finalizing…';
+            status.textContent = 'Splitting the bill…';
             const r = await postJson(`/room/${roomCode}/finalize`, {});
             if (r.ok && r.data && r.data.redirect) {
                 window.location.href = r.data.redirect;
                 return;
             }
-            status.textContent = (r.data && r.data.message) || 'Could not finalize. Try again.';
+            status.classList.add('error');
+            status.textContent = (r.data && r.data.message) || 'Could not split the bill. Try again.';
             updateStatus();
         }
 
-        const finalizeBtn = document.getElementById('finalizeBtn');
-        if (finalizeBtn) finalizeBtn.addEventListener('click', finalizeBill);
-
-        async function saveNumPeople() {
-            const input = document.getElementById('numPeopleInput');
-            const status = document.getElementById('numPeopleStatus');
-            const val = parseInt(input.value, 10);
-            if (!Number.isFinite(val)) { status.textContent = 'Enter a number.'; return; }
-            status.textContent = 'Saving…';
+        async function saveNumPeople(val) {
+            const status = $('numPeopleStatus');
+            if (!Number.isFinite(val) || val < 1 || val > 50) return;
+            status.classList.remove('error');
+            status.textContent = '';
             const r = await postJson(`/room/${roomCode}/host/num-people`, { num_people: val });
-            status.textContent = r.ok ? 'Saved.' : ((r.data && r.data.message) || 'Failed.');
-            if (r.ok) setTimeout(() => { status.textContent = ''; }, 1500);
+            if (!r.ok) {
+                status.classList.add('error');
+                status.textContent = (r.data && r.data.message) || 'Could not change the head count.';
+            }
             updateStatus();
         }
-        const numPeopleSaveBtn = document.getElementById('numPeopleSaveBtn');
-        if (numPeopleSaveBtn) numPeopleSaveBtn.addEventListener('click', saveNumPeople);
+
+        if (isHost) {
+            $('finalizeBtn').addEventListener('click', finalizeBill);
+            const expected = () => (lastData ? lastData.expected_people : parseInt($('peopleCount').textContent, 10));
+            $('peopleLess').addEventListener('click', () => saveNumPeople(expected() - 1));
+            $('peopleMore').addEventListener('click', () => saveNumPeople(expected() + 1));
+            // "Not coming" drops the empty seats so the bill can be split.
+            $('seatDropBtn').addEventListener('click', () => { if (lastData) saveNumPeople(lastData.total_users); });
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Polling                                                             */
+        /* ------------------------------------------------------------------ */
 
         function stopPolling() {
             stopped = true;
@@ -768,7 +395,7 @@
             if (stopped || document.hidden) return;
             const age = Date.now() - pageStart;
             if (age > STOP_AFTER_MS) {
-                document.getElementById('lastUpdated').textContent = 'Paused — reload the page to refresh';
+                $('lastUpdated').textContent = 'a while ago. Reload the page to refresh';
                 return;
             }
             pollTimer = setTimeout(updateStatus, age > SLOW_AFTER_MS ? POLL_SLOW_MS : POLL_FAST_MS);
@@ -783,6 +410,21 @@
             }
         });
 
+        function renderHeadline(data) {
+            const pending = data.still_editing;
+            let text;
+            if (data.can_finalize) {
+                text = isHost ? 'Everyone is in' : `Waiting on ${hostName} to split the bill`;
+            } else if (pending.length && pending.length <= 2 && data.waiting_for === 0) {
+                const others = pending.filter(n => n !== currentUser);
+                text = others.length === pending.length ? `Waiting on ${joinNames(pending)}`
+                    : others.length ? `Waiting on you and ${joinNames(others)}` : 'Waiting on you';
+            } else {
+                text = `${data.submitted_count} of ${data.expected_people} have sent their picks`;
+            }
+            $('headline').textContent = text;
+        }
+
         async function updateStatus() {
             if (pollTimer) clearTimeout(pollTimer);
             pollTimer = null;
@@ -790,7 +432,7 @@
                 const resp = await fetch(`/room/${roomCode}/status`, { credentials: 'same-origin' });
                 if (resp.status === 404) {
                     stopPolling();
-                    showHostBanner({ text: 'This room has expired.', buttonLabel: 'Back to home', onClick: () => { window.location.href = '/'; }, background: '#EF5350' });
+                    showHostBanner({ text: 'This room has expired.', buttonLabel: 'Go to home', onClick: () => { window.location.href = '/'; }, danger: true });
                     return;
                 }
                 const data = await resp.json();
@@ -798,40 +440,37 @@
 
                 if (data.finalized) {
                     stopPolling();
-                    document.getElementById('waitingMessage').style.display = 'none';
-                    document.getElementById('completionMessage').style.display = 'block';
+                    $('completionMessage').style.display = 'block';
                     window.location.href = `/room/${roomCode}/results`;
                     return;
                 }
 
-                // This device is no longer linked: removed by host, or device reset.
+                // This device is no longer linked: removed by host, or moved to a new phone.
                 if (!data.caller_name) {
                     stopPolling();
                     const removed = !data.users.includes(currentUser);
                     showHostBanner({
                         text: removed
-                            ? '👋 The host removed you from this room.'
-                            : '📱 This device was unlinked by the host. Rejoin with your name to continue.',
-                        buttonLabel: removed ? 'Back to home' : 'Rejoin',
+                            ? 'The host removed you from this room.'
+                            : 'The host unlinked this phone. Join again with your name to carry on.',
+                        buttonLabel: removed ? 'Go to home' : 'Join again',
                         onClick: () => { window.location.href = removed ? '/' : `/join/${roomCode}`; },
-                        background: '#EF5350',
+                        danger: true,
                     });
                     return;
                 }
 
-                const users = data.users;
-                const submittedUsers = data.submitted_users;
-                const meSubmitted = submittedUsers.includes(currentUser);
+                lastData = data;
+                const meSubmitted = data.submitted_users.includes(currentUser);
 
                 if (prevMeSubmitted === true && !meSubmitted && !repickBannerShown) {
                     repickBannerShown = true;
                     showHostBanner({
-                        text: '✏️ Your selection was reopened (the host asked you to re-pick, or the items changed).',
-                        buttonLabel: 'Re-pick now',
+                        text: 'Your picks were reopened. The host asked you to pick again, or the dishes changed.',
+                        buttonLabel: 'Pick again',
                         onClick: () => {
                             window.location.href = `/room/${roomCode}/user/${encodeURIComponent(currentUser)}/select-items`;
                         },
-                        background: '#FF9800',
                     });
                 }
                 if (prevMeSubmitted === false && meSubmitted) {
@@ -839,26 +478,23 @@
                     hideHostBanner();
                 }
                 prevMeSubmitted = meSubmitted;
-                document.getElementById('pickCard').style.display = meSubmitted ? 'none' : 'block';
+                $('pickCard').style.display = meSubmitted ? 'none' : 'flex';
 
-                document.getElementById('statusCount').textContent =
-                    `${submittedUsers.length} / ${data.expected_people} submitted`;
-                const pct = data.expected_people > 0 ? (submittedUsers.length / data.expected_people) * 100 : 0;
-                document.getElementById('progressFill').style.width = Math.min(100, pct) + '%';
+                renderHeadline(data);
+                $('statusCount').textContent = `${data.submitted_count}/${data.expected_people} sent`;
+                $('userList').replaceChildren(...data.users.map(u => renderUserRow(u, data)));
 
-                const userList = document.getElementById('userList');
-                userList.replaceChildren(...users.map(u => renderUserRow(u, submittedUsers, data.devices)));
+                $('seatRow').hidden = data.waiting_for === 0;
+                $('seatText').textContent = data.waiting_for === 1 ? '1 seat still empty' : `${data.waiting_for} seats still empty`;
+                const count = $('peopleCount');
+                if (count) count.textContent = data.expected_people;
 
                 renderFinalizePanel(data);
-                if (!isHost) {
-                    document.getElementById('waitingHeadline').textContent = data.can_finalize
-                        ? 'Everyone has submitted — waiting for the host to finalize'
-                        : 'Waiting for everyone to submit';
-                }
-                document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+                fillSheet();
+                $('lastUpdated').textContent = 'at ' + new Date().toLocaleTimeString();
             } catch (error) {
                 console.error('Error fetching status:', error);
-                document.getElementById('lastUpdated').textContent = 'Connection problem — retrying';
+                $('lastUpdated').textContent = 'a moment ago. Connection problem, retrying';
             } finally {
                 schedulePoll();
             }
@@ -870,7 +506,7 @@
             function done(ok) {
                 const original = btn.dataset.label || btn.textContent;
                 btn.dataset.label = original;
-                btn.textContent = ok ? '✅ Copied!' : '❌ Failed';
+                btn.textContent = ok ? 'Copied' : 'Could not copy';
                 setTimeout(() => { btn.textContent = original; }, 2000);
             }
             if (navigator.clipboard && window.isSecureContext) {
@@ -891,16 +527,11 @@
             }
         }
 
-        function copyToClipboard() {
-            copyText(document.getElementById('joinUrl').textContent.trim(), document.getElementById('copyBtn'));
-        }
-        document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
 
-        const copyHostLinkBtn = document.getElementById('copyHostLinkBtn');
+        $('copyBtn').addEventListener('click', () => copyText($('joinUrl').textContent.trim(), $('copyBtn')));
+        const copyHostLinkBtn = $('copyHostLinkBtn');
         if (copyHostLinkBtn) {
-            copyHostLinkBtn.addEventListener('click', () =>
-                copyText(document.getElementById('hostLinkText').textContent.trim(), copyHostLinkBtn));
+            copyHostLinkBtn.addEventListener('click', () => copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
         }
     </script>
-</body>
-</html>
+{% endblock %}

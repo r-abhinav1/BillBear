@@ -1,457 +1,111 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Select Items - {{ room['room_name'] }}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #121212;
-            color: #FFFFFF;
-            line-height: 1.6;
-            min-height: 100vh;
-        }
-
-        .top-bar {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            padding: 1rem 0;
-            text-align: center;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .top-bar h1 {
-            font-size: clamp(1.5rem, 4vw, 2rem);
-            font-weight: 600;
-            color: #FFFFFF;
-            margin: 0;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 1rem;
-            animation: fadeIn 0.6s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .card {
-            background: #1E1E1E;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            border: 1px solid #333333;
-        }
-
-        .room-info {
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-            text-align: center;
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-        }
-
-        .room-info h2 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-        }
-
-        .user-info {
-            background: linear-gradient(135deg, #FF4081 0%, #F06292 100%);
-            color: #FFFFFF;
-            text-align: center;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-        }
-
-        .user-info h3 {
-            font-size: 1.2rem;
-            font-weight: 600;
-        }
-
-        .instructions {
-            background: #2D2D2D;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-            border-left: 4px solid #3F51B5;
-        }
-
-        .instructions p {
-            margin: 0;
-            color: #CCCCCC;
-            font-weight: 500;
-        }
-
-        .items-container {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 1rem;
-        }
-
-        .item-row {
-            display: flex;
-            align-items: center;
-            padding: 1rem;
-            background: #2D2D2D;
-            border: 2px solid #333333;
-            border-radius: 8px;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            min-height: 60px;
-        }
-
-        .item-row:hover {
-            border-color: #3F51B5;
-            background: #333333;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(63, 81, 181, 0.2);
-        }
-
-        .item-row.selected {
-            border-color: #4CAF50;
-            background: rgba(76, 175, 80, 0.1);
-            box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
-        }
-
-        .item-checkbox {
-            width: 20px;
-            height: 20px;
-            margin-right: 1rem;
-            accent-color: #4CAF50;
-            transform: scale(1.2);
-        }
-
-        .item-details {
-            flex: 1;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .item-name {
-            font-weight: 600;
-            color: #FFFFFF;
-            font-size: 1rem;
-        }
-
-        .item-price {
-            font-weight: 700;
-            color: #4CAF50;
-            font-size: 1.1rem;
-        }
-
-        .btn {
-            display: inline-block;
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 1rem;
-            text-decoration: none;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            min-height: 48px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            color: #FFFFFF;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(63, 81, 181, 0.4);
-        }
-
-        .btn-primary:disabled {
-            background: #555555;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .btn-success {
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-        }
-
-        .btn-success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
-        }
-
-        .actions {
-            display: flex;
-            gap: 0.75rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-top: 2rem;
-            position: sticky;
-            bottom: 0;
-            z-index: 100;
-            padding: 0.75rem;
-            background: rgba(18, 18, 18, 0.96);
-            border-top: 1px solid #333333;
-            border-radius: 12px 12px 0 0;
-        }
-
-        .section-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-            text-align: center;
-        }
-
-        .selected-count {
-            background: #3F51B5;
-            color: #FFFFFF;
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-            text-align: center;
-            display: inline-block;
-        }
-
-
-        .no-items {
-            text-align: center;
-            padding: 3rem;
-            color: #CCCCCC;
-        }
-
-        .no-items h3 {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-            color: #FFFFFF;
-        }
-
-        @media (min-width: 768px) {
-            .container {
-                padding: 2rem;
-            }
-
-            .card {
-                padding: 2rem;
-            }
-
-            .items-container {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .actions {
-                justify-content: flex-end;
-            }
-        }
-
-        @media (min-width: 1024px) {
-            .items-container {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
-
-        /* Loading animation */
-        .loading {
-            opacity: 0.7;
-            pointer-events: none;
-        }
-
-        .loading .btn-primary {
-            position: relative;
-            color: transparent;
-        }
-
-        .loading .btn-primary::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 20px;
-            height: 20px;
-            border: 2px solid #FFFFFF;
-            border-top: 2px solid transparent;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            transform: translate(-50%, -50%);
-        }
-
-        @keyframes spin {
-            0% { transform: translate(-50%, -50%) rotate(0deg); }
-            100% { transform: translate(-50%, -50%) rotate(360deg); }
-        }
-
-        /* Accessibility improvements */
-        input:focus, button:focus, a:focus {
-            outline: 3px solid #3F51B5;
-            outline-offset: 2px;
-        }
-
-        /* Custom checkbox styling */
-        .item-checkbox {
-            appearance: none;
-            width: 20px;
-            height: 20px;
-            border: 2px solid #555555;
-            border-radius: 4px;
-            position: relative;
-            cursor: pointer;
-        }
-
-        .item-checkbox:checked {
-            background: #4CAF50;
-            border-color: #4CAF50;
-        }
-
-        .item-checkbox:checked::after {
-            content: '✓';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: #FFFFFF;
-            font-size: 12px;
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <header class="top-bar">
-        <h1>🛒 Select Your Items</h1>
-    </header>
-
-    <main class="container">
-        <div class="room-info">
-            <h2>{{ room['room_name'] }}</h2>
-            <p>Host: {{ room['host_name'] }}</p>
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% set LABELS = {'veg': 'Veg', 'nonveg': 'Non-veg', 'egg': 'Egg', 'alcohol': 'Alcohol'} %}
+{% block title %}Tap what you had, {{ room['room_name'] }}{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
+{% block head %}<style>form.loading .receipt { opacity: 0.6; pointer-events: none; }</style>{% endblock %}
+{% block content %}
+<main class="stack has-paybar">
+    <div class="row">
+        <div class="bear-avatar">{{ ui.bear(66) }}</div>
+        <div class="grow">
+            <p class="eyebrow">{{ room['room_name'] }}, hosted by {{ room['host_name'] }}</p>
+            <h1 style="font-size: 1.75rem">{{ user_name }}, tap what you had</h1>
         </div>
+    </div>
+    <p>Shared a dish? Everyone who had some taps it, and the price splits between you.</p>
 
-        <div class="user-info">
-            <h3>👋 Welcome, {{ user_name }}!</h3>
-            <p style="margin-top:0.5rem; font-size:0.9rem;">
-                <a href="{{ url_for('room_summary', room_code=room_code) }}" style="color:#9FA8DA;">🏠 Room page</a>
-                &nbsp;·&nbsp;
-                <a href="{{ url_for('waiting_room', room_code=room_code, user_name=user_name) }}" style="color:#9FA8DA;">👥 See who's done</a>
-            </p>
-        </div>
+    {% if room['items'] %}
+    {% set present = room['items'] | map(attribute='category') | list %}
+    {% if present | select('in', LABELS) | list %}
+    <div class="chips" role="group" aria-label="Show dishes by type">
+        <button type="button" class="chip" data-filter="all" aria-pressed="true">All <span class="mono">{{ room['items'] | length }}</span></button>
+        {% for key, label in LABELS.items() %}{% if key in present %}
+        <button type="button" class="chip" data-filter="{{ key }}" aria-pressed="false">{{ ui.diet(key, false) }} {{ label }} <span class="mono">{{ present | select('equalto', key) | list | length }}</span></button>
+        {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
 
-        <div class="instructions">
-            <p>🎯 Select the items you consumed from the bill. You'll be charged proportionally for shared items.</p>
-        </div>
-
-        <form method="POST" id="selectionForm">
-            <div class="card">
-                <div class="selected-count" id="selectedCount">
-                    0 items selected
+    <form method="POST" id="selectionForm" class="stack">
+        {% if room['items'] %}
+        <section class="receipt">
+            <div class="paper paper--tight">
+                {% for item in room['items'] %}
+                <label class="pick item-row" for="item_{{ loop.index }}" data-category="{{ item.category }}">
+                    <input type="checkbox" id="item_{{ loop.index }}" name="selected_items" value="{{ item.id }}"
+                           class="item-checkbox" data-amount="{{ item.amount if item.amount is not none else 0 }}"
+                           {% if item.id in (pre_selected or []) %}checked{% endif %} onchange="updateSelection()">
+                    {{ ui.paw(false) }}
+                    <span class="with-diet grow">{{ ui.diet(item.category) }}<span class="pick__name">{{ item.name }}</span></span>
+                    <span class="pick__price">{{ item.price }}</span>
+                </label>
+                {% endfor %}
+                <p class="fineprint" id="emptyFilter" hidden style="padding: 14px 10px">No dishes of this type on the bill.</p>
+                <div class="row row--between" style="padding: 6px 10px 0">
+                    <button type="button" class="link-btn" onclick="selectAll()">Select all shown</button>
+                    <button type="button" class="link-btn" onclick="clearAll()">Clear my picks</button>
                 </div>
-                
-                <h3 class="section-title">Available Items</h3>
-                
-                {% if room['items'] %}
-                <div class="items-container">
-                    {% for item in room['items'] %}
-                    <label class="item-row" for="item_{{ loop.index }}">
-                        <input type="checkbox"
-                               id="item_{{ loop.index }}"
-                               name="selected_items"
-                               value="{{ item.id }}"
-                               class="item-checkbox"
-                               {% if item.id in (pre_selected or []) %}checked{% endif %}
-                               onchange="updateSelection()">
-                        <div class="item-details">
-                            <span class="item-name">{{ item.name }}</span>
-                            <span class="item-price">{{ item.price }}</span>
-                        </div>
-                    </label>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div class="no-items">
-                    <h3>No Items Available</h3>
-                    <p>The host hasn't added any items yet.</p>
-                </div>
-                {% endif %}
             </div>
+            <div class="tear"></div>
+        </section>
+        {% else %}
+        <div class="notice">The host hasn't added any dishes yet. Check back in a moment.</div>
+        {% endif %}
 
-            <input type="hidden" name="submission_id" id="submission_id" value="">
-            <input type="hidden" name="ajax" value="1">
+        <input type="hidden" name="submission_id" id="submission_id" value="">
+        <input type="hidden" name="ajax" value="1">
+        <div id="submitStatus" class="status-line center" aria-live="polite"></div>
 
-            <div class="actions">
-                <button type="submit" class="btn btn-success" id="submitBtn">
-                    ✅ Submit (<span id="submitCount">0</span>)
-                </button>
-                <button type="button" class="btn btn-primary" onclick="selectAll()">
-                    ☑️ Select All
-                </button>
-                <button type="button" class="btn btn-primary" onclick="clearAll()">
-                    ❌ Clear All
-                </button>
+        <div class="paybar">
+            <div>
+                <div class="paybar__count" id="selectedCount">0 dishes, before tax</div>
+                <div class="paybar__total" id="selectedTotal">₹0</div>
             </div>
-            <div id="submitStatus" style="margin-top:1rem; text-align:center; min-height:1.4rem; color:#B0BEC5;"></div>
-        </form>
-
-    </main>
-
+            <button type="submit" class="btn" id="submitBtn">Send my picks</button>
+        </div>
+    </form>
+</main>
+{% endblock %}
+{% block scripts %}
     <script>
+        const boxes = () => Array.from(document.querySelectorAll('input[name="selected_items"]'));
+
         function updateSelection() {
-            const checkboxes = document.querySelectorAll('input[name="selected_items"]:checked');
-            const count = checkboxes.length;
-            const countText = `${count} item${count !== 1 ? 's' : ''} selected`;
-            
-            document.getElementById('selectedCount').textContent = countText;
-            document.getElementById('submitCount').textContent = `${count} item${count !== 1 ? 's' : ''}`;
-            
-            // Update item row styling
-            document.querySelectorAll('.item-row').forEach(row => {
-                const checkbox = row.querySelector('.item-checkbox');
-                if (checkbox.checked) {
-                    row.classList.add('selected');
-                } else {
-                    row.classList.remove('selected');
-                }
-            });
-            
-            // Enable/disable submit button
+            const picked = boxes().filter(b => b.checked);
+            const sum = picked.reduce((s, b) => s + (parseFloat(b.dataset.amount) || 0), 0);
+            document.getElementById('selectedCount').textContent =
+                `${picked.length} dish${picked.length === 1 ? '' : 'es'}, before tax`;
+            document.getElementById('selectedTotal').textContent =
+                '₹' + sum.toLocaleString('en-IN', { maximumFractionDigits: 2 });
         }
-        
+
+        // "Select all" only touches the dishes the current filter shows.
         function selectAll() {
-            const checkboxes = document.querySelectorAll('input[name="selected_items"]');
-            checkboxes.forEach(checkbox => {
-                checkbox.checked = true;
-            });
+            boxes().forEach(b => { if (!b.closest('.pick').hidden) b.checked = true; });
             updateSelection();
         }
-        
+
         function clearAll() {
-            const checkboxes = document.querySelectorAll('input[name="selected_items"]');
-            checkboxes.forEach(checkbox => {
-                checkbox.checked = false;
-            });
+            boxes().forEach(b => { b.checked = false; });
             updateSelection();
         }
-        
+
+        // Filtering only hides rows; picks in hidden rows still count.
+        document.querySelectorAll('.chip[data-filter]').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const filter = chip.dataset.filter;
+                document.querySelectorAll('.chip[data-filter]').forEach(c =>
+                    c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'));
+                let shown = 0;
+                document.querySelectorAll('.pick').forEach(row => {
+                    row.hidden = filter !== 'all' && row.dataset.category !== filter;
+                    if (!row.hidden) shown++;
+                });
+                document.getElementById('emptyFilter').hidden = shown > 0;
+            });
+        });
+
         /* ------------------------------------------------------------------ */
         /* Idempotent, resilient submit                                        */
         /* ------------------------------------------------------------------ */
@@ -486,9 +140,8 @@
         function setStatus(text, type) {
             const el = document.getElementById('submitStatus');
             el.textContent = text || '';
-            el.style.color = type === 'error' ? '#EF5350'
-                           : type === 'success' ? '#66BB6A'
-                           : '#B0BEC5';
+            el.classList.toggle('error', type === 'error');
+            el.classList.toggle('success', type === 'success');
         }
 
         function setLoading(on) {
@@ -519,7 +172,7 @@
         document.getElementById('selectionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             if (document.querySelectorAll('input[name="selected_items"]:checked').length === 0
-                && !confirm("You haven't picked anything, so you'll owe ₹0. Submit anyway?")) {
+                && !confirm("You haven't picked anything, so you'll owe ₹0. Send anyway?")) {
                 return;
             }
             const sid = ensureSubmissionId();
@@ -527,7 +180,7 @@
             const data = new FormData(form);
 
             setLoading(true);
-            setStatus('Submitting…');
+            setStatus('Sending your picks…');
 
             try {
                 const resp = await fetch(form.action || window.location.pathname, {
@@ -542,49 +195,46 @@
 
                 if (resp.ok && json && json.status === 'success') {
                     clearSubmissionId();
-                    setStatus('Submitted. Redirecting…', 'success');
+                    setStatus('Picks sent.', 'success');
                     window.location.href = json.redirect;
                     return;
                 }
 
                 // Unexpected response — before telling the user it failed,
                 // ask the server whether our submission landed anyway.
-                setStatus('Checking whether your submission was saved…');
+                setStatus('Checking whether your picks were saved…');
                 const my = await checkMyStatus();
                 if (my && my.status === 'success' && my.submitted
                     && my.submission_id && my.submission_id === sid) {
                     clearSubmissionId();
-                    setStatus('Your submission was saved. Redirecting…', 'success');
+                    setStatus('Your picks were saved.', 'success');
                     window.location.href = my.redirect;
                     return;
                 }
 
                 setLoading(false);
-                const msg = (json && json.message) || `Submit failed (HTTP ${resp.status}). Tap Submit to retry.`;
+                const msg = (json && json.message) || `Could not send your picks (HTTP ${resp.status}). Tap Send my picks to retry.`;
                 setStatus(msg, 'error');
             } catch (netErr) {
                 // True network error (offline, CORS, DNS). Check status before
                 // alarming the user — the POST may have reached the server.
-                setStatus('Network hiccup — verifying with server…');
+                setStatus('Connection dropped. Checking whether your picks were saved…');
                 const my = await checkMyStatus();
                 if (my && my.status === 'success' && my.submitted
                     && my.submission_id && my.submission_id === sid) {
                     clearSubmissionId();
-                    setStatus('Your submission was saved. Redirecting…', 'success');
+                    setStatus('Your picks were saved.', 'success');
                     window.location.href = my.redirect;
                     return;
                 }
                 setLoading(false);
-                setStatus('Could not reach the server. Check your connection and tap Submit again.', 'error');
+                setStatus('Could not reach the server. Check your connection and tap Send my picks again.', 'error');
             }
         });
 
-        // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
             ensureSubmissionId();
             updateSelection();
         });
     </script>
-</body>
-</html>
-  
+{% endblock %}

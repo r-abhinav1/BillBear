@@ -1,580 +1,166 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Room Summary - {{ room.room_name }}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-         box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #121212;
-            color: #FFFFFF;
-            line-height: 1.6;
-            min-height: 100vh;
-        }
-
-        .trans-logo {
-            max-width: 150px;
-            height: auto;
-            display: block;
-            margin: 1rem auto;
-            opacity: 0.9;
-        }
-
-        .top-bar {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            padding: 1rem 0;
-            text-align: center;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .top-bar h1 {
-            font-size: clamp(1.5rem, 4vw, 2rem);
-            font-weight: 600;
-            color: #FFFFFF;
-            margin: 0;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 1rem;
-            animation: fadeIn 0.6s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .card {
-            background: #1E1E1E;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            border: 1px solid #333333;
-        }
-
-        .room-info {
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-            text-align: center;
-            padding: 2rem;
-            border-radius: 12px;
-            margin-bottom: 2rem;
-        }
-
-        .room-info h2 {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-            font-weight: 700;
-        }
-
-        .room-info p {
-            font-size: 1.1rem;
-            opacity: 0.9;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-
-        .info-item {
-            background: #2D2D2D;
-            padding: 1.5rem;
-            border-radius: 8px;
-            border: 1px solid #333333;
-            text-align: center;
-        }
-
-        .info-label {
-            font-weight: 600;
-            color: #CCCCCC;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.5rem;
-        }
-
-        .info-value {
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: #FFFFFF;
-        }
-
-        .qr-section {
-            text-align: center;
-            background: #1E1E1E;
-            padding: 2rem;
-            border-radius: 12px;
-            margin-bottom: 2rem;
-            border: 1px solid #333333;
-        }
-
-        .qr-container {
-            display: inline-block;
-            padding: 1rem;
-            background: #FFFFFF;
-            border-radius: 12px;
-            box-shadow: 0 0 20px rgba(63, 81, 181, 0.3);
-            border: 3px solid #3F51B5;
-            animation: glow 2s ease-in-out infinite alternate;
-        }
-
-        @keyframes glow {
-            from { box-shadow: 0 0 20px rgba(63, 81, 181, 0.3); }
-            to { box-shadow: 0 0 30px rgba(63, 81, 181, 0.6); }
-        }
-
-        .qr-code {
-            display: block;
-            width: 200px;
-            height: 200px;
-            border-radius: 8px;
-        }
-
-        .qr-instructions {
-            margin-top: 1rem;
-            color: #CCCCCC;
-            font-size: 1rem;
-        }
-
-        .join-url {
-            background: #2D2D2D;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-top: 1rem;
-            word-break: break-all;
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: #3F51B5;
-            border: 1px solid #333333;
-        }
-
-        .items-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1rem 0;
-        }
-
-        .items-table th,
-        .items-table td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid #333333;
-        }
-
-        .items-table th {
-            background: #2D2D2D;
-            color: #FFFFFF;
-            font-weight: 600;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .items-table tr:nth-child(even) {
-            background: #252525;
-        }
-
-        .items-table tr:hover {
-            background: #2A2A2A;
-            transition: background-color 0.2s ease;
-        }
-
-        .price-cell {
-            text-align: right;
-            font-weight: 600;
-            color: #4CAF50;
-        }
-
-        .btn {
-            display: inline-block;
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 1rem;
-            text-decoration: none;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            min-height: 48px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            color: #FFFFFF;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(63, 81, 181, 0.4);
-        }
-
-        .btn-success {
-            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
-            color: #FFFFFF;
-        }
-
-        .btn-success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
-        }
-
-        .actions {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-top: 2rem;
-        }
-
-        .section-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-            text-align: center;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-left: 0.5rem;
-        }
-
-        .status-success {
-            background: #4CAF50;
-            color: #FFFFFF;
-        }
-
-        .status-warning {
-            background: #FF9800;
-            color: #FFFFFF;
-        }
-
-        .bill-image {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-            border: 1px solid #333333;
-        }
-
-        @media (min-width: 768px) {
-            .container {
-                padding: 2rem;
-            }
-
-            .card {
-                padding: 2rem;
-            }
-
-            .info-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .qr-code {
-                width: 250px;
-                height: 250px;
-            }
-
-            .actions {
-                justify-content: flex-end;
-            }
-        }
-
-        @media (min-width: 1024px) {
-            .info-grid {
-                grid-template-columns: repeat(4, 1fr);
-            }
-        }
-
-        /* Accessibility improvements */
-        input:focus, button:focus, a:focus {
-            outline: 3px solid #3F51B5;
-            outline-offset: 2px;
-        }
-
-        /* Copy button animation */
-        .copy-btn {
-            background: #333333;
-            color: #FFFFFF;
-            border: 2px solid #555555;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            margin-left: 0.5rem;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            font-family: inherit;
-        }
-
-        .copy-btn:hover {
-            background: #555555;
-            border-color: #777777;
-        }
-
-        .copy-btn.copied {
-            background: #4CAF50;
-            border-color: #4CAF50;
-        }
-
-        /* Loading and transition animations */
-        .updating {
-            opacity: 0.7;
-            transition: opacity 0.3s ease;
-        }
-
-        .member-item {
-            transition: all 0.3s ease;
-        }
-
-        .member-item.new {
-            animation: slideIn 0.5s ease;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-
-
-        .connection-status.connected {
-            background: #4CAF50;
-            color: white;
-        }
-
-        .connection-status.disconnected {
-            background: #f44336;
-            color: white;
-        }
-
-        .connection-status.connecting {
-            background: #FF9800;
-            color: white;
-        }
-    </style>
-</head>
-<body>
-    <div class="logo-banner">
-        <img src="{{ url_for('static', filename='images/trans_logo.png') }}" alt="Transparent Logo" class="trans-logo">
-    </div>
-
-    <header class="top-bar">
-        <h1>🏠 Room Summary</h1>
-    </header>
-
-    <!-- Connection status indicator -->
-    <div id="connection-status" class="connection-status connecting">
-        🔄 Connecting…
-    </div>
-
-    <main class="container">
-        <div class="room-info">
-            <h2>{{ room.room_name }}</h2>
-            <p>Host: {{ room.host_name }}</p>
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% block title %}{{ room.room_name }}, BillBear{% endblock %}
+{% block content %}
+<main class="stack stack--lg">
+    <div>
+        <div class="row row--between">
+            <p class="eyebrow">Hosted by {{ room.host_name }}</p>
+            <span id="connection-status" class="live connecting">Connecting</span>
         </div>
+        <h1>{{ room.room_name }}</h1>
+    </div>
 
-        <div class="actions" id="actions-container">
-            {% if me %}
-                {% if room.finalized %}
-                <a href="{{ url_for('results_page', room_code=room_code) }}" class="btn btn-success">📊 View the split</a>
-                {% elif me.submitted %}
-                <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn-success">
-                    ✅ Items Selected - Go to Waiting Room
-                </a>
-                {% else %}
-                <a href="{{ url_for('select_items', room_code=room_code, user_name=me.name) }}" class="btn btn-success">
-                    🛒 Select My Items
-                </a>
-                <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn-primary">
-                    ⏳ Go to Waiting Room
-                </a>
-                {% endif %}
-                {% if is_host and not room.finalized %}
-                <a href="{{ url_for('edit_items', room_code=room_code) }}" class="btn btn-primary">✏️ Edit Items</a>
-                {% endif %}
+    <div class="actions" id="actions-container">
+        {% if me %}
+            {% if room.finalized %}
+            <a href="{{ url_for('results_page', room_code=room_code) }}" class="btn btn--primary btn--block">See the split</a>
+            {% elif me.submitted %}
+            <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">Your picks are in. See who's left</a>
             {% else %}
-                <a href="{{ url_for('join_room', room_code=room_code) }}" class="btn btn-success">🙋 Join this room</a>
+            <a href="{{ url_for('select_items', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">Pick my dishes</a>
+            <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--block">See who's here</a>
             {% endif %}
+            {% if is_host and not room.finalized %}
+            <a href="{{ url_for('edit_items', room_code=room_code) }}" class="btn btn--block">Edit dishes</a>
+            {% endif %}
+        {% else %}
+            <a href="{{ url_for('join_room', room_code=room_code) }}" class="btn btn--primary btn--block">Join this room</a>
+        {% endif %}
+    </div>
+
+    <div>
+        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
+        <section class="card ticket">
+            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
+            <div class="grow stack" style="gap: 6px">
+                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
+                <span class="ticket__code">{{ room_code }}</span>
+                <span id="joinUrl" hidden>{{ join_url }}</span>
+                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
+            </div>
+        </section>
+    </div>
+
+    <section class="stack">
+        <div class="row row--between">
+            <h2>At the table</h2>
+            <span class="small mono"><span id="joinedValue">{{ room.users | length }}</span> of <span id="expectedValue">{{ room.num_people }}</span> here, <span id="submittedValue">{{ room.get('submitted_users', []) | length }} / {{ room.users | length }}</span> sent</span>
         </div>
-
-        <div class="info-grid">
-            <div class="info-item">
-                <div class="info-label">Room Code</div>
-                <div class="info-value">{{ room_code }}</div>
-            </div>
-
-            <div class="info-item">
-                <div class="info-label">Expected People</div>
-                <div class="info-value" id="expectedValue">{{ room.num_people }}</div>
-            </div>
-
-            <div class="info-item">
-                <div class="info-label">Joined Users</div>
-                <div class="info-value" id="joinedValue">{{ room.users | length }}</div>
-            </div>
-
-            <div class="info-item">
-                <div class="info-label">Items Selected</div>
-                <div class="info-value" id="submittedValue">{{ room.get('submitted_users', []) | length }} / {{ room.users | length }}</div>
-            </div>
-        </div>
-
-        <div class="qr-section">
-            <h3 class="section-title">📱 Join Room</h3>
-            <p class="qr-instructions">Scan this QR code or share the link below:</p>
-            
-            <div class="qr-container">
-                <img src="{{ qr_b64 }}" alt="QR Code for joining room" class="qr-code">
-            </div>
-            
-            <div class="join-url">
-                <span id="joinUrl">{{ join_url }}</span>
-                <button type="button" class="copy-btn" id="copyBtn">
-                    📋 Copy
-                </button>
-            </div>
-        </div>
-
-        <div class="card">
-            <h3 class="section-title">📄 Bill Items</h3>
-            <div class="table-container">
-                <table class="items-table">
-                    <thead>
-                        <tr>
-                            <th>Item Name</th>
-                            <th>Price</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in room['items'] %}
-                        <tr>
-                            <td>{{ item.name }}</td>
-                            <td class="price-cell">{{ item.price }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="card">
-            <h3 class="section-title">👥 Room Members</h3>
-            <div class="info-grid" id="members-container">
-                {% for user in room.users %}
-                <div class="info-item member-item">
-                    <div class="info-value">
-                        <span class="member-name">{{ user }}</span>
-                        {% if user == room.host_name %}
-                        <span class="status-badge status-success">Host</span>
-                        {% endif %}
-                        {% if user in room.get('submitted_users', []) %}
-                        <span class="status-badge status-success">Selected</span>
-                        {% else %}
-                        <span class="status-badge status-warning">Pending</span>
-                        {% endif %}
-                    </div>
+        <div class="stack" id="members-container" style="gap: 10px">
+            {% for user in room.users %}
+            {% set done = user in room.get('submitted_users', []) %}
+            <div class="person{% if not done %} person--pending{% endif %}">
+                {{ ui.paw(done) }}
+                <div class="grow">
+                    <div class="person__name">{{ user }}</div>
+                    <div class="person__meta">{% if user == room.host_name %}Host. {% endif %}{% if done %}Picks sent.{% else %}Still picking.{% endif %}</div>
                 </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="receipt">
+        <div class="paper stack">
+            <h2>On the bill</h2>
+            <hr class="dash dash--ink">
+            <div class="lines">
+                {% for item in room['items'] %}
+                <div class="line"><span class="with-diet">{{ ui.diet(item.category) }}<span>{{ item.name }}</span></span><span>{{ item.price }}</span></div>
+                {% else %}
+                <p class="fineprint">No dishes yet.</p>
                 {% endfor %}
             </div>
         </div>
+        <div class="tear"></div>
+    </section>
 
-        {% if host_link %}
-        <div class="card">
-            <h3 class="section-title">🔑 Your host link</h3>
-            <p style="color:#CCCCCC; font-size:0.9rem; margin-bottom:0.75rem;">
-                Save this privately (e.g. message it to yourself). If your phone dies or you open the room in
-                another browser, this link gives you host controls back. Don't share it.
-            </p>
-            <div class="join-url">
-                <span id="hostLinkText" style="filter:blur(4px); word-break:break-all;">{{ host_link }}</span>
-                <button type="button" class="copy-btn" id="copyHostLinkBtn">📋 Copy</button>
-            </div>
+    {% if host_link %}
+    <details class="fold outline-box">
+        <summary>Save your host link</summary>
+        <p class="small" style="margin-bottom: 10px">Keep this somewhere private, like a message to yourself. If your phone dies or you open the room in another browser, it gives you host controls back. Don't share it.</p>
+        <div class="row">
+            <span class="secret grow" id="hostLinkText">{{ host_link }}</span>
+            <button type="button" class="btn btn--small" id="copyHostLinkBtn">Copy</button>
         </div>
-        {% endif %}
+    </details>
+    {% endif %}
+</main>
 
-    </main>
-
-    <!-- Member template for JavaScript rendering -->
-    <template id="member-template">
-        <div class="info-item member-item">
-            <div class="info-value">
-                <span class="member-name"></span>
-                <span class="host-badge status-badge status-success" style="display: none;">Host</span>
-                <span class="selected-badge status-badge status-success" style="display: none;">Selected</span>
-                <span class="pending-badge status-badge status-warning" style="display: none;">Pending</span>
-            </div>
+<template id="member-template">
+    <div class="person">
+        {{ ui.paw(true) }}
+        <div class="grow">
+            <div class="person__name"></div>
+            <div class="person__meta"></div>
         </div>
-    </template>
-
+    </div>
+</template>
+{% endblock %}
+{% block scripts %}
     <script>
-        document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
-        const copyHostLinkBtn = document.getElementById('copyHostLinkBtn');
-        if (copyHostLinkBtn) {
-            copyHostLinkBtn.addEventListener('click', async () => {
-                const text = document.getElementById('hostLinkText').textContent.trim();
-                try { await navigator.clipboard.writeText(text); copyHostLinkBtn.textContent = '✅ Copied!'; }
-                catch (_e) { copyHostLinkBtn.textContent = '❌ Copy failed'; }
-                setTimeout(() => { copyHostLinkBtn.textContent = '📋 Copy'; }, 2000);
-            });
+        function copyText(text, btn) {
+            function done(ok) {
+                const original = btn.dataset.label || btn.textContent;
+                btn.dataset.label = original;
+                btn.textContent = ok ? 'Copied' : 'Could not copy';
+                setTimeout(() => { btn.textContent = original; }, 2000);
+            }
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => done(true)).catch(() => fallback());
+            } else {
+                fallback();
+            }
+            function fallback() {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                document.body.appendChild(ta);
+                ta.select();
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (_e) {}
+                document.body.removeChild(ta);
+                done(ok);
+            }
         }
 
-        // ------------------------------------------------------------------
-        // Live updates: members + counts refresh every few seconds.
-        // ------------------------------------------------------------------
+
+        const $ = (id) => document.getElementById(id);
+        $('copyBtn').addEventListener('click', () => copyText($('joinUrl').textContent.trim(), $('copyBtn')));
+        const copyHostLinkBtn = $('copyHostLinkBtn');
+        if (copyHostLinkBtn) {
+            copyHostLinkBtn.addEventListener('click', () => copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
+        }
+
+        // Live updates: members and counts refresh every few seconds.
         (function liveLobby() {
             const ROOM_CODE = {{ room_code | tojson }};
             const MY_NAME = {{ (me.name if me else None) | tojson }};
             const MY_SUBMITTED = {{ (me.submitted if me else False) | tojson }};
-            const indicator = document.getElementById('connection-status');
-            const tpl = document.getElementById('member-template');
-            const container = document.getElementById('members-container');
+            const indicator = $('connection-status');
+            const tpl = $('member-template');
+            const container = $('members-container');
             let timer = null;
             const started = Date.now();
 
             function setIndicator(state, text) {
-                indicator.className = 'connection-status ' + state;
+                indicator.className = 'live ' + state;
                 indicator.textContent = text;
             }
 
             function renderMembers(d) {
                 const nodes = d.users.map(name => {
                     const el = tpl.content.firstElementChild.cloneNode(true);
-                    el.querySelector('.member-name').textContent = name + (name === MY_NAME ? ' (you)' : '');
-                    el.querySelector('.host-badge').style.display = name === d.host_name ? 'inline-block' : 'none';
                     const done = d.submitted_users.includes(name);
-                    el.querySelector('.selected-badge').style.display = done ? 'inline-block' : 'none';
-                    el.querySelector('.pending-badge').style.display = done ? 'none' : 'inline-block';
+                    el.classList.toggle('person--pending', !done);
+                    el.querySelector('.paw').classList.toggle('paw--empty', !done);
+                    el.querySelector('.person__name').textContent = name;
+                    const bits = [];
+                    if (name === MY_NAME) bits.push('You');
+                    if (name === d.host_name) bits.push(name === MY_NAME ? 'the host' : 'Host');
+                    el.querySelector('.person__meta').textContent =
+                        (bits.length ? bits.join(', ') + '. ' : '') + (done ? 'Picks sent.' : 'Still picking.');
                     return el;
                 });
                 container.replaceChildren(...nodes);
@@ -584,19 +170,19 @@
                 timer = null;
                 try {
                     const r = await fetch(`/room/${ROOM_CODE}/status`, { credentials: 'same-origin' });
-                    if (r.status === 404) { setIndicator('disconnected', '⌛ Room expired'); return; }
+                    if (r.status === 404) { setIndicator('disconnected', 'Room expired'); return; }
                     const d = await r.json();
                     if (d.status !== 'success') throw new Error('bad status');
                     const meSubmitted = MY_NAME ? d.submitted_users.includes(MY_NAME) : false;
                     // Buttons depend on these: re-render the page when they change.
                     if (d.finalized || meSubmitted !== MY_SUBMITTED) { window.location.reload(); return; }
-                    document.getElementById('expectedValue').textContent = d.expected_people;
-                    document.getElementById('joinedValue').textContent = d.total_users;
-                    document.getElementById('submittedValue').textContent = `${d.submitted_count} / ${d.total_users}`;
+                    $('expectedValue').textContent = d.expected_people;
+                    $('joinedValue').textContent = d.total_users;
+                    $('submittedValue').textContent = `${d.submitted_count} / ${d.total_users}`;
                     renderMembers(d);
-                    setIndicator('connected', '🟢 Live');
+                    setIndicator('connected', 'Live');
                 } catch (_e) {
-                    setIndicator('disconnected', '🔴 Reconnecting…');
+                    setIndicator('disconnected', 'Reconnecting');
                 }
                 schedule();
             }
@@ -604,7 +190,7 @@
             function schedule() {
                 if (document.hidden) return;
                 const age = Date.now() - started;
-                if (age > 2 * 60 * 60 * 1000) { setIndicator('disconnected', '⏸ Paused — reload to refresh'); return; }
+                if (age > 2 * 60 * 60 * 1000) { setIndicator('disconnected', 'Paused. Reload to refresh'); return; }
                 timer = setTimeout(tick, age > 10 * 60 * 1000 ? 15000 : 3000);
             }
 
@@ -612,48 +198,7 @@
                 if (document.hidden) { clearTimeout(timer); timer = null; }
                 else if (!timer) tick();
             });
-            tick();
+            {% if not room.finalized %}tick();{% else %}setIndicator('connected', 'Final');{% endif %}
         })();
-
-        function copyToClipboard() {
-            const text = document.getElementById('joinUrl').textContent.trim();
-            const btn = document.getElementById('copyBtn');
-
-            function showSuccess() {
-                btn.textContent = '✅ Copied!';
-                btn.classList.add('copied');
-                setTimeout(() => {
-                    btn.textContent = '📋 Copy';
-                    btn.classList.remove('copied');
-                }, 2000);
-            }
-
-            function showFailure() {
-                btn.textContent = '❌ Failed';
-                setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
-            }
-
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(text).then(showSuccess).catch(() => execFallback());
-            } else {
-                execFallback();
-            }
-
-            function execFallback() {
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-                document.body.appendChild(ta);
-                ta.focus();
-                ta.select();
-                try {
-                    document.execCommand('copy') ? showSuccess() : showFailure();
-                } catch (e) {
-                    showFailure();
-                }
-                document.body.removeChild(ta);
-            }
-        }
     </script>
-</body>
-</html>
+{% endblock %}

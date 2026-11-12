@@ -13,7 +13,7 @@
             <h1 style="font-size: 1.75rem">{{ user_name }}, tap what you had</h1>
         </div>
     </div>
-    <p>Shared a dish? Everyone who had some taps it, and the price splits between you.</p>
+    <p>Shared a dish? Everyone who had some taps it, and the price splits between you.{% if room['items'] | selectattr('quantity', 'gt', 1) | list %} Where the bill has several of a dish, a tap means you shared them; press + for each one you had to yourself.{% endif %}</p>
 
     {% if room['items'] %}
     {% set present = room['items'] | map(attribute='category') | list %}
@@ -32,14 +32,28 @@
         <section class="receipt">
             <div class="paper paper--tight">
                 {% for item in room['items'] %}
-                <label class="pick item-row" for="item_{{ loop.index }}" data-category="{{ item.category }}">
+                <label class="pick item-row{% if item.quantity > 1 %} pick--many{% endif %}" for="item_{{ loop.index }}" data-category="{{ item.category }}">
                     <input type="checkbox" id="item_{{ loop.index }}" name="selected_items" value="{{ item.id }}"
                            class="item-checkbox" data-amount="{{ item.amount if item.amount is not none else 0 }}"
-                           {% if item.id in (pre_selected or []) %}checked{% endif %} onchange="updateSelection()">
+                           data-quantity="{{ item.quantity }}"
+                           {% if item.id in (pre_selected or []) %}checked{% endif %}>
                     {{ ui.paw(false) }}
-                    <span class="with-diet grow">{{ ui.diet(item.category) }}<span class="pick__name">{{ item.name }}</span></span>
-                    <span class="pick__price">{{ item.price }}</span>
+                    <span class="with-diet grow">{{ ui.diet(item.category) }}<span class="pick__name">{{ item.name }}{% if item.quantity > 1 %} <span class="pick__qty">×{{ item.quantity }}</span><span class="pick__taken" data-item="{{ item.id }}" data-quantity="{{ item.quantity }}" aria-live="polite"></span>{% endif %}</span></span>
+                    <span class="pick__side"><span class="pick__price">{{ item.price }}</span>{% if item.quantity > 1 %}<span class="pick__mode" data-item="{{ item.id }}"></span>{% endif %}</span>
                 </label>
+                {% if item.quantity > 1 %}
+                {% set mine = [[(pre_portions or {}).get(item.id, 0), 0] | max, item.quantity] | min %}
+                <div class="portions" data-item="{{ item.id }}" data-quantity="{{ item.quantity }}" data-max="{{ item.quantity }}" data-amount="{{ item.amount if item.amount is not none else 0 }}">
+                    <span class="portions__label" id="portions_label_{{ item.id }}" aria-live="polite"></span>
+                    <span class="portions__hint">Had one to yourself? Press +</span>
+                    <span class="stepper stepper--mode" role="group" aria-label="Shared, or how many were yours alone">
+                        <button type="button" data-step="-1" aria-label="One fewer to myself">−</button>
+                        <output>{{ mine or 'Shared' }}</output>
+                        <button type="button" data-step="1" aria-label="One more to myself">+</button>
+                    </span>
+                    <input type="hidden" name="portions_{{ item.id }}" value="{{ mine }}">
+                </div>
+                {% endif %}
                 {% endfor %}
                 <p class="fineprint" id="emptyFilter" hidden style="padding: 14px 10px">No dishes of this type on the bill.</p>
                 <div class="row row--between" style="padding: 6px 10px 0">
@@ -73,22 +87,160 @@
 
         function updateSelection() {
             const picked = boxes().filter(b => b.checked);
-            const sum = picked.reduce((s, b) => s + (parseFloat(b.dataset.amount) || 0), 0);
+            const sum = picked.reduce((s, b) => s + estimateFor(b), 0);
             document.getElementById('selectedCount').textContent =
                 `${picked.length} dish${picked.length === 1 ? '' : 'es'}, before tax`;
             document.getElementById('selectedTotal').textContent =
                 '₹' + sum.toLocaleString('en-IN', { maximumFractionDigits: 2 });
         }
 
+        // Picks in progress are kept on this device until they are sent, so
+        // leaving the page (back button, reopening the room link) loses nothing.
+        function draftKey() {
+            return `bb_draft:${ROOM_CODE}:${USER_NAME}`;
+        }
+
+        function saveDraft() {
+            try {
+                const draft = {};
+                boxes().filter(b => b.checked).forEach(b => { draft[b.value] = portionsOf(b.value); });
+                localStorage.setItem(draftKey(), JSON.stringify(draft));
+            } catch (_e) { /* private mode or storage full: picks just aren't kept */ }
+        }
+
+        function restoreDraft() {
+            let saved = null;
+            try { saved = JSON.parse(localStorage.getItem(draftKey())); } catch (_e) {}
+            if (!saved || typeof saved !== 'object') return;
+            // Drafts are {dish id: how many}; older ones were a plain list of ids.
+            const draft = Array.isArray(saved)
+                ? Object.fromEntries(saved.map(id => [String(id), 0]))
+                : saved;
+            boxes().forEach(b => {
+                b.checked = Object.prototype.hasOwnProperty.call(draft, b.value);
+                if (b.checked) setPortions(b.value, draft[b.value]);
+            });
+        }
+
+        function clearDraft() {
+            try { localStorage.removeItem(draftKey()); } catch (_e) {}
+        }
+
+        /* Dishes the bill lists several of: 0 = shared, n = n of them were mine alone. */
+        const portionRow = id => document.querySelector(`.portions[data-item="${id}"]`);
+        let takenByOthers = {};   // item id -> [{name, portions}] already sent by other people
+
+        function portionsOf(id) {
+            const row = portionRow(id);
+            return row ? (parseInt(row.querySelector('input').value, 10) || 0) : 1;
+        }
+
+        function othersFor(id) {
+            const held = takenByOthers[id] || [];
+            return {
+                held,
+                units: held.reduce((s, h) => s + h.portions, 0),
+                sharers: held.filter(h => h.portions === 0).length,
+            };
+        }
+
+        // What this pick will roughly cost before tax, from what has been sent so far.
+        function estimateFor(box) {
+            const amount = parseFloat(box.dataset.amount) || 0;
+            const quantity = parseInt(box.dataset.quantity, 10) || 1;
+            if (quantity <= 1) return amount;
+            const mine = portionsOf(box.value);
+            if (mine > 0) return amount * mine / quantity;
+            const others = othersFor(box.value);
+            return amount * Math.max(quantity - others.units, 0) / quantity / (others.sharers + 1);
+        }
+
+        function setPortions(id, value) {
+            const row = portionRow(id);
+            if (!row) return;
+            const quantity = parseInt(row.dataset.quantity, 10) || 1;
+            const max = parseInt(row.dataset.max, 10) || 0;
+            const n = Math.min(Math.max(parseInt(value, 10) || 0, 0), max);
+            row.querySelector('input').value = n;
+            row.querySelector('output').textContent = n === 0 ? 'Shared' : n;
+            row.querySelector('[data-step="-1"]').disabled = n <= 0;
+            row.querySelector('[data-step="1"]').disabled = n >= max;
+
+            const others = othersFor(id);
+            const unclaimed = Math.max(quantity - others.units, 0);
+            const label = row.querySelector('.portions__label');
+            if (n > 0) {
+                label.textContent = `${n} of the ${quantity} ${n === 1 ? 'is' : 'are'} yours alone.`;
+            } else if (unclaimed === 0) {
+                label.textContent = 'All of them are claimed, so there is nothing left to share.';
+            } else {
+                const withOthers = others.sharers
+                    ? `with ${others.sharers} other${others.sharers === 1 ? '' : 's'}`
+                    : 'with whoever else shares';
+                label.textContent = `Sharing ${unclaimed === quantity ? `all ${quantity}` : `the ${unclaimed} unclaimed`} ${withOthers}.`;
+            }
+            const mode = document.querySelector(`.pick__mode[data-item="${id}"]`);
+            if (mode) mode.textContent = n === 0 ? 'Shared' : `${n} yours`;
+        }
+
+        document.querySelectorAll('.portions').forEach(row => {
+            setPortions(row.dataset.item, row.querySelector('input').value);
+            row.querySelectorAll('button[data-step]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    setPortions(row.dataset.item, portionsOf(row.dataset.item) + parseInt(btn.dataset.step, 10));
+                    updateSelection();
+                    saveDraft();
+                });
+            });
+        });
+
+        /* What other people have already sent for dishes the bill lists several of. */
+        async function refreshTaken() {
+            const marks = document.querySelectorAll('.pick__taken');
+            if (!marks.length || document.hidden) return;
+            let data = null;
+            try {
+                const resp = await fetch(`/room/${ROOM_CODE}/status`, {
+                    credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' },
+                });
+                if (resp.ok) data = await resp.json();
+            } catch (_e) { /* offline: keep what is shown */ }
+            if (!data || !data.taken) return;
+            takenByOthers = data.taken;
+            marks.forEach(mark => {
+                const id = mark.dataset.item;
+                const quantity = parseInt(mark.dataset.quantity, 10) || 1;
+                const others = othersFor(id);
+                const unclaimed = Math.max(quantity - others.units, 0);
+                const sharing = others.held.filter(h => h.portions === 0).map(h => h.name);
+                const parts = others.held.filter(h => h.portions > 0).map(h => `${h.name} has ${h.portions}`);
+                if (sharing.length) parts.push(`${sharing.join(', ')} sharing`);
+                mark.textContent = parts.length
+                    ? parts.join(', ') + (unclaimed > 0 ? `. ${unclaimed} unclaimed.` : '. All claimed.')
+                    : '';
+                // Units still free to claim; one stays back while anyone is sharing.
+                const row = portionRow(id);
+                if (row) {
+                    const before = portionsOf(id);
+                    row.dataset.max = Math.max(unclaimed - (others.sharers ? 1 : 0), 0);
+                    setPortions(id, before);
+                    if (portionsOf(id) !== before) saveDraft();
+                }
+            });
+            updateSelection();
+        }
+
         // "Select all" only touches the dishes the current filter shows.
         function selectAll() {
             boxes().forEach(b => { if (!b.closest('.pick').hidden) b.checked = true; });
             updateSelection();
+            saveDraft();
         }
 
         function clearAll() {
             boxes().forEach(b => { b.checked = false; });
             updateSelection();
+            saveDraft();
         }
 
         // Filtering only hides rows; picks in hidden rows still count.
@@ -195,8 +347,17 @@
 
                 if (resp.ok && json && json.status === 'success') {
                     clearSubmissionId();
+                    clearDraft();
                     setStatus('Picks sent.', 'success');
                     window.location.href = json.redirect;
+                    return;
+                }
+
+                // Someone else already sent a claim for these. Nothing was saved.
+                if (json && json.code === 'PORTIONS_TAKEN') {
+                    setLoading(false);
+                    await refreshTaken();
+                    setStatus(json.message + ' Check your picks and send again.', 'error');
                     return;
                 }
 
@@ -207,6 +368,7 @@
                 if (my && my.status === 'success' && my.submitted
                     && my.submission_id && my.submission_id === sid) {
                     clearSubmissionId();
+                    clearDraft();
                     setStatus('Your picks were saved.', 'success');
                     window.location.href = my.redirect;
                     return;
@@ -223,6 +385,7 @@
                 if (my && my.status === 'success' && my.submitted
                     && my.submission_id && my.submission_id === sid) {
                     clearSubmissionId();
+                    clearDraft();
                     setStatus('Your picks were saved.', 'success');
                     window.location.href = my.redirect;
                     return;
@@ -234,7 +397,20 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             ensureSubmissionId();
+            refreshTaken();
+            setInterval(refreshTaken, 5000);
+            document.addEventListener('visibilitychange', refreshTaken);
+            restoreDraft();
             updateSelection();
+            document.getElementById('selectionForm').addEventListener('change', function () {
+                updateSelection();
+                saveDraft();
+            });
+        });
+
+        // Coming back with the browser's back button can show a cached copy of the page.
+        window.addEventListener('pageshow', function (e) {
+            if (e.persisted) { restoreDraft(); updateSelection(); }
         });
     </script>
 {% endblock %}

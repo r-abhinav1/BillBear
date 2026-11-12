@@ -35,8 +35,8 @@ def test_parse_price_rejects(raw):
 def test_clean_items_lenient_vs_strict():
     rows = [{"name": "  Tea  ", "price": "x"}, {"name": "", "price": "1"}, {"name": "Dal", "price": "₹10"}]
     assert clean_items(rows) == [
-        {"id": None, "name": "Tea", "price": None, "category": "other"},
-        {"id": None, "name": "Dal", "price": Decimal("10.00"), "category": "other"},
+        {"id": None, "name": "Tea", "price": None, "category": "other", "quantity": 1},
+        {"id": None, "name": "Dal", "price": Decimal("10.00"), "category": "other", "quantity": 1},
     ]
     with pytest.raises(ValueError):
         clean_items(rows, strict_prices=True)
@@ -315,3 +315,139 @@ def test_scan_prompt_asks_for_category():
     assert '"category":"[veg|nonveg|egg|alcohol|other]"' in prompt
     for word in ("nonveg", "egg", "alcohol", "other"):
         assert f'"{word}"' in prompt
+
+
+# --- quantities and portions ------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    (5, 5), ("5", 5), ("x2", 2), ("3 Nos", 3), ("2.0", 2),
+    (None, 1), ("", 1), ("lots", 1), (0, 1), (True, 1), (500, 99),
+])
+def test_quantity_normalization(raw, expected):
+    from utils.receipt_contracts import normalize_item_quantity
+    from utils.validation import normalize_quantity
+
+    assert normalize_quantity(raw) == expected
+    assert normalize_item_quantity(raw) == expected
+
+
+def test_scan_prompt_asks_for_quantity():
+    from utils.receipt_rules import build_image_receipt_prompt
+
+    prompt = build_image_receipt_prompt()
+    assert '"quantity":[whole number]' in prompt
+    assert "never the price of one" in prompt
+
+
+def _dosa_room(claims):
+    """Five dosas for 500 and one coffee; `claims` is [(participant id, item id, portions)]."""
+    room = {"code": "ABCDEF", "room_name": "R", "num_people": 4, "ocr_data": {"total": "₹560.00"},
+            "ocr_source": "manual", "finalized_at": None, "created_at": T0, "last_activity_at": T0}
+    people = [
+        {"id": n, "name": name, "is_host": n == 1, "joined_at": T0 + timedelta(seconds=n),
+         "submitted_at": T0, "submission_id": "s", "user_id_hash": f"h{n}"}
+        for n, name in enumerate(["Asha", "Bala", "Chitra", "Dev"], start=1)
+    ]
+    items = [
+        {"id": 10, "position": 0, "name": "Masala Dosa", "price": Decimal("500"), "quantity": 5},
+        {"id": 11, "position": 1, "name": "Coffee", "price": Decimal("60"), "quantity": 1},
+    ]
+    rows = [{"participant_id": p, "item_id": i, "portions": n} for p, i, n in claims]
+    return assemble_room(room, people, items, rows)
+
+
+def test_units_are_paid_per_unit_and_sharers_split_the_rest():
+    # Five dosas for 500: Asha had two, Bala one, and Chitra and Dev shared the other two.
+    r = _dosa_room([(1, 10, 2), (2, 10, 1), (3, 10, 0), (4, 10, 0), (1, 11, 1), (2, 11, 1)])
+    assert r["items"][0]["quantity"] == 5
+    assert r["portions"]["Asha"] == {"Masala Dosa": 2, "Coffee": 1}
+    assert r["portions"]["Dev"] == {"Masala Dosa": 0}
+    assert r["quantity_mismatches"] == []
+    split = calculate_bill_split(r)
+    people = split["user_breakdown"]
+    assert people["Asha"]["item_total"] == 230.0       # two dosas, half the coffee
+    assert people["Bala"]["item_total"] == 130.0
+    assert people["Chitra"]["item_total"] == people["Dev"]["item_total"] == 100.0
+    assert split["totals"]["subtotal"] == 560.0
+    mine = people["Asha"]["item_details"][0]
+    assert (mine["mode"], mine["portions"], mine["quantity"], mine["your_share"]) == ("units", 2, 5, 200.0)
+    shared = people["Dev"]["item_details"][0]
+    assert (shared["mode"], shared["unclaimed"], shared["sharers"], shared["your_share"]) == ("shared", 2, 2, 100.0)
+    assert [w["severity"] for w in audit_bill(r, split)] == ["ok"]
+
+
+def test_everyone_sharing_splits_the_whole_line():
+    # Nobody claims a unit: five dosas between four people is a quarter each.
+    r = _dosa_room([(n, 10, 0) for n in (1, 2, 3, 4)])
+    split = calculate_bill_split(r)
+    assert {d["item_total"] for d in split["user_breakdown"].values()} == {125.0}
+    assert r["quantity_mismatches"] == []
+
+
+def test_one_sharer_pays_for_everything_unclaimed():
+    r = _dosa_room([(1, 10, 1), (2, 10, 0)])
+    people = calculate_bill_split(r)["user_breakdown"]
+    assert people["Asha"]["item_total"] == 100.0 and people["Bala"]["item_total"] == 400.0
+
+
+def test_units_nobody_owns_are_not_charged_and_are_flagged():
+    # Four of the five dosas claimed and nobody sharing: one dosa has no owner.
+    r = _dosa_room([(1, 10, 1), (2, 10, 1), (3, 10, 1), (4, 10, 1), (1, 11, 1)])
+    miss = r["quantity_mismatches"]
+    assert [(m["name"], m["quantity"], m["claimed"], m["unowned"]) for m in miss] == [("Masala Dosa", 5, 4, 100.0)]
+    assert miss[0]["by"][0] == {"name": "Asha", "portions": 1}
+    split = calculate_bill_split(r)
+    assert split["user_breakdown"]["Bala"]["item_total"] == 100.0
+    assert split["totals"]["subtotal"] == 460.0
+    audit = audit_bill(r, split)
+    assert audit[0]["title"] == "Masala Dosa: 4 of 5 claimed" and audit[0]["severity"] == "warn"
+    assert "ok" not in [w["severity"] for w in audit]
+
+
+def test_rows_without_portions_count_as_one_each():
+    r = assemble_room(*_rows())
+    assert r["portions"] == {"Bob": {"Naan (2)": 1}}
+    assert r["items"][0]["quantity"] == 1 and r["quantity_mismatches"] == []
+
+
+# --- how taxes and service charge are divided --------------------------------
+
+def _taxed_room(tax_split=None):
+    """Asha ordered 300 of food, Bala 100; the bill adds 40 service charge and 20 + 20 GST."""
+    ocr = {"serviceCharge": "₹40.00", "cgst": "₹20.00", "sgst": "₹20.00", "total": "₹480.00"}
+    if tax_split:
+        ocr["taxSplit"] = tax_split
+    return {
+        "items": [{"name": "Biryani", "price": "₹300.00", "quantity": 1},
+                  {"name": "Dal", "price": "₹100.00", "quantity": 1}],
+        "selections": {"Asha": ["Biryani"], "Bala": ["Dal"], "Chitra": []},
+        "ocr_data": ocr,
+    }
+
+
+def test_taxes_follow_what_each_person_had_by_default():
+    split = calculate_bill_split(_taxed_room())
+    people = split["user_breakdown"]
+    assert split["totals"]["tax_split"] == "proportional"
+    assert (people["Asha"]["service_charge"], people["Asha"]["cgst"], people["Asha"]["sgst"]) == (30.0, 15.0, 15.0)
+    assert (people["Bala"]["service_charge"], people["Bala"]["cgst"], people["Bala"]["sgst"]) == (10.0, 5.0, 5.0)
+    assert people["Asha"]["final_amount"] == 360.0 and people["Bala"]["final_amount"] == 120.0
+    assert people["Chitra"]["final_amount"] == 0.0          # picked nothing, owes nothing
+    assert split["totals"]["grand_total"] == 480.0
+
+
+def test_host_can_split_taxes_equally_instead():
+    split = calculate_bill_split(_taxed_room("equal"))
+    people = split["user_breakdown"]
+    assert split["totals"]["tax_split"] == "equal"
+    assert people["Asha"]["final_amount"] == 340.0 and people["Bala"]["final_amount"] == 140.0
+    assert people["Chitra"]["final_amount"] == 0.0
+    assert split["totals"]["grand_total"] == 480.0
+
+
+def test_proportional_taxes_fall_back_to_equal_when_dishes_cost_nothing():
+    room = _taxed_room()
+    for item in room["items"]:
+        item["price"] = "₹0.00"
+    people = calculate_bill_split(room)["user_breakdown"]
+    assert people["Asha"]["final_amount"] == people["Bala"]["final_amount"] == 40.0

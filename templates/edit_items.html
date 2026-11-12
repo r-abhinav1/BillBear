@@ -39,6 +39,7 @@
                     <input class="input" type="text" name="item_name" value="{{ item.name }}" required maxlength="80" placeholder="Dish" aria-label="Item name">
                     <input class="input input--mono" type="text" name="item_price" value="{{ item.price }}" required inputmode="decimal" placeholder="₹0.00" aria-label="Item price">
                     <button type="button" class="icon-btn" onclick="removeRow(this)" aria-label="Remove item">{{ ui.icon('close') }}</button>
+                    <label class="qty-field"><span aria-hidden="true">×</span><input class="input input--mono" type="text" name="item_quantity" value="{{ item.quantity or 1 }}" inputmode="numeric" maxlength="2" aria-label="How many of this dish are on the bill"></label>
                     <select name="item_category" class="select item-category" aria-label="Item type">
                         {% for value, label in CATEGORIES %}
                         <option value="{{ value }}"{% if (item.category or 'other') == value %} selected{% endif %}>{{ label }}</option>
@@ -88,6 +89,15 @@
                     <input class="input input--mono" type="text" id="total" name="total" value="{{ items.total or 'N/A' }}" inputmode="decimal" placeholder="₹0.00">
                 </div>
             </div>
+            <input type="hidden" name="tax_split_set" value="1">
+            <label class="switch" for="tax_proportional">
+                <input type="checkbox" id="tax_proportional" name="tax_proportional" value="1"{% if items.taxSplit != 'equal' %} checked{% endif %}>
+                <span class="switch__track" aria-hidden="true"></span>
+                <span class="switch__text">
+                    <b>Split taxes and service charge by what each person had</b>
+                    <span>Someone who ordered more pays more of the tax. Turn off to split them equally.</span>
+                </span>
+            </label>
         </section>
 
         <div class="actions actions--center">
@@ -102,6 +112,7 @@
                     <input class="input" type="text" name="item_name" value="" required maxlength="80" placeholder="Dish" aria-label="Item name">
                     <input class="input input--mono" type="text" name="item_price" value="" required inputmode="decimal" placeholder="₹0.00" aria-label="Item price">
                     <button type="button" class="icon-btn" onclick="removeRow(this)" aria-label="Remove item">{{ ui.icon('close') }}</button>
+                    <label class="qty-field"><span aria-hidden="true">×</span><input class="input input--mono" type="text" name="item_quantity" value="1" inputmode="numeric" maxlength="2" aria-label="How many of this dish are on the bill"></label>
                     <select name="item_category" class="select item-category" aria-label="Item type">
                         {% for value, label in CATEGORIES %}
                         <option value="{{ value }}"{% if 'other' == value %} selected{% endif %}>{{ label }}</option>
@@ -126,6 +137,7 @@
                         name: (nameInput?.value || '').trim(),
                         price: (priceInput?.value || '').trim(),
                         category: row.querySelector('select[name="item_category"]')?.value || 'other',
+                        quantity: parseInt(row.querySelector('input[name="item_quantity"]')?.value, 10) || 1,
                     };
                 })
                 .filter(it => it.name.length > 0);

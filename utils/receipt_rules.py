@@ -2,7 +2,7 @@ from textwrap import dedent
 
 RECEIPT_JSON_FORMAT = (
     '{"restaurant":"[restaurant name]","date":"[date]","time":"[time]",'
-    '"items":[{"name":"[item name]","price":"₹[price]","category":"[veg|nonveg|egg|alcohol|other]"}],'
+    '"items":[{"name":"[item name]","price":"₹[price]","quantity":[whole number],"category":"[veg|nonveg|egg|alcohol|other]"}],'
     '"subtotal":"₹[amount]","serviceCharge":"₹[amount]","discount":"₹[amount]",'
     '"cgst":"₹[amount]","sgst":"₹[amount]","igst":"₹[amount]","total":"₹[amount]"}'
 )
@@ -12,7 +12,14 @@ RECEIPT_RULES = [
     "Do not include markdown, code fences, or explanations.",
     'Use "N/A" if any field is missing.',
     "All monetary values must include the rupee sign and two decimal places (example: ₹199.00).",
-    'List all bill line-items under "items", each with "name", "price" and "category".',
+    'List all bill line-items under "items", each with "name", "price", "quantity" and "category".',
+    (
+        "Quantity: how many of that item the line is for, as a whole number, taken from the bill's "
+        "Qty column or a prefix/suffix such as '5 x', 'x5' or '5 Nos'. Use 1 when the bill prints no quantity. "
+        "Do not put the quantity in the name, and do not treat a portion size printed as part of the dish name "
+        "(e.g. 'Idly (2 pcs)', 'Momos 6pc', 'Coke 750ml') as the quantity. "
+        "The price stays the total for the whole line, never the price of one."
+    ),
     (
         'Category: classify every item as exactly one of "veg", "nonveg", "egg", "alcohol" or "other", '
         "using Indian restaurant conventions. "

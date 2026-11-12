@@ -36,7 +36,7 @@
 <table cellspacing="0">
     {% for item in d.item_details %}
     <tr>
-        <td class="line box-l" width="72%">{{ mark(cats.get(item.name)) }}{{ item.name }}{% if item.shared_by > 1 %} <span class="soft">(1 of {{ item.shared_by }})</span>{% endif %}</td>
+        <td class="line box-l" width="72%">{{ mark(cats.get(item.name)) }}{{ item.name }}{% if item.mode == 'units' %} <span class="soft">({{ item.portions }} of {{ item.quantity }})</span>{% elif item.mode == 'shared' %} <span class="soft">(shared {{ item.sharers }} {{ 'way' if item.sharers == 1 else 'ways' }})</span>{% elif item.shared_by > 1 %} <span class="soft">(1 of {{ item.shared_by }})</span>{% endif %}</td>
         <td class="amount box-r" width="28%">{{ money(item.your_share) }}</td>
     </tr>
     {% else %}
@@ -55,7 +55,7 @@
 <table cellspacing="0">
     {% for item in room['items'] %}
     <tr>
-        <td class="plain-line" width="72%">{{ mark(item.category) }}{{ item.name }}</td>
+        <td class="plain-line" width="72%">{{ mark(item.category) }}{{ item.name }}{% if item.quantity > 1 %} <span class="soft">x{{ item.quantity }}</span>{% endif %}</td>
         <td class="plain-amount" width="28%">{{ item.price | replace('₹', '') }}</td>
     </tr>
     {% endfor %}
@@ -183,7 +183,7 @@
 <div id="footer">
     <table cellspacing="0">
         <tr>
-            <td class="footer">{% if all_square %}Shares add up to the bill total. {% endif %}Amounts in rupees.</td>
+            <td class="footer">{% if all_square %}Shares add up to the bill total. {% endif %}{% if (t.service_charge + t.cgst + t.sgst + t.igst) > 0 %}Taxes and service charge split {{ 'equally' if t.tax_split == 'equal' else 'by what each person had' }}. {% endif %}Amounts in rupees.</td>
             <td class="footer" style="text-align: right">billbear.me</td>
         </tr>
     </table>

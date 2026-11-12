@@ -53,6 +53,7 @@ from utils.session import (  # noqa: E402
 )
 from utils.validation import (  # noqa: E402
     clean_items,
+    normalize_quantity,
     format_price,
     normalize_person_name,
     normalize_room_name,
@@ -338,7 +339,7 @@ def _pdf_link_callback(uri: str, rel: str) -> str:
 
 def generate_pdf_response(room: dict, room_code: str):
     bill_split = calculate_bill_split(room)
-    all_square = all(w.get("severity") == "ok" for w in audit_bill(room, bill_split))
+    all_square = all(w.get("severity") in ("ok", "note") for w in audit_bill(room, bill_split))
     html = render_template(
         "results_pdf.html",
         room=room,
@@ -427,7 +428,8 @@ def scan_receipt():
 
     items = clean_items(receipt.get("items"))
     receipt["items"] = [
-        {"name": i["name"], "price": format_price(i["price"]), "category": i["category"]}
+        {"name": i["name"], "price": format_price(i["price"]), "category": i["category"],
+         "quantity": i["quantity"]}
         for i in items
     ]
     receipt.pop("parser_meta", None)
@@ -533,9 +535,10 @@ def edit_items(room_code):
         names = request.form.getlist("item_name")
         prices = request.form.getlist("item_price")
         categories = request.form.getlist("item_category")
+        quantities = request.form.getlist("item_quantity")
         rows = [
-            {"id": item_id, "name": name, "price": price, "category": category}
-            for item_id, name, price, category in zip_longest(ids, names, prices, categories)
+            {"id": item_id, "name": name, "price": price, "category": category, "quantity": quantity}
+            for item_id, name, price, category, quantity in zip_longest(ids, names, prices, categories, quantities)
             if name is not None
         ]
         try:
@@ -543,6 +546,10 @@ def edit_items(room_code):
             totals = {}
             for field in AMOUNT_FIELDS:
                 totals[field] = format_price(parse_price(request.form.get(field)))
+            # The switch is a checkbox, so "off" arrives as a missing field; the
+            # marker says the form had the switch at all.
+            if "tax_split_set" in request.form:
+                totals["taxSplit"] = "proportional" if request.form.get("tax_proportional") else "equal"
         except ValueError as exc:
             error = str(exc)
         else:
@@ -551,7 +558,8 @@ def edit_items(room_code):
 
     view = dict(room["ocr_data"])
     view["items"] = [
-        {"id": i["id"], "name": i["raw_name"], "price": i["price"], "category": i["category"]}
+        {"id": i["id"], "name": i["raw_name"], "price": i["price"], "category": i["category"],
+         "quantity": i["quantity"]}
         for i in room["items"]
     ]
     if error:
@@ -562,10 +570,13 @@ def edit_items(room_code):
                 "name": r["name"],
                 "price": r["price"] or "",
                 "category": normalize_item_category(r["category"]),
+                "quantity": normalize_quantity(r["quantity"]),
             }
             for r in rows
         ]
         view.update({field: request.form.get(field, "N/A") for field in AMOUNT_FIELDS})
+        if "tax_split_set" in request.form:
+            view["taxSplit"] = "proportional" if request.form.get("tax_proportional") else "equal"
     return render_template(
         "edit_items.html",
         room_code=code,
@@ -596,6 +607,24 @@ def room_summary(room_code):
     )
 
 
+def _picks_for_host(room: dict) -> dict:
+    """Each person's sent picks as display strings, e.g. "Masala Dosa ×2" or "Naan (sharing)"."""
+    several = {item["name"] for item in room["items"] if item["quantity"] > 1}
+    picks = {}
+    for name, dishes in room["selections"].items():
+        counts = room["portions"].get(name, {})
+        shown = []
+        for dish in dishes:
+            if dish not in several:
+                shown.append(dish)
+            elif counts.get(dish, 0) == 0:
+                shown.append(f"{dish} (sharing)")
+            else:
+                shown.append(f"{dish} ×{counts[dish]}")
+        picks[name] = shown
+    return picks
+
+
 @app.route("/room/<room_code>/status")
 def room_status(room_code):
     room = load_room(room_code)
@@ -624,7 +653,15 @@ def room_status(room_code):
         "caller_is_host": bool(me and me["is_host"]),
         # What each person has sent, for the host's Manage sheet. Guests only
         # see everyone's picks once the bill is final.
-        "picks": dict(room["selections"]) if me and me["is_host"] else None,
+        "picks": _picks_for_host(room) if me and me["is_host"] else None,
+        # Dishes where the portions sent don't add up to the bill's quantity.
+        "quantity_mismatches": room["quantity_mismatches"] if me and me["is_host"] else [],
+        # For dishes the bill lists several of: what each *other* person has sent
+        # (units claimed, or 0 for sharing), so someone picking can see what is left.
+        "taken": {
+            str(item_id): [h for h in holders if h["name"] != me["name"]]
+            for item_id, holders in room["taken"].items()
+        } if me else {},
     })
 
 
@@ -772,7 +809,16 @@ def select_items(room_code, user_name):
         if me["name"] != user_name:
             raise RoomError("NOT_YOUR_SESSION", "You can only submit your own selection.", status=403)
         item_ids = _resolve_item_ids(room, request.form.getlist("selected_items"))
-        result = storage.submit_selection(code, uid, item_ids, request.form.get("submission_id", "").strip())
+        # "portions_<item id>": whole units of a several-of dish the caller had to
+        # themselves; 0 or absent means they are sharing whatever nobody claims.
+        portions = {}
+        for item_id in item_ids:
+            raw = request.form.get(f"portions_{item_id}", "").strip()
+            if raw.isdigit():
+                portions[item_id] = min(int(raw), 99)
+        result = storage.submit_selection(
+            code, uid, item_ids, request.form.get("submission_id", "").strip(), portions
+        )
         target = url_for("waiting_room", room_code=code, user_name=me["name"])
         if wants_json():
             return jsonify({"status": "success", "idempotent": result["idempotent"], "redirect": target})
@@ -789,6 +835,7 @@ def select_items(room_code, user_name):
         room_code=code,
         user_name=me["name"],
         pre_selected=me["claim_ids"],
+        pre_portions=me["claim_portions"],
     )
 
 

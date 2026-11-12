@@ -24,6 +24,7 @@ def _parse_amount(value: Any) -> float:
 def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[str, str]]:
     """
     Return a list of {severity, title, detail} dicts. Severities:
+      - "note"  : worth a look, but the money still adds up
       - "info"  : FYI
       - "warn"  : user probably wants to fix this
       - "error" : math is clearly off
@@ -53,12 +54,25 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
             ),
         })
 
+    # --- Units of a several-of dish that nobody owns --------------------------
+    for miss in room.get("quantity_mismatches") or []:
+        left = miss["quantity"] - miss["claimed"]
+        warnings.append({
+            "severity": "warn",
+            "title": f"{miss['name']}: {miss['claimed']} of {miss['quantity']} claimed",
+            "detail": (
+                f"Nobody claimed the other {left} or chose to share {'it' if left == 1 else 'them'} "
+                f"(~₹{miss.get('unowned', 0):.2f}). That amount is not included in anyone's share."
+            ),
+        })
+
     # --- Ordered subtotal vs printed bill subtotal --------------------------
+    unowned = sum(float(m.get("unowned") or 0) for m in room.get("quantity_mismatches") or [])
     ordered_subtotal = sum(
         _parse_amount(i.get("price"))
         for i in items
         if item_sharing.get(i.get("name"), 0) > 0
-    )
+    ) - unowned
     if bill_subtotal > 0 and round(abs(ordered_subtotal - bill_subtotal), 2) > 0.0:
         warnings.append({
             "severity": "info",
@@ -66,7 +80,7 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
             "detail": (
                 f"The group covered ₹{ordered_subtotal:.2f} worth of items, "
                 f"but the bill subtotal is ₹{bill_subtotal:.2f}. "
-                f"Difference: ₹{bill_subtotal - ordered_subtotal:.2f} (the unpicked items)."
+                f"Difference: ₹{bill_subtotal - ordered_subtotal:.2f} (what nobody picked or claimed)."
             ),
         })
 
@@ -99,7 +113,7 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
         })
 
     # --- All clean ----------------------------------------------------------
-    if not warnings:
+    if all(w["severity"] == "note" for w in warnings):
         warnings.append({
             "severity": "ok",
             "title": "✅ Math reconciled",

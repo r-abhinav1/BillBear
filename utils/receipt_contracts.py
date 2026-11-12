@@ -32,6 +32,16 @@ _CATEGORY_ALIASES = {
 }
 
 
+def normalize_item_quantity(value: Any) -> int:
+    """Quantity printed on the bill for a line; 1 when missing or unreadable."""
+    if isinstance(value, bool) or value is None:
+        return 1
+    match = re.search(r"\d+", str(value))
+    if not match:
+        return 1
+    return min(max(int(match.group()), 1), 99)
+
+
 def normalize_item_category(value: Any) -> str:
     """Map whatever a model or form sent ("Non-Veg", "ALCOHOLIC", None) to an ITEM_CATEGORIES value."""
     if not isinstance(value, str):
@@ -100,10 +110,12 @@ def normalize_receipt_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, An
                 name = _normalize_text_field(raw_item.get("name"))
                 raw_price = raw_item.get("price")
                 category = normalize_item_category(raw_item.get("category"))
+                quantity = normalize_item_quantity(raw_item.get("quantity"))
             else:
                 name = _normalize_text_field(raw_item)
                 raw_price = None
                 category = DEFAULT_ITEM_CATEGORY
+                quantity = 1
 
             if name == MISSING_VALUE:
                 continue
@@ -118,7 +130,7 @@ def normalize_receipt_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, An
             else:
                 price = format_currency(numeric_price)
 
-            items.append({"name": name, "price": price, "category": category})
+            items.append({"name": name, "price": price, "category": category, "quantity": quantity})
 
     normalized["items"] = items
 

@@ -63,6 +63,7 @@
     {% if is_host %}
     <section class="stack" id="hostControls">
         <p class="notice" id="unclaimedWarning" style="display: none"></p>
+        <p class="notice" id="quantityWarning" style="display: none"></p>
         <p id="finalizeDetail" style="font-weight: 600">Checking…</p>
         <button type="button" class="btn btn--primary btn--block" id="finalizeBtn" disabled>Split the bill</button>
         <p id="finalizeStatus" class="status-line" aria-live="polite"></p>
@@ -339,6 +340,18 @@
             } else {
                 unclaimed.style.display = 'none';
             }
+            // Only worth raising once everyone has sent: until then the count is still moving.
+            const quantity = $('quantityWarning');
+            const off = data.can_finalize ? (data.quantity_mismatches || []) : [];
+            if (off.length) {
+                const list = off.slice(0, 4)
+                    .map(m => `${m.name} (${m.claimed} of ${m.quantity} claimed: ${(m.by || []).map(h => `${h.name} ${h.portions}`).join(', ')})`).join('; ')
+                    + (off.length > 4 ? '; and more' : '');
+                quantity.textContent = `Not fully claimed: ${list}. Nobody is sharing the rest, so it isn't charged to anyone. Ask around first.`;
+                quantity.style.display = 'block';
+            } else {
+                quantity.style.display = 'none';
+            }
             btn.disabled = !data.can_finalize;
         }
 
@@ -347,6 +360,8 @@
             const status = $('finalizeStatus');
             const unclaimedVisible = $('unclaimedWarning').style.display !== 'none';
             if (unclaimedVisible && !confirm('Some dishes are not picked by anyone and will not be charged. Split the bill anyway?')) return;
+            const quantityOff = $('quantityWarning').style.display !== 'none';
+            if (quantityOff && !confirm("Some dishes are only partly claimed and the rest will not be charged to anyone. Split the bill anyway?")) return;
             btn.disabled = true;
             status.textContent = 'Splitting the bill…';
             const r = await postJson(`/room/${roomCode}/finalize`, {});

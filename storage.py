@@ -101,12 +101,14 @@ def _participant_by_name(cur, code: str, name: str) -> Optional[Dict[str, Any]]:
 
 def _insert_items(cur, code: str, items: Iterable[dict], start: int = 0) -> None:
     rows = [
-        (code, start + idx, item["name"], item["price"], item.get("category") or "other")
+        (code, start + idx, item["name"], item["price"], item.get("category") or "other",
+         item.get("quantity") or 1)
         for idx, item in enumerate(items)
     ]
     if rows:
         cur.executemany(
-            "INSERT INTO items (room_code, position, name, price, category) VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO items (room_code, position, name, price, category, quantity)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
             rows,
         )
 
@@ -129,7 +131,7 @@ def get_room(code: str) -> Optional[Dict[str, Any]]:
         cur.execute("SELECT * FROM items WHERE room_code = %s", (code,))
         items = cur.fetchall()
         cur.execute(
-            "SELECT c.participant_id, c.item_id FROM claims c"
+            "SELECT c.participant_id, c.item_id, c.portions FROM claims c"
             " JOIN participants p ON p.id = c.participant_id WHERE p.room_code = %s",
             (code,),
         )
@@ -206,7 +208,8 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
     insert new rows, delete removed rows (their claims cascade). If anything
     changed and anyone had submitted, every submission is reset so people
     reconfirm against the new prices (their picks stay as a draft). Changing
-    only an item's category (veg/nonveg/...) does not reset anyone.
+    only an item's category (veg/nonveg/...) does not reset anyone; changing
+    its quantity does, because it changes how many portions can be claimed.
     Returns True if submissions were reset.
     """
     code = normalize_code(code)
@@ -214,33 +217,49 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
     with conn.transaction(), conn.cursor() as cur:
         room_row = _lock_room(cur, code)
         _require_open(room_row)
-        cur.execute("SELECT id, position, name, price FROM items WHERE room_code = %s", (code,))
+        cur.execute("SELECT id, position, name, price, quantity FROM items WHERE room_code = %s", (code,))
         existing = {row["id"]: row for row in cur.fetchall()}
 
-        before = sorted((r["position"], r["name"], r["price"]) for r in existing.values())
+        before = sorted((r["position"], r["name"], r["price"], r["quantity"]) for r in existing.values())
         kept_ids = set()
         for position, item in enumerate(items):
             item_id = item.get("id")
             if item_id in existing and item_id not in kept_ids:
                 kept_ids.add(item_id)
                 cur.execute(
-                    "UPDATE items SET position = %s, name = %s, price = %s, category = %s WHERE id = %s",
-                    (position, item["name"], item["price"], item.get("category") or "other", item_id),
+                    "UPDATE items SET position = %s, name = %s, price = %s, category = %s, quantity = %s"
+                    " WHERE id = %s",
+                    (position, item["name"], item["price"], item.get("category") or "other",
+                     item.get("quantity") or 1, item_id),
                 )
             else:
                 cur.execute(
-                    "INSERT INTO items (room_code, position, name, price, category) VALUES (%s, %s, %s, %s, %s)",
-                    (code, position, item["name"], item["price"], item.get("category") or "other"),
+                    "INSERT INTO items (room_code, position, name, price, category, quantity)"
+                    " VALUES (%s, %s, %s, %s, %s, %s)",
+                    (code, position, item["name"], item["price"], item.get("category") or "other",
+                     item.get("quantity") or 1),
                 )
         removed = [item_id for item_id in existing if item_id not in kept_ids]
         if removed:
             cur.execute("DELETE FROM items WHERE id = ANY(%s)", (removed,))
 
-        after = sorted((pos, it["name"], it["price"]) for pos, it in enumerate(items))
+        # Nobody keeps a draft claim for more of a dish than the bill now lists.
+        cur.execute(
+            "UPDATE claims c SET portions = i.quantity FROM items i"
+            " WHERE i.id = c.item_id AND i.room_code = %s AND c.portions > i.quantity",
+            (code,),
+        )
+
+        after = sorted((pos, it["name"], it["price"], it.get("quantity") or 1) for pos, it in enumerate(items))
         new_ocr = dict(room_row["ocr_data"] or {})
         new_ocr.update(totals)
         new_ocr.pop("items", None)
-        changed = before != after or new_ocr != (room_row["ocr_data"] or {})
+        # How taxes are divided changes amounts but nobody's picks, so it does
+        # not send people back to reconfirm.
+        def _without_tax_split(data):
+            return {k: v for k, v in data.items() if k != "taxSplit"}
+
+        changed = before != after or _without_tax_split(new_ocr) != _without_tax_split(room_row["ocr_data"] or {})
 
         cur.execute("UPDATE rooms SET ocr_data = %s WHERE code = %s", (Jsonb(new_ocr), code))
         reset = False
@@ -299,8 +318,37 @@ def join_participant(code: str, raw_name: str) -> Tuple[str, Dict[str, Any], str
         return "JOINED", row, uid
 
 
-def submit_selection(code: str, uid: str, item_ids: List[int], submission_id: str) -> Dict[str, Any]:
-    """Replace the caller's claims and mark them submitted. Idempotent on submission_id."""
+def _join_names(names: List[str]) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def submit_selection(
+    code: str,
+    uid: str,
+    item_ids: List[int],
+    submission_id: str,
+    portions: Optional[Dict[int, int]] = None,
+) -> Dict[str, Any]:
+    """
+    Replace the caller's claims and mark them submitted. Idempotent on submission_id.
+
+    For a dish the bill lists several of, `portions[item_id]` is either a number
+    of whole units the caller had to themselves, or 0 / absent for "shared":
+    splitting whatever nobody claims with the other sharers. Against what other
+    people have already sent (PORTIONS_TAKEN otherwise):
+      - units claimed can never exceed the bill's quantity;
+      - while anyone is sharing, one unit has to stay unclaimed for them;
+      - nobody can share once every unit is claimed.
+    Sends in a room are serialized by the room lock, so of two people racing for
+    the last unit the second one is told. Single dishes are always shared equally.
+
+    Someone who has reopened their picks keeps what they last sent on hold until
+    they send again, so nobody can take their unit while they are changing
+    something else.
+    """
+    portions = portions or {}
     code = normalize_code(code)
     conn = db.get_conn()
     with conn.transaction(), conn.cursor() as cur:
@@ -312,13 +360,71 @@ def submit_selection(code: str, uid: str, item_ids: List[int], submission_id: st
         if submission_id and me["submitted_at"] is not None and me["submission_id"] == submission_id:
             return {"idempotent": True, "participant": me}
 
-        cur.execute("SELECT id FROM items WHERE room_code = %s AND id = ANY(%s)", (code, list(item_ids)))
-        valid_ids = [row["id"] for row in cur.fetchall()]
+        cur.execute(
+            "SELECT id, name, quantity FROM items WHERE room_code = %s AND id = ANY(%s)",
+            (code, list(item_ids)),
+        )
+        item_rows = {row["id"]: row for row in cur.fetchall()}
+        quantity_by_id = {item_id: row["quantity"] for item_id, row in item_rows.items()}
+        valid_ids = list(quantity_by_id)
+        several = [item_id for item_id in valid_ids if quantity_by_id[item_id] > 1]
+        wanted = {}
+        for item_id in valid_ids:
+            if quantity_by_id[item_id] > 1:
+                wanted[item_id] = min(max(int(portions.get(item_id, 0)), 0), quantity_by_id[item_id])
+            else:
+                wanted[item_id] = 1
+
+        if several:
+            cur.execute(
+                "SELECT c.item_id, p.name, c.portions FROM claims c"
+                " JOIN participants p ON p.id = c.participant_id"
+                " WHERE p.room_code = %s AND p.id <> %s"
+                " AND c.item_id = ANY(%s) ORDER BY p.joined_at, p.id",
+                (code, me["id"], several),
+            )
+            holders: Dict[int, List[Tuple[str, int]]] = {}
+            for row in cur.fetchall():
+                holders.setdefault(row["item_id"], []).append((row["name"], row["portions"]))
+            over, lines = [], []
+            for item_id in several:
+                held = holders.get(item_id, [])
+                name, quantity = item_rows[item_id]["name"], quantity_by_id[item_id]
+                claimed = sum(count for _n, count in held)
+                sharers = [n for n, count in held if count == 0]
+                who = ", ".join(
+                    [f"{n} has {count}" for n, count in held if count]
+                    + ([f"{_join_names(sharers)} {'is' if len(sharers) == 1 else 'are'} sharing the rest"]
+                       if sharers else [])
+                )
+                # Units the caller may still claim outright.
+                claimable = max(quantity - claimed - (1 if sharers else 0), 0)
+                if wanted[item_id] == 0:
+                    if claimed < quantity:
+                        continue
+                    lines.append(f"All {quantity} {name} are claimed ({who}), so there is nothing left to share.")
+                elif wanted[item_id] <= claimable:
+                    continue
+                elif claimable == 0:
+                    lines.append(
+                        f"No {name} left to claim: {who}."
+                        + (" You can share instead." if claimed < quantity else "")
+                    )
+                else:
+                    lines.append(f"Only {claimable} of the {quantity} {name} can still be claimed: {who}.")
+                over.append({
+                    "item_id": item_id, "name": name, "quantity": quantity,
+                    "claimable": claimable, "wanted": wanted[item_id],
+                    "held": [{"name": n, "portions": count} for n, count in held],
+                })
+            if over:
+                raise RoomError("PORTIONS_TAKEN", " ".join(lines), status=409, over=over)
+
         cur.execute("DELETE FROM claims WHERE participant_id = %s", (me["id"],))
         if valid_ids:
             cur.executemany(
-                "INSERT INTO claims (participant_id, item_id) VALUES (%s, %s)",
-                [(me["id"], item_id) for item_id in valid_ids],
+                "INSERT INTO claims (participant_id, item_id, portions) VALUES (%s, %s, %s)",
+                [(me["id"], item_id, wanted[item_id]) for item_id in valid_ids],
             )
         cur.execute(
             "UPDATE participants SET submitted_at = now(), submission_id = %s WHERE id = %s",

@@ -67,7 +67,7 @@
             <hr class="dash dash--ink">
             <div class="lines">
                 {% for item in room['items'] %}
-                <div class="line"><span class="with-diet">{{ ui.diet(item.category) }}<span>{{ item.name }}</span></span><span>{{ item.price }}</span></div>
+                <div class="line"><span class="with-diet">{{ ui.diet(item.category) }}<span>{{ item.name }}{% if item.quantity > 1 %} <span class="pick__qty">×{{ item.quantity }}</span>{% endif %}</span></span><span>{{ item.price }}</span></div>
                 {% else %}
                 <p class="fineprint">No dishes yet.</p>
                 {% endfor %}

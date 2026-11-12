@@ -433,3 +433,265 @@ def test_item_categories_survive_create_and_edit(client):
     })
     assert resp.status_code == 302
     assert [i["category"] for i in room(code)["items"]] == ["veg", "nonveg", "alcohol", "other", "egg"]
+
+
+def _dosa_room():
+    host = new_client()
+    resp = host.post("/create", data={
+        "host_name": "Alice", "room_name": "Breakfast", "num_people": "2",
+        "receipt_json": json.dumps({
+            "items": [{"name": "Masala Dosa", "price": "500", "quantity": 5},
+                      {"name": "Coffee", "price": "60"}],
+            "subtotal": "560", "total": "560",
+        }),
+    })
+    assert resp.status_code == 302
+    code = resp.headers["Location"].rsplit("/", 1)[-1]
+    bob = new_client()
+    assert join(bob, code, "Bob").status_code == 302
+    return code, host, bob
+
+
+def _submit_portions(client, code, name, portions):
+    """portions: {item name: how many}"""
+    ids = dict(zip(portions, item_ids(code, *portions)))
+    data = {"selected_items": list(ids.values()), "submission_id": ""}
+    data.update({f"portions_{ids[item]}": str(count) for item, count in portions.items()})
+    return client.post(f"/room/{code}/user/{name}/select-items", data=data,
+                       headers={"X-Requested-With": "fetch"})
+
+
+def test_quantity_survives_create_and_shows_stepper():
+    code, host, _bob = _dosa_room()
+    assert [i["quantity"] for i in room(code)["items"]] == [5, 1]
+    page = host.get(f"/room/{code}/user/Alice/select-items").get_data(as_text=True)
+    assert page.count('class="portions"') == 1          # only the dish there are several of
+    assert "<output>Shared</output>" in page            # a plain tap means sharing
+    assert 'name="item_quantity" value="5"' in host.get(f"/edit/{code}").get_data(as_text=True)
+
+
+def test_plain_tap_on_a_several_of_dish_means_shared():
+    code, host, bob = _dosa_room()
+    assert submit(host, code, "Alice", ["Masala Dosa"]).status_code == 200
+    assert submit(bob, code, "Bob", ["Masala Dosa", "Coffee"]).status_code == 200
+    r = room(code)
+    assert r["portions"] == {"Alice": {"Masala Dosa": 0}, "Bob": {"Masala Dosa": 0, "Coffee": 1}}
+    assert r["quantity_mismatches"] == []
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+    page = host.get(f"/room/{code}/results").get_data(as_text=True)
+    assert "all 5 shared 2 ways" in page
+
+
+def test_claimed_units_and_sharers_end_to_end():
+    code, host, bob = _dosa_room()
+    # Alice asks for 9 of 5 dosas: capped at the five there are.
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 9, "Coffee": 1}).status_code == 200
+    assert room(code)["portions"]["Alice"] == {"Masala Dosa": 5, "Coffee": 1}
+
+    # Every dosa is Alice's, so Bob can neither claim one nor share.
+    resp = _submit_portions(bob, code, "Bob", {"Masala Dosa": 1})
+    assert resp.status_code == 409 and resp.get_json()["code"] == "PORTIONS_TAKEN"
+    assert resp.get_json()["message"] == "No Masala Dosa left to claim: Alice has 5."
+    resp = _submit_portions(bob, code, "Bob", {"Masala Dosa": 0})
+    assert resp.status_code == 409
+    assert resp.get_json()["message"] == (
+        "All 5 Masala Dosa are claimed (Alice has 5), so there is nothing left to share."
+    )
+    assert "Bob" not in room(code)["submitted_users"]      # nothing was saved
+
+    # Alice corrects herself to three; Bob shares the other two.
+    assert post_json(host, f"/room/{code}/user/Alice/revoke").status_code == 200
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3, "Coffee": 1}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    r = room(code)
+    assert r["portions"] == {"Alice": {"Masala Dosa": 3, "Coffee": 1}, "Bob": {"Masala Dosa": 0}}
+    assert r["quantity_mismatches"] == []
+
+    status = host.get(f"/room/{code}/status").get_json()
+    assert status["picks"] == {"Alice": ["Masala Dosa ×3", "Coffee"], "Bob": ["Masala Dosa (sharing)"]}
+
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+    page = host.get(f"/room/{code}/results").get_data(as_text=True)
+    assert "3 of 5, ₹100.00 each" in page and "2 of 5 shared 1 way" in page
+    pdf = host.get(f"/room/{code}/download")
+    assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+
+
+def test_unowned_units_warn_the_host_only():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 1}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    status = host.get(f"/room/{code}/status").get_json()
+    assert [(m["name"], m["claimed"], m["quantity"]) for m in status["quantity_mismatches"]] == [("Masala Dosa", 3, 5)]
+    assert bob.get(f"/room/{code}/status").get_json()["quantity_mismatches"] == []
+
+
+def test_lowering_quantity_resets_and_trims_claims():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 4}).status_code == 200
+    r = room(code)
+    resp = host.post(f"/edit/{code}", data={
+        "item_id": [str(i["id"]) for i in r["items"]],
+        "item_name": ["Masala Dosa", "Coffee"],
+        "item_price": ["500", "60"],
+        "item_quantity": ["2", "1"],
+        "item_category": ["veg", "veg"],
+        "subtotal": "560", "total": "560",
+    })
+    assert resp.status_code == 302
+    r = room(code)
+    assert r["items"][0]["quantity"] == 2
+    assert r["submitted_users"] == set()                # Bob has to confirm again
+    bob_row = next(p for p in r["participants"] if p["name"] == "Bob")
+    assert list(bob_row["claim_portions"].values()) == [2]
+
+
+def test_second_sender_sees_what_is_taken_and_takes_what_is_left():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 4}).status_code == 200
+    # Bob, still picking, can see what Alice sent; Alice's own view leaves her out.
+    dosa = item_ids(code, "Masala Dosa")[0]
+    assert bob.get(f"/room/{code}/status").get_json()["taken"] == {dosa: [{"name": "Alice", "portions": 4}]}
+    assert host.get(f"/room/{code}/status").get_json()["taken"] == {dosa: []}
+
+    resp = _submit_portions(bob, code, "Bob", {"Masala Dosa": 2, "Coffee": 1})
+    assert resp.status_code == 409
+    assert resp.get_json()["message"] == "Only 1 of the 5 Masala Dosa can still be claimed: Alice has 4."
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 1, "Coffee": 1}).status_code == 200
+    assert room(code)["quantity_mismatches"] == []
+
+    # Alice changing her own mind is not blocked by her earlier claim, but Bob's one is.
+    assert post_json(host, f"/room/{code}/user/Alice/revoke").status_code == 200
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 4}).status_code == 200
+    assert post_json(host, f"/room/{code}/user/Alice/revoke").status_code == 200
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 5}).status_code == 409
+
+
+def test_single_dishes_are_shared_never_blocked():
+    code, host, bob = _dosa_room()
+    assert submit(host, code, "Alice", ["Coffee"]).status_code == 200
+    assert submit(bob, code, "Bob", ["Coffee"]).status_code == 200
+
+
+def _naan_room(people, quantity=2, price="90"):
+    """`quantity` naans; `people` guests join besides the host Alice."""
+    host = new_client()
+    resp = host.post("/create", data={
+        "host_name": "Alice", "room_name": "Dinner", "num_people": str(len(people) + 1),
+        "receipt_json": json.dumps({"items": [{"name": "Naan", "price": price, "quantity": quantity}],
+                                    "subtotal": price, "total": price}),
+    })
+    code = resp.headers["Location"].rsplit("/", 1)[-1]
+    clients = {"Alice": host}
+    for name in people:
+        clients[name] = new_client()
+        assert join(clients[name], code, name).status_code == 302
+    return code, clients
+
+
+def _item_totals(code):
+    from utils.bill_split import calculate_bill_split
+
+    return {n: d["item_total"] for n, d in calculate_bill_split(room(code))["user_breakdown"].items()}
+
+
+def test_two_dishes_shared_between_four_people():
+    code, c = _naan_room(["Bob", "Cara", "Dev"])
+    for name in c:
+        assert _submit_portions(c[name], code, name, {"Naan": 0}).status_code == 200, name
+    assert room(code)["quantity_mismatches"] == []
+    assert _item_totals(code) == {"Alice": 22.5, "Bob": 22.5, "Cara": 22.5, "Dev": 22.5}
+
+
+def test_one_claims_a_unit_and_any_number_share_the_rest():
+    # Three dosas for 300: Alice had one to herself, the other two go round the table.
+    code, c = _naan_room(["Bob", "Cara", "Dev", "Esha"], quantity=3, price="300")
+    assert _submit_portions(c["Alice"], code, "Alice", {"Naan": 1}).status_code == 200
+    for name in ("Bob", "Cara", "Dev", "Esha"):
+        assert _submit_portions(c[name], code, name, {"Naan": 0}).status_code == 200, name
+    assert _item_totals(code) == {"Alice": 100.0, "Bob": 50.0, "Cara": 50.0, "Dev": 50.0, "Esha": 50.0}
+
+
+def test_a_unit_stays_back_while_someone_is_sharing():
+    # Three dosas: Bob is sharing, so Alice and Cara cannot claim all three between them.
+    code, c = _naan_room(["Bob", "Cara"], quantity=3, price="300")
+    assert _submit_portions(c["Bob"], code, "Bob", {"Naan": 0}).status_code == 200
+    assert _submit_portions(c["Alice"], code, "Alice", {"Naan": 2}).status_code == 200
+    resp = _submit_portions(c["Cara"], code, "Cara", {"Naan": 1})
+    assert resp.status_code == 409
+    assert resp.get_json()["message"] == (
+        "No Naan left to claim: Alice has 2, Bob is sharing the rest. You can share instead."
+    )
+    assert _submit_portions(c["Cara"], code, "Cara", {"Naan": 0}).status_code == 200
+    assert _item_totals(code) == {"Alice": 200.0, "Bob": 50.0, "Cara": 50.0}
+
+
+def test_units_can_never_exceed_the_bill():
+    # shlok 1, Jsoh 2 of three; levi can neither claim a fourth nor share nothing.
+    host = new_client()
+    resp = host.post("/create", data={
+        "host_name": "shlok", "room_name": "Breakfast", "num_people": "3",
+        "receipt_json": json.dumps({"items": [{"name": "MASALA DOSA", "price": "300", "quantity": 3}],
+                                    "subtotal": "300", "total": "300"}),
+    })
+    code = resp.headers["Location"].rsplit("/", 1)[-1]
+    jsoh, levi = new_client(), new_client()
+    assert join(jsoh, code, "Jsoh").status_code == 302 and join(levi, code, "levi").status_code == 302
+    assert _submit_portions(host, code, "shlok", {"MASALA DOSA": 1}).status_code == 200
+    assert _submit_portions(jsoh, code, "Jsoh", {"MASALA DOSA": 2}).status_code == 200
+    resp = _submit_portions(levi, code, "levi", {"MASALA DOSA": 1})
+    assert resp.status_code == 409
+    assert resp.get_json()["message"] == "No MASALA DOSA left to claim: shlok has 1, Jsoh has 2."
+    assert _submit_portions(levi, code, "levi", {"MASALA DOSA": 0}).status_code == 409
+    assert room(code)["quantity_mismatches"] == []
+
+
+def test_tax_split_switch_is_on_by_default_and_can_be_turned_off():
+    code, host, bob = _dosa_room()
+    page = host.get(f"/edit/{code}").get_data(as_text=True)
+    assert 'name="tax_proportional" value="1" checked' in page
+    assert submit(bob, code, "Bob", ["Coffee"]).status_code == 200
+
+    r = room(code)
+    form = {
+        "item_id": [str(i["id"]) for i in r["items"]],
+        "item_name": ["Masala Dosa", "Coffee"], "item_price": ["500", "60"],
+        "item_quantity": ["5", "1"], "item_category": ["other", "other"],
+        "subtotal": "560", "total": "560", "tax_split_set": "1",
+    }
+    assert host.post(f"/edit/{code}", data=form).status_code == 302          # switch off
+    r = room(code)
+    assert r["ocr_data"]["taxSplit"] == "equal"
+    assert r["submitted_users"] == {"Bob"}               # nobody is sent back to re-pick
+    assert 'name="tax_proportional" value="1">' in host.get(f"/edit/{code}").get_data(as_text=True)
+
+    assert host.post(f"/edit/{code}", data={**form, "tax_proportional": "1"}).status_code == 302
+    assert room(code)["ocr_data"]["taxSplit"] == "proportional"
+    # A form without the switch at all (an old cached page) leaves the choice alone.
+    form.pop("tax_split_set")
+    assert host.post(f"/edit/{code}", data=form).status_code == 302
+    assert room(code)["ocr_data"]["taxSplit"] == "proportional"
+
+
+def test_reopened_picks_stay_on_hold_for_their_owner():
+    # Three dosas: Alice has 2, Bob has 1. Bob reopens his picks to change something else;
+    # Cara, who joined late, must not be able to take or share Bob's dosa meanwhile.
+    code, c = _naan_room(["Bob", "Cara"], quantity=3, price="300")
+    assert _submit_portions(c["Alice"], code, "Alice", {"Naan": 2}).status_code == 200
+    assert _submit_portions(c["Bob"], code, "Bob", {"Naan": 1}).status_code == 200
+    assert post_json(c["Bob"], f"/room/{code}/user/Bob/revoke").status_code == 200
+
+    naan = item_ids(code, "Naan")[0]
+    seen = c["Cara"].get(f"/room/{code}/status").get_json()["taken"][naan]
+    assert seen == [{"name": "Alice", "portions": 2}, {"name": "Bob", "portions": 1}]
+    assert _submit_portions(c["Cara"], code, "Cara", {"Naan": 1}).status_code == 409
+    resp = _submit_portions(c["Cara"], code, "Cara", {"Naan": 0})
+    assert resp.status_code == 409
+    assert "Alice has 2, Bob has 1" in resp.get_json()["message"]
+
+    # Bob can send his own again, and can also give it up, which frees it for Cara.
+    assert _submit_portions(c["Bob"], code, "Bob", {"Naan": 1}).status_code == 200
+    assert post_json(c["Bob"], f"/room/{code}/user/Bob/revoke").status_code == 200
+    assert submit(c["Bob"], code, "Bob", []).status_code == 200
+    assert _submit_portions(c["Cara"], code, "Cara", {"Naan": 1}).status_code == 200
+

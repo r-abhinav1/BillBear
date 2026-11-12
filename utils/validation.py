@@ -17,6 +17,7 @@ NAME_MAX = 30
 ROOM_NAME_MAX = 60
 ITEM_NAME_MAX = 80
 MAX_ITEMS = 200
+MAX_QUANTITY = 99
 PRICE_LIMIT = Decimal("10000000")
 
 _NAME_PUNCT = set(" .'-_")
@@ -113,10 +114,24 @@ def format_price(amount: Optional[Decimal]) -> str:
     return f"₹{amount:.2f}"
 
 
+def normalize_quantity(raw: Any) -> int:
+    """How many of a dish the bill lists: "5", 5, "5.0", "x2" -> 1..99. Anything else -> 1."""
+    if isinstance(raw, bool) or raw is None:
+        return 1
+    match = re.search(r"\d+", str(raw))
+    if not match:
+        return 1
+    try:
+        value = int(match.group())
+    except ValueError:
+        return 1
+    return min(max(value, 1), MAX_QUANTITY)
+
+
 def clean_items(raw_items: Any, strict_prices: bool = False) -> List[dict]:
     """
-    Normalize a list of {name, price[, id, category]} into
-    [{id|None, name, price: Decimal|None, category}].
+    Normalize a list of {name, price[, id, category, quantity]} into
+    [{id|None, name, price: Decimal|None, category, quantity}].
     Drops nameless rows. With strict_prices, an unparsable price raises ValueError;
     otherwise it becomes None (used for LLM output, which the host reviews).
     """
@@ -145,6 +160,7 @@ def clean_items(raw_items: Any, strict_prices: bool = False) -> List[dict]:
             "name": name,
             "price": price,
             "category": normalize_item_category(raw.get("category")),
+            "quantity": normalize_quantity(raw.get("quantity")),
         })
         if len(cleaned) > MAX_ITEMS:
             raise ValueError(f"A bill can have at most {MAX_ITEMS} items.")

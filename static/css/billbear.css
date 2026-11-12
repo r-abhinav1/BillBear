@@ -336,3 +336,71 @@ details.fold > summary { cursor: pointer; font-weight: 600; padding: 10px 0; min
 .switch__text b { font-weight: 700; }
 .switch__text span { font-size: 0.9rem; opacity: 0.85; }
 @media (prefers-reduced-motion: reduce) { .switch__track, .switch__track::after { transition: none; } }
+
+/* ---- Help pages ---- */
+.help__small { font-size: 0.93rem; line-height: 1.35; }
+.help .card h2, .help .paper h2 { font-size: 1.15rem; }
+.help__icon { width: 38px; height: 38px; flex-shrink: 0; border: var(--line) solid var(--ink); border-radius: 12px; background: var(--honey); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; }
+
+/* The bear says the point of the page in one line */
+.say { display: flex; align-items: flex-end; gap: 12px; }
+.say__bear { flex-shrink: 0; }
+.say__bubble { flex: 1; padding: 12px 14px; border: var(--line) solid var(--ink); border-radius: 18px 18px 18px 4px; background: var(--paper); color: var(--ink); box-shadow: 4px 4px 0 var(--shadow); font-size: 1.08rem; font-weight: 700; line-height: 1.25; }
+
+.tag { display: inline-block; padding: 1px 9px; border: 2px solid var(--ink); border-radius: 10px; background: var(--honey); color: var(--ink); font-size: 0.78rem; font-weight: 700; line-height: 1.35; white-space: nowrap; vertical-align: 1px; }
+.tag--plain { background: var(--field); }
+
+.stepper--mock { flex-shrink: 0; gap: 8px; }
+.stepper--mock span { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border: var(--line) solid var(--ink); border-radius: 12px; background: var(--paper); font-family: var(--mono); font-size: 1.2rem; font-weight: 600; }
+.stepper--mock span.is-off { opacity: 0.35; }
+.stepper--mock b { min-width: 56px; text-align: center; font-size: 1rem; }
+
+.dosas { display: flex; justify-content: center; gap: 12px; padding: 4px 0; }
+.dosa { width: 76px; height: 76px; border: var(--line) solid var(--ink); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; line-height: 1.05; text-align: center; }
+.dosa--mine { background: var(--honey); }
+.dosa--split { flex-direction: column; background: linear-gradient(var(--field) 0 calc(50% - 1.25px), var(--ink) calc(50% - 1.25px) calc(50% + 1.25px), var(--field) calc(50% + 1.25px)); }
+.dosa--split span { flex: 1; display: flex; align-items: center; font-size: 0.72rem; }
+
+.formula { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 14px; background: var(--ink); color: var(--paper); font-family: var(--mono); font-size: 0.85rem; line-height: 1.45; }
+:root[data-theme="dark"] .formula { background: #1E1208; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .formula { background: #1E1208; } }
+.formula b { color: var(--honey); font-weight: 600; }
+
+.points { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.points li { position: relative; padding-left: 20px; font-size: 0.95rem; line-height: 1.35; }
+.points li::before { content: ""; position: absolute; left: 0; top: 0.42em; width: 9px; height: 9px; border-radius: 50%; background: var(--ink); }
+.points--no li::before { border-radius: 2px; background: var(--danger); }
+
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.compare__box { display: flex; flex-direction: column; padding: 10px; border: var(--line) solid var(--ink); border-radius: 14px; background: var(--field); line-height: 1.2; }
+.compare__box--on { background: var(--honey); }
+.compare__box b { font-size: 0.92rem; }
+.compare__box span { font-size: 0.8rem; }
+.compare__box p { margin-top: 8px; font-family: var(--mono); font-size: 0.88rem; font-weight: 600; line-height: 1.45; }
+
+/* Contents list on the help index */
+.topic { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px; border-bottom: 2px dashed var(--rule); color: var(--ink); text-decoration: none; }
+.topic:last-child { border-bottom: 0; }
+.topic > svg { flex-shrink: 0; transform: rotate(180deg); }
+.topic b { display: block; font-size: 1.08rem; line-height: 1.15; }
+.topic .grow span { display: block; font-size: 0.88rem; line-height: 1.25; color: var(--ink-soft); }
+.topic__num { width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%; background: var(--ink); color: var(--paper); display: inline-flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 0.85rem; font-weight: 600; }
+
+/* Paw-print trail: where you are in the help, and the way to the next part */
+.trail { display: flex; justify-content: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.trail li:nth-child(even) { transform: translateY(7px); }
+.trail a { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; color: var(--on-ground); opacity: 0.28; transform: rotate(78deg); }
+.trail .is-done a { opacity: 1; }
+.trail [aria-current] a { color: var(--ink); background: var(--paper); border: var(--line) solid var(--ink); border-radius: 50%; }
+.nextup { display: flex; align-items: center; gap: 14px; padding: 16px 16px 16px 18px; border: var(--line) solid var(--ink); border-radius: 18px; background: var(--ink); color: var(--paper); text-decoration: none; box-shadow: 5px 6px 0 var(--shadow); }
+:root[data-theme="dark"] .nextup { background: var(--honey); color: var(--ink); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .nextup { background: var(--honey); color: var(--ink); } }
+.nextup:active { transform: translate(2px, 2px); box-shadow: 3px 4px 0 var(--shadow); }
+.nextup__text { flex: 1; display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.nextup__kicker { font-family: var(--mono); font-size: 0.78rem; }
+.nextup__text b { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em; }
+.nextup__text span:last-child { font-size: 0.92rem; opacity: 0.9; }
+.nextup__paw { width: 52px; height: 52px; flex-shrink: 0; border: var(--line) solid var(--ink); border-radius: 50%; background: var(--honey); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; transform: rotate(78deg); }
+:root[data-theme="dark"] .nextup__paw { background: var(--paper); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .nextup__paw { background: var(--paper); } }
+.nextup__paw svg { width: 28px; height: 28px; }

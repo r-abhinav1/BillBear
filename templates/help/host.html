@@ -1,0 +1,34 @@
+{% extends 'help/_layout.html' %}
+{% from 'help/_layout.html' import say, tag, mock_stepper with context %}
+{% block topic %}
+    {{ say("You run the room. Here is everything you can do from the waiting room.") }}
+
+    <section class="card stack">
+        <h2>Manage a guest</h2>
+        <p class="help__small">Tap Manage next to their name.</p>
+        <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('repick', 20) }}</span><div><h3>Let them re-pick</h3><p class="help__small">Reopens their picks. Their phone asks them to choose again.</p></div></div>
+        <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('phone', 20) }}</span><div><h3>Move them to a new phone</h3><p class="help__small">For a dead battery or a closed tab. They rejoin with the same name and keep their picks.</p></div></div>
+        <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('remove', 20) }}</span><div><h3>Remove from the room</h3><p class="help__small">Their picks are thrown away and their seat is freed.</p></div></div>
+    </section>
+
+    <section class="card stack">
+        <div class="row row--between" style="align-items: center">
+            <div><h2>People at the table</h2><p class="help__small">Change the head count, or tap Not coming to drop empty seats so the bill can be split.</p></div>
+            {{ mock_stepper("4") }}
+        </div>
+        <hr class="dash">
+        <h2>Edit dishes</h2>
+        <p class="help__small">Changing a name, price or quantity sends everyone back to confirm their picks. Changing veg or non-veg, or the tax switch, does not.</p>
+        <hr class="dash">
+        <h2>Split the bill</h2>
+        <p class="help__small">Possible once everyone has joined and sent their picks. Bear warns you first about dishes nobody picked.</p>
+        <hr class="dash">
+        <h2>Reopen the picks</h2>
+        <p class="help__small">Split too early, or someone picked wrong? Reopen from the results page and split again.</p>
+    </section>
+
+    <section class="card stack">
+        <h2>Save your host link</h2>
+        <p class="help__small">It gets you back in as host on another phone, or after clearing your browser. Anyone with the link becomes the host, so keep it to yourself.</p>
+    </section>
+{% endblock %}

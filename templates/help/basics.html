@@ -1,0 +1,43 @@
+{% extends 'help/_layout.html' %}
+{% from 'help/_layout.html' import say, tag, mock_stepper with context %}
+{% block topic %}
+    {{ say("One person scans, everyone taps, and I do the sums.") }}
+    <section class="receipt">
+        <div class="paper stack">
+            {% for title, text in [
+                ("The host scans the bill", "A photo is enough. Typing the dishes in works too."),
+                ("The host checks what Bear read", "Names, prices, how many of each, and the totals printed on the bill."),
+                ("Everyone joins the room", "With the six-character code or the QR. No accounts, nothing to install."),
+                ("Each person taps what they had", "Then presses Send my picks. You can change them until the bill is split."),
+                ("The host splits the bill", "Everyone sees what they owe, line by line, and can download a PDF."),
+            ] %}
+            <div class="row" style="align-items: flex-start">
+                <span class="topic__num">{{ loop.index }}</span>
+                <div><h2 style="font-size: 1.1rem">{{ title }}</h2><p class="help__small">{{ text }}</p></div>
+            </div>
+            {% if not loop.last %}<hr class="dash">{% endif %}
+            {% endfor %}
+        </div>
+        <div class="tear"></div>
+    </section>
+
+    <section class="card stack">
+        <h2>One dish, several people</h2>
+        <p class="help__small">Everyone who had some taps it, and the price is split equally between them.</p>
+        <hr class="dash">
+        <div class="lines">
+            <div class="line"><span>Paneer Tikka</span><span>₹330.00</span></div>
+            <div class="line line--muted"><span>Shlok, Sanjana and Manjari tapped it</span><span>₹110.00 each</span></div>
+        </div>
+    </section>
+
+    <section class="card stack">
+        <h2>Good to know</h2>
+        <ul class="points">
+            <li>Rooms are deleted 24 hours after the last activity.</li>
+            <li>No accounts. The room remembers your phone.</li>
+            <li>Picks you haven't sent are kept on your phone, so the back button loses nothing.</li>
+            <li>A dish nobody taps is charged to no one. The host is warned before splitting.</li>
+        </ul>
+    </section>
+{% endblock %}

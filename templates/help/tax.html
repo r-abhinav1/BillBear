@@ -1,0 +1,36 @@
+{% extends 'help/_layout.html' %}
+{% from 'help/_layout.html' import say, tag, mock_stepper with context %}
+{% block topic %}
+    {{ say("Tax follows the food, unless the host says to split it equally.") }}
+
+    <section class="card stack">
+        <div class="lines">
+            <div class="line"><span>Shlok had the biryani</span><span>₹300.00</span></div>
+            <div class="line"><span>Sanjana had the dal</span><span>₹100.00</span></div>
+            <div class="line line--muted"><span>Service charge and GST</span><span>₹80.00</span></div>
+        </div>
+        <hr class="dash">
+        <div class="compare">
+            <div class="compare__box compare__box--on">
+                <b>By what each had</b><span>the usual setting</span>
+                <p>Shlok ₹360<br>Sanjana ₹120</p>
+            </div>
+            <div class="compare__box">
+                <b>Equally</b><span>if the host turns it off</span>
+                <p>Shlok ₹340<br>Sanjana ₹140</p>
+            </div>
+        </div>
+        <p class="help__small">Shlok ordered three quarters of the food, so with the usual setting Shlok pays three quarters of the ₹80.</p>
+    </section>
+
+    <section class="card stack">
+        <h2>How it's decided</h2>
+        <ul class="points">
+            <li>The host sets it with a switch under the totals when checking the bill, and can change it later from Edit dishes.</li>
+            <li>It covers service charge, CGST, SGST and IGST.</li>
+            <li>A discount always follows the food: a bigger order gets more of it.</li>
+            <li>Someone who picked nothing pays nothing, whichever way it is set.</li>
+            <li>The results page and the PDF say which way the bill was split.</li>
+        </ul>
+    </section>
+{% endblock %}

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% import '_ui.html' as ui %}
 {% block title %}BillBear: everyone pays for what they ate{% endblock %}
-{% block nav %}<a href="/about">About</a><a href="/terms">Terms</a>{% endblock %}
+{% block nav %}<a href="/help">Help</a><a href="/terms">Terms</a>{% endblock %}
 {% block head %}
 <style>
     .home-hero { position: relative; padding-bottom: 56px; min-height: 250px; }
@@ -39,6 +39,7 @@
         </div>
         <div class="tear"></div>
     </section>
+    <p class="center" style="margin-top: 22px"><a class="textlink" href="/help" style="font-size: 1rem; font-weight: 700">First time here? Bear explains how it works</a></p>
 </main>
 {% endblock %}
 {% block scripts %}

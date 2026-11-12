@@ -1,0 +1,64 @@
+{% extends 'help/_layout.html' %}
+{% from 'help/_layout.html' import say, tag, mock_stepper with context %}
+{% block topic %}
+    {{ say("When the bill has several of one dish, tell me if you shared them or had your own.") }}
+
+    <section class="card stack">
+        <div class="line line--total"><span>Masala Dosa <span class="pick__qty">×3</span></span><span>₹300.00</span></div>
+        <hr class="dash">
+        <div class="row row--between" style="align-items: center">
+            <div>{{ tag("Shared") }}<p class="help__small" style="margin-top: 5px">A tap means shared. You split whatever nobody claims.</p></div>
+            {{ mock_stepper("Shared", minus_off=true) }}
+        </div>
+        <hr class="dash">
+        <div class="row row--between" style="align-items: center">
+            <div>{{ tag("1 yours") }}<p class="help__small" style="margin-top: 5px">Press + for each one you had to yourself. You pay the price of one for each.</p></div>
+            {{ mock_stepper("1") }}
+        </div>
+    </section>
+
+    <section class="receipt">
+        <div class="paper stack">
+            <h2>Three dosas, ₹300, four people</h2>
+            <div class="dosas" role="img" aria-label="Three dosas: one is Shlok's, one is Sanjana's, and one is split between Manjari and Abhinav">
+                <span class="dosa dosa--mine">Shlok</span>
+                <span class="dosa dosa--mine">Sanjana</span>
+                <span class="dosa dosa--split"><span>Manjari</span><span>Abhinav</span></span>
+            </div>
+            <div class="lines">
+                <div class="line"><span>Shlok {{ tag("1 yours") }}</span><span>₹100.00</span></div>
+                <div class="line"><span>Sanjana {{ tag("1 yours") }}</span><span>₹100.00</span></div>
+                <div class="line"><span>Manjari {{ tag("Shared", plain=true) }}</span><span>₹50.00</span></div>
+                <div class="line"><span>Abhinav {{ tag("Shared", plain=true) }}</span><span>₹50.00</span></div>
+                <hr class="dash">
+                <div class="line line--total"><span>Adds up to</span><span>₹300.00</span></div>
+            </div>
+        </div>
+        <div class="tear"></div>
+    </section>
+
+    <div class="formula" role="group" aria-label="The two formulas">
+        <p><b>yours</b> = price ÷ how many on the bill × how many you claimed</p>
+        <p><b>shared</b> = price of the unclaimed ones ÷ people sharing</p>
+    </div>
+
+    <section class="card stack">
+        <h2>What Bear won't allow</h2>
+        <ul class="points points--no">
+            <li><b>Claiming more than the bill lists.</b> If all three are claimed, a fourth claim is refused and you're told who has them.</li>
+            <li><b>Taking the last one from the sharers.</b> While anyone is sharing, one stays unclaimed for them.</li>
+            <li><b>Sharing when nothing is left.</b> If every one is claimed, there is nothing to split.</li>
+        </ul>
+    </section>
+
+    <section class="card stack">
+        <h2>Worth knowing</h2>
+        <ul class="points">
+            <li><b>Sharing alone?</b> You pay for everything unclaimed until someone else shares too.</li>
+            <li><b>Two of three claimed and nobody sharing?</b> The third is charged to no one. The host is warned before splitting.</li>
+            <li><b>Two people send at the same moment?</b> The first one in gets it. The other is told what is left.</li>
+            <li><b>Changing your picks?</b> What you sent stays on hold for you until you send again.</li>
+            <li><b>Only one of a dish on the bill?</b> There is nothing to claim. Everyone who taps it splits it equally.</li>
+        </ul>
+    </section>
+{% endblock %}

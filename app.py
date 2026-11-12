@@ -376,9 +376,39 @@ def index():
     return render_template("index.html")
 
 
+# Help: an index and one page per topic, read in this order.
+HELP_TOPICS = [
+    {"slug": "basics", "title": "The basics", "blurb": "From scan to split in five steps"},
+    {"slug": "sharing", "title": "Shared or yours", "blurb": "When the bill has several of one dish"},
+    {"slug": "tax", "title": "Tax and service", "blurb": "Who pays how much of the charges"},
+    {"slug": "host", "title": "For the host", "blurb": "Everything you can do in the room"},
+    {"slug": "scan", "title": "The scan", "blurb": "How Bear reads the bill, and where it slips"},
+]
+
+
+@app.route("/help")
+def help_index():
+    return render_template("help/index.html", topics=HELP_TOPICS)
+
+
+@app.route("/help/<topic>")
+def help_topic(topic):
+    index = next((i for i, t in enumerate(HELP_TOPICS) if t["slug"] == topic), None)
+    if index is None:
+        return redirect(url_for("help_index"))
+    return render_template(
+        f"help/{HELP_TOPICS[index]['slug']}.html",
+        topics=HELP_TOPICS,
+        topic=HELP_TOPICS[index],
+        position=index + 1,
+        next_topic=HELP_TOPICS[index + 1] if index + 1 < len(HELP_TOPICS) else None,
+    )
+
+
 @app.route("/about")
 def about():
-    return render_template("about.html")
+    # The About page was folded into Help.
+    return redirect(url_for("help_index"), code=301)
 
 
 @app.route("/terms")

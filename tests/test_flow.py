@@ -695,3 +695,23 @@ def test_reopened_picks_stay_on_hold_for_their_owner():
     assert submit(c["Bob"], code, "Bob", []).status_code == 200
     assert _submit_portions(c["Cara"], code, "Cara", {"Naan": 1}).status_code == 200
 
+
+def test_help_pages_link_through_in_order(client):
+    import app as app_module
+
+    index = client.get("/help")
+    assert index.status_code == 200
+    slugs = [t["slug"] for t in app_module.HELP_TOPICS]
+    for position, slug in enumerate(slugs):
+        page = client.get(f"/help/{slug}")
+        assert page.status_code == 200, slug
+        text = page.get_data(as_text=True)
+        assert f'href="/help/{slug}"' in index.get_data(as_text=True)
+        if position + 1 < len(slugs):
+            assert f'class="nextup" href="/help/{slugs[position + 1]}"' in text
+        else:
+            assert 'class="nextup" href="/create?mode=image"' in text
+    assert client.get("/help/nope").status_code == 302
+    about = client.get("/about")
+    assert about.status_code == 301 and about.headers["Location"].endswith("/help")
+    assert 'href="/help"' in client.get("/").get_data(as_text=True)

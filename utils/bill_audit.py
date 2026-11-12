@@ -7,6 +7,10 @@ group collectively didn't assign every item to someone.
 """
 from typing import Any, Dict, List
 
+# Bills round the grand total ("round off"), usually by up to ₹1; per-person
+# shares are rounded to the paisa. Differences within this are not reported.
+ROUND_OFF_TOLERANCE = 1.0
+
 
 def _parse_amount(value: Any) -> float:
     if value is None or value == "N/A":
@@ -55,7 +59,7 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
         for i in items
         if item_sharing.get(i.get("name"), 0) > 0
     )
-    if bill_subtotal > 0 and abs(ordered_subtotal - bill_subtotal) > 0.01:
+    if bill_subtotal > 0 and round(abs(ordered_subtotal - bill_subtotal), 2) > 0.0:
         warnings.append({
             "severity": "info",
             "title": "Items paid for < bill subtotal",
@@ -67,7 +71,7 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
         })
 
     # --- Grand total vs printed bill total ----------------------------------
-    if bill_total > 0 and abs(reported_grand - bill_total) > 0.01:
+    if bill_total > 0 and round(abs(reported_grand - bill_total), 2) > ROUND_OFF_TOLERANCE:
         delta = bill_total - reported_grand
         sign = "higher" if delta > 0 else "lower"
         warnings.append({

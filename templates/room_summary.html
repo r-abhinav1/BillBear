@@ -395,13 +395,37 @@
 
     <!-- Connection status indicator -->
     <div id="connection-status" class="connection-status connecting">
-        🔄 Connecting...
+        🔄 Connecting…
     </div>
 
     <main class="container">
         <div class="room-info">
             <h2>{{ room.room_name }}</h2>
             <p>Host: {{ room.host_name }}</p>
+        </div>
+
+        <div class="actions" id="actions-container">
+            {% if me %}
+                {% if room.finalized %}
+                <a href="{{ url_for('results_page', room_code=room_code) }}" class="btn btn-success">📊 View the split</a>
+                {% elif me.submitted %}
+                <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn-success">
+                    ✅ Items Selected - Go to Waiting Room
+                </a>
+                {% else %}
+                <a href="{{ url_for('select_items', room_code=room_code, user_name=me.name) }}" class="btn btn-success">
+                    🛒 Select My Items
+                </a>
+                <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn-primary">
+                    ⏳ Go to Waiting Room
+                </a>
+                {% endif %}
+                {% if is_host and not room.finalized %}
+                <a href="{{ url_for('edit_items', room_code=room_code) }}" class="btn btn-primary">✏️ Edit Items</a>
+                {% endif %}
+            {% else %}
+                <a href="{{ url_for('join_room', room_code=room_code) }}" class="btn btn-success">🙋 Join this room</a>
+            {% endif %}
         </div>
 
         <div class="info-grid">
@@ -412,17 +436,17 @@
 
             <div class="info-item">
                 <div class="info-label">Expected People</div>
-                <div class="info-value">{{ room.num_people }}</div>
+                <div class="info-value" id="expectedValue">{{ room.num_people }}</div>
             </div>
 
             <div class="info-item">
                 <div class="info-label">Joined Users</div>
-                <div class="info-value">{{ room.users | length }}</div>
+                <div class="info-value" id="joinedValue">{{ room.users | length }}</div>
             </div>
 
             <div class="info-item">
                 <div class="info-label">Items Selected</div>
-                <div class="info-value">{{ room.get('submitted_users', []) | length }} / {{ room.users | length }}</div>
+                <div class="info-value" id="submittedValue">{{ room.get('submitted_users', []) | length }} / {{ room.users | length }}</div>
             </div>
         </div>
 
@@ -436,7 +460,7 @@
             
             <div class="join-url">
                 <span id="joinUrl">{{ join_url }}</span>
-                <button type="button" class="copy-btn" onclick="copyToClipboard()" id="copyBtn">
+                <button type="button" class="copy-btn" id="copyBtn">
                     📋 Copy
                 </button>
             </div>
@@ -485,23 +509,20 @@
             </div>
         </div>
 
-        <div class="actions" id="actions-container">
-            {% if room.host_name in room.get('submitted_users', []) %}
-                <a href="/room/{{ room_code }}/waiting/{{ room.host_name }}" class="btn btn-success">
-                    ✅ Items Selected - Go to Waiting Room
-                </a>
-            {% else %}
-                <a href="/room/{{ room_code }}/user/{{ room.host_name }}/select-items" class="btn btn-success">
-                    🛒 Select My Items
-                </a>
-                <a href="/room/{{ room_code }}/waiting/{{ room.host_name }}" class="btn btn-primary">
-                    ⏳ Go to Waiting Room
-                </a>
-            {% endif %}
-            <a href="/edit/{{ room_code }}" class="btn btn-primary">
-                ✏️ Edit Items
-            </a>
+        {% if host_link %}
+        <div class="card">
+            <h3 class="section-title">🔑 Your host link</h3>
+            <p style="color:#CCCCCC; font-size:0.9rem; margin-bottom:0.75rem;">
+                Save this privately (e.g. message it to yourself). If your phone dies or you open the room in
+                another browser, this link gives you host controls back. Don't share it.
+            </p>
+            <div class="join-url">
+                <span id="hostLinkText" style="filter:blur(4px); word-break:break-all;">{{ host_link }}</span>
+                <button type="button" class="copy-btn" id="copyHostLinkBtn">📋 Copy</button>
+            </div>
         </div>
+        {% endif %}
+
     </main>
 
     <!-- Member template for JavaScript rendering -->
@@ -517,6 +538,83 @@
     </template>
 
     <script>
+        document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
+        const copyHostLinkBtn = document.getElementById('copyHostLinkBtn');
+        if (copyHostLinkBtn) {
+            copyHostLinkBtn.addEventListener('click', async () => {
+                const text = document.getElementById('hostLinkText').textContent.trim();
+                try { await navigator.clipboard.writeText(text); copyHostLinkBtn.textContent = '✅ Copied!'; }
+                catch (_e) { copyHostLinkBtn.textContent = '❌ Copy failed'; }
+                setTimeout(() => { copyHostLinkBtn.textContent = '📋 Copy'; }, 2000);
+            });
+        }
+
+        // ------------------------------------------------------------------
+        // Live updates: members + counts refresh every few seconds.
+        // ------------------------------------------------------------------
+        (function liveLobby() {
+            const ROOM_CODE = {{ room_code | tojson }};
+            const MY_NAME = {{ (me.name if me else None) | tojson }};
+            const MY_SUBMITTED = {{ (me.submitted if me else False) | tojson }};
+            const indicator = document.getElementById('connection-status');
+            const tpl = document.getElementById('member-template');
+            const container = document.getElementById('members-container');
+            let timer = null;
+            const started = Date.now();
+
+            function setIndicator(state, text) {
+                indicator.className = 'connection-status ' + state;
+                indicator.textContent = text;
+            }
+
+            function renderMembers(d) {
+                const nodes = d.users.map(name => {
+                    const el = tpl.content.firstElementChild.cloneNode(true);
+                    el.querySelector('.member-name').textContent = name + (name === MY_NAME ? ' (you)' : '');
+                    el.querySelector('.host-badge').style.display = name === d.host_name ? 'inline-block' : 'none';
+                    const done = d.submitted_users.includes(name);
+                    el.querySelector('.selected-badge').style.display = done ? 'inline-block' : 'none';
+                    el.querySelector('.pending-badge').style.display = done ? 'none' : 'inline-block';
+                    return el;
+                });
+                container.replaceChildren(...nodes);
+            }
+
+            async function tick() {
+                timer = null;
+                try {
+                    const r = await fetch(`/room/${ROOM_CODE}/status`, { credentials: 'same-origin' });
+                    if (r.status === 404) { setIndicator('disconnected', '⌛ Room expired'); return; }
+                    const d = await r.json();
+                    if (d.status !== 'success') throw new Error('bad status');
+                    const meSubmitted = MY_NAME ? d.submitted_users.includes(MY_NAME) : false;
+                    // Buttons depend on these: re-render the page when they change.
+                    if (d.finalized || meSubmitted !== MY_SUBMITTED) { window.location.reload(); return; }
+                    document.getElementById('expectedValue').textContent = d.expected_people;
+                    document.getElementById('joinedValue').textContent = d.total_users;
+                    document.getElementById('submittedValue').textContent = `${d.submitted_count} / ${d.total_users}`;
+                    renderMembers(d);
+                    setIndicator('connected', '🟢 Live');
+                } catch (_e) {
+                    setIndicator('disconnected', '🔴 Reconnecting…');
+                }
+                schedule();
+            }
+
+            function schedule() {
+                if (document.hidden) return;
+                const age = Date.now() - started;
+                if (age > 2 * 60 * 60 * 1000) { setIndicator('disconnected', '⏸ Paused — reload to refresh'); return; }
+                timer = setTimeout(tick, age > 10 * 60 * 1000 ? 15000 : 3000);
+            }
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) { clearTimeout(timer); timer = null; }
+                else if (!timer) tick();
+            });
+            tick();
+        })();
+
         function copyToClipboard() {
             const text = document.getElementById('joinUrl').textContent.trim();
             const btn = document.getElementById('copyBtn');

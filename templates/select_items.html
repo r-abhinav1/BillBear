@@ -203,10 +203,17 @@
 
         .actions {
             display: flex;
-            gap: 1rem;
+            gap: 0.75rem;
             justify-content: center;
             flex-wrap: wrap;
             margin-top: 2rem;
+            position: sticky;
+            bottom: 0;
+            z-index: 100;
+            padding: 0.75rem;
+            background: rgba(18, 18, 18, 0.96);
+            border-top: 1px solid #333333;
+            border-radius: 12px 12px 0 0;
         }
 
         .section-title {
@@ -229,28 +236,6 @@
             display: inline-block;
         }
 
-        .floating-summary {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #1E1E1E;
-            border: 2px solid #3F51B5;
-            border-radius: 12px;
-            padding: 1rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            display: none;
-        }
-
-        .floating-summary.show {
-            display: block;
-            animation: slideUp 0.3s ease-out;
-        }
-
-        @keyframes slideUp {
-            from { transform: translateY(100%); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
 
         .no-items {
             text-align: center;
@@ -365,6 +350,11 @@
 
         <div class="user-info">
             <h3>👋 Welcome, {{ user_name }}!</h3>
+            <p style="margin-top:0.5rem; font-size:0.9rem;">
+                <a href="{{ url_for('room_summary', room_code=room_code) }}" style="color:#9FA8DA;">🏠 Room page</a>
+                &nbsp;·&nbsp;
+                <a href="{{ url_for('waiting_room', room_code=room_code, user_name=user_name) }}" style="color:#9FA8DA;">👥 See who's done</a>
+            </p>
         </div>
 
         <div class="instructions">
@@ -386,9 +376,9 @@
                         <input type="checkbox"
                                id="item_{{ loop.index }}"
                                name="selected_items"
-                               value="{{ item.name }}"
+                               value="{{ item.id }}"
                                class="item-checkbox"
-                               {% if item.name in (pre_selected or []) %}checked{% endif %}
+                               {% if item.id in (pre_selected or []) %}checked{% endif %}
                                onchange="updateSelection()">
                         <div class="item-details">
                             <span class="item-name">{{ item.name }}</span>
@@ -410,7 +400,7 @@
 
             <div class="actions">
                 <button type="submit" class="btn btn-success" id="submitBtn">
-                    ✅ Submit Selection
+                    ✅ Submit (<span id="submitCount">0</span>)
                 </button>
                 <button type="button" class="btn btn-primary" onclick="selectAll()">
                     ☑️ Select All
@@ -422,14 +412,6 @@
             <div id="submitStatus" style="margin-top:1rem; text-align:center; min-height:1.4rem; color:#B0BEC5;"></div>
         </form>
 
-        <div class="floating-summary" id="floatingSummary">
-            <div class="selected-count" id="floatingCount">
-                0 items selected
-            </div>
-            <button type="button" class="btn btn-success" onclick="document.getElementById('submitBtn').click()">
-                Submit
-            </button>
-        </div>
     </main>
 
     <script>
@@ -439,7 +421,7 @@
             const countText = `${count} item${count !== 1 ? 's' : ''} selected`;
             
             document.getElementById('selectedCount').textContent = countText;
-            document.getElementById('floatingCount').textContent = countText;
+            document.getElementById('submitCount').textContent = `${count} item${count !== 1 ? 's' : ''}`;
             
             // Update item row styling
             document.querySelectorAll('.item-row').forEach(row => {
@@ -451,16 +433,7 @@
                 }
             });
             
-            // Show/hide floating summary
-            const floatingSummary = document.getElementById('floatingSummary');
-            if (count > 0) {
-                floatingSummary.classList.add('show');
-            } else {
-                floatingSummary.classList.remove('show');
-            }
-            
             // Enable/disable submit button
-            document.getElementById('submitBtn').disabled = count === 0;
         }
         
         function selectAll() {
@@ -486,7 +459,7 @@
         const ROOM_CODE = {{ room_code | tojson }};
         const USER_NAME = {{ user_name | tojson }};
 
-        // One submission_id per (room, user) lives in localStorage so that a
+        // One submission_id per (room, user, tab) lives in sessionStorage so that a
         // retry after a lost response is dedup'd server-side. A successful
         // submit clears it so the next edit mints a fresh one.
         function submissionStorageKey() {
@@ -495,19 +468,19 @@
 
         function ensureSubmissionId() {
             const key = submissionStorageKey();
-            let sid = localStorage.getItem(key);
+            let sid = sessionStorage.getItem(key);
             if (!sid) {
                 sid = (self.crypto && crypto.randomUUID)
                     ? crypto.randomUUID()
                     : 'sid-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-                localStorage.setItem(key, sid);
+                sessionStorage.setItem(key, sid);
             }
             document.getElementById('submission_id').value = sid;
             return sid;
         }
 
         function clearSubmissionId() {
-            localStorage.removeItem(submissionStorageKey());
+            sessionStorage.removeItem(submissionStorageKey());
         }
 
         function setStatus(text, type) {
@@ -526,7 +499,7 @@
                 btn.disabled = true;
             } else {
                 form.classList.remove('loading');
-                btn.disabled = document.querySelectorAll('input[name="selected_items"]:checked').length === 0;
+                btn.disabled = false;
             }
         }
 
@@ -545,6 +518,10 @@
 
         document.getElementById('selectionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            if (document.querySelectorAll('input[name="selected_items"]:checked').length === 0
+                && !confirm("You haven't picked anything, so you'll owe ₹0. Submit anyway?")) {
+                return;
+            }
             const sid = ensureSubmissionId();
             const form = e.target;
             const data = new FormData(form);

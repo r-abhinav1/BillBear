@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title or 'Bill Bear' }} - Bill Bear</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #121212; color: #fff; min-height: 100vh;
+            display: flex; align-items: center; justify-content: center; padding: 1rem;
+        }
+        .card {
+            background: #1E1E1E; border: 1px solid #333; border-radius: 16px;
+            padding: 2rem; max-width: 480px; width: 100%; text-align: center;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 0.75rem; }
+        p { color: #CFD8DC; line-height: 1.6; margin-bottom: 1.5rem; }
+        a.btn {
+            display: inline-block; padding: 0.75rem 1.5rem; border-radius: 8px;
+            background: #3F51B5; color: #fff; text-decoration: none; font-weight: 600; margin: 0.25rem;
+        }
+        a.secondary { background: transparent; border: 1px solid #555; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>{{ title or 'Something went wrong' }}</h1>
+        <p>{{ message }}</p>
+        {% if link %}<a class="btn" href="{{ link }}">{{ link_text or 'Continue' }}</a>{% endif %}
+        <a class="btn secondary" href="/">Home</a>
+    </div>
+</body>
+</html>

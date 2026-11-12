@@ -336,7 +336,7 @@
             <div class="form-group">
                 <label for="user_name">Your Name</label>
                 <div class="input-icon">
-                    <input type="text" id="user_name" name="user_name" required 
+                    <input type="text" id="user_name" name="user_name" required maxlength="30" 
                            placeholder="Enter your name" 
                            value="{{ request.form.get('user_name', '') }}"
                            autocomplete="name">
@@ -346,10 +346,10 @@
             <div class="form-group">
                 <label for="room_code">Room Code</label>
                 <div class="input-icon code-input-icon">
-                    <input type="text" id="room_code" name="room_code" required 
+                    <input type="text" id="room_code" name="room_code" required autocapitalize="characters" 
                            placeholder="Enter room code (e.g., ABC123)"
                            value="{{ request.args.get('room_code', '') or request.form.get('room_code', '') }}"
-                           maxlength="10"
+                           maxlength="6"
                            pattern="[A-Z0-9]{3,10}"
                            title="Room code should be 3-10 characters long (letters and numbers only)">
                 </div>

@@ -1,10 +1,9 @@
 Flask==2.3.3
-flask-cors==3.0.10
 gunicorn==23.0.0
 requests==2.32.4
 python-dotenv==1.1.1
 qrcode==8.2
-redis==5.0.1
+psycopg[binary]==3.2.3
 Pillow==11.2.1
 
 # --- PDF Handling & QR ---

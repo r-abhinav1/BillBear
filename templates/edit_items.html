@@ -315,6 +315,17 @@
         <div class="instructions">
             <p>Review and edit the extracted bill items below. Make sure all items and prices are correct before proceeding.</p>
         </div>
+        {% if error %}
+        <div class="card" role="alert" style="border-left:4px solid #EF5350; padding:1rem 1.25rem; margin-bottom:1.5rem; color:#EF9A9A;">
+            {{ error }}
+        </div>
+        {% endif %}
+        {% if submitted_count %}
+        <div class="card" style="border-left:4px solid #FF9800; padding:1rem 1.25rem; margin-bottom:1.5rem; color:#FFCC80;">
+            {{ submitted_count }} {{ 'person has' if submitted_count == 1 else 'people have' }} already submitted.
+            If you change anything, everyone will be asked to reconfirm their picks (their selections are kept).
+        </div>
+        {% endif %}
 
         <!-- Reconciliation banner: compares what the OCR pulled out vs the bill's own totals. -->
         <div id="reconBanner" class="card" style="padding:1rem 1.25rem; border-left:4px solid #777; margin-bottom:1.5rem;">
@@ -327,7 +338,7 @@
              style="display:none; position:fixed; right:1rem; bottom:1rem; z-index:2000;
                     background:#4CAF50; color:#fff; padding:0.9rem 1.2rem; border-radius:8px;
                     box-shadow:0 6px 20px rgba(0,0,0,0.4); font-weight:600; max-width:320px;">
-            ✅ OCR totals match the bill!
+            ✅ Totals match the bill!
         </div>
 
         <form method="POST" id="editForm" action="/edit/{{room_code}}">
@@ -346,7 +357,8 @@
                             {% for item in items['items'] %}
                             <tr class="item-row">
                                 <td>
-                                    <input type="text" name="item_name" value="{{ item.name }}" required 
+                                    <input type="hidden" name="item_id" value="{{ item.id or '' }}">
+                                    <input type="text" name="item_name" value="{{ item.name }}" required maxlength="80" 
                                            placeholder="Enter item name" aria-label="Item name">
                                 </td>
                                 <td>
@@ -504,7 +516,10 @@
         /* Live reconciliation: flag when items/taxes don't add up to total    */
         /* ------------------------------------------------------------------ */
 
-        const RECON_TOLERANCE = 0.01; // rupee-level rounding
+        // Compare in whole paise so float noise (0.1 + 0.2) never flags.
+        const paise = (n) => Math.round(n * 100);
+        // Bills round the grand total (the "round off" line), usually by up to ₹1.
+        const ROUND_OFF_PAISE = 100;
 
         function parseRupees(v) {
             if (v == null) return null;
@@ -538,6 +553,11 @@
             return { items, itemsSum, subtotal, total, expectedTotal, priced };
         }
 
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+            }[c]));
+        }
         function rupee(n) {
             if (n == null) return 'N/A';
             return '₹' + n.toFixed(2);
@@ -558,13 +578,13 @@
             const unpriced = items.filter(i => i.name && i.price == null);
             if (unpriced.length) {
                 status = 'warn';
-                rows.push(`⚠️ ${unpriced.length} item${unpriced.length>1?'s':''} missing a price (${unpriced.map(i=>i.name).slice(0,3).join(', ')}${unpriced.length>3?'…':''})`);
+                rows.push(`⚠️ ${unpriced.length} item${unpriced.length>1?'s':''} missing a price (${unpriced.map(i=>escapeHtml(i.name)).slice(0,3).join(', ')}${unpriced.length>3?'…':''})`);
             }
 
             // Items sum vs subtotal
             if (subtotal != null && priced.length) {
                 const delta = itemsSum - subtotal;
-                if (Math.abs(delta) > RECON_TOLERANCE) {
+                if (paise(Math.abs(delta)) !== 0) {
                     status = 'mismatch';
                     const off = delta > 0 ? 'higher' : 'lower';
                     rows.push(`🔴 Items add up to <strong>${rupee(itemsSum)}</strong>, but bill subtotal is <strong>${rupee(subtotal)}</strong> (${rupee(Math.abs(delta))} ${off}).`);
@@ -578,10 +598,13 @@
             // Subtotal + charges - discount vs total
             if (total != null && subtotal != null) {
                 const delta = expectedTotal - total;
-                if (Math.abs(delta) > RECON_TOLERANCE) {
+                const diff = paise(Math.abs(delta));
+                if (diff > ROUND_OFF_PAISE) {
                     status = 'mismatch';
                     const off = delta > 0 ? 'higher' : 'lower';
                     rows.push(`🔴 Subtotal + taxes/service − discount = <strong>${rupee(expectedTotal)}</strong>, but bill total is <strong>${rupee(total)}</strong> (${rupee(Math.abs(delta))} ${off}). Please verify the numbers against your bill.`);
+                } else if (diff > 0) {
+                    rows.push(`✅ Matches bill total ${rupee(total)} (bill rounded by ${rupee(diff / 100)}).`);
                 } else {
                     rows.push(`✅ Subtotal + charges − discount (${rupee(expectedTotal)}) matches bill total.`);
                 }
@@ -608,7 +631,7 @@
             } else if (status === 'ok') {
                 banner.style.borderLeftColor = '#4CAF50';
                 banner.style.background = 'rgba(76, 175, 80, 0.08)';
-                headline.textContent = '✅ OCR totals match the bill';
+                headline.textContent = '✅ Totals match the bill';
                 headline.style.color = '#81C784';
             } else {
                 banner.style.borderLeftColor = '#777';
@@ -654,7 +677,8 @@
             newRow.className = 'item-row';
             newRow.innerHTML = `
                 <td>
-                    <input type="text" name="item_name" required 
+                    <input type="hidden" name="item_id" value="">
+                    <input type="text" name="item_name" required maxlength="80" 
                            placeholder="Enter item name" aria-label="Item name">
                 </td>
                 <td>

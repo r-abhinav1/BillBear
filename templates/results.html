@@ -238,63 +238,6 @@
             box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
         }
 
-        .share-section {
-            background: #1E1E1E;
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-top: 2rem;
-            border: 1px solid #333333;
-            text-align: center;
-        }
-
-        .share-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #FFFFFF;
-            margin-bottom: 1rem;
-        }
-
-        .share-url {
-            background: #2D2D2D;
-            padding: 1rem;
-            border-radius: 8px;
-            margin: 1rem 0;
-            word-break: break-all;
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: #3F51B5;
-            border: 1px solid #333333;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .share-url-text {
-            flex: 1;
-        }
-
-        .copy-btn {
-            background: #333333;
-            color: #FFFFFF;
-            border: 2px solid #555555;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            cursor: pointer;
-            font-family: inherit;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        .copy-btn:hover {
-            background: #555555;
-            border-color: #777777;
-        }
-
-        .copy-btn.copied {
-            background: #4CAF50;
-            border-color: #4CAF50;
-        }
 
         .breakdown-details {
             margin-top: 2rem;
@@ -596,71 +539,14 @@
                 ⬇️ Download PDF
             </a>
             {% endif %}
-            <button onclick="copyShareLink()" class="btn btn-secondary" id="shareBtn">
-                📋 Copy Share Link
-            </button>
             <a href="/" class="btn btn-success">
                 🏠 New Session
             </a>
         </div>
 
-        <div class="share-section">
-            <h3 class="share-title">🔗 Share Results</h3>
-            <div class="share-url">
-                <span class="share-url-text" id="shareUrl">{{ request.url }}</span>
-                <button onclick="copyShareLink()" class="copy-btn" id="copyBtn">📋 Copy</button>
-            </div>
-        </div>
     </div>
 
     <script>
-        function copyShareLink() {
-            const text = document.getElementById('shareUrl').textContent.trim();
-            const copyBtn = document.getElementById('copyBtn');
-            const shareBtn = document.getElementById('shareBtn');
-
-            function showSuccess() {
-                copyBtn.textContent = '✅ Copied!';
-                shareBtn.textContent = '✅ Copied!';
-                copyBtn.classList.add('copied');
-                setTimeout(() => {
-                    copyBtn.textContent = '📋 Copy';
-                    shareBtn.textContent = '📋 Copy Share Link';
-                    copyBtn.classList.remove('copied');
-                }, 2000);
-            }
-
-            function showFailure() {
-                copyBtn.textContent = '❌ Failed';
-                shareBtn.textContent = '❌ Failed';
-                setTimeout(() => {
-                    copyBtn.textContent = '📋 Copy';
-                    shareBtn.textContent = '📋 Copy Share Link';
-                }, 2000);
-            }
-
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(text).then(showSuccess).catch(() => execFallback());
-            } else {
-                execFallback();
-            }
-
-            function execFallback() {
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-                document.body.appendChild(ta);
-                ta.focus();
-                ta.select();
-                try {
-                    document.execCommand('copy') ? showSuccess() : showFailure();
-                } catch (e) {
-                    showFailure();
-                }
-                document.body.removeChild(ta);
-            }
-        }
-
         /* ------------------------------------------------------------------ */
         /* Host revert: take everyone back to the selections stage             */
         /* ------------------------------------------------------------------ */
@@ -713,39 +599,29 @@
         /* Live refresh: react to host actions (revoke / remove / revert)      */
         /* ------------------------------------------------------------------ */
         (function liveResultsRefresh() {
-            let lastSig = null;
+            // The split is final; only a host "reopen" changes it. Poll slowly,
+            // and not at all while the tab is hidden.
+            let timer = null;
             async function tick() {
+                timer = null;
                 try {
                     const r = await fetch(`/room/${ROOM_CODE}/status`, { credentials: 'same-origin' });
-                    if (!r.ok) return;
-                    const d = await r.json();
-
-                    // If the host triggered a "revert & re-edit", everyone's
-                    // submission is cleared. Take this client back to their
-                    // own select-items page (with prior picks pre-checked).
-                    if (lastSig !== null && d.submitted_count === 0 && d.users.length > 0) {
-                        if (CALLER_NAME) {
-                            window.location.href =
-                                `/room/${ROOM_CODE}/user/${encodeURIComponent(CALLER_NAME)}/select-items`;
+                    if (r.ok) {
+                        const d = await r.json();
+                        if (d.status === 'success' && !d.finalized) {
+                            window.location.href = CALLER_NAME
+                                ? `/room/${ROOM_CODE}/user/${encodeURIComponent(CALLER_NAME)}`
+                                : '/';
                             return;
                         }
-                        window.location.reload();
-                        return;
-                    }
-
-                    const sig = JSON.stringify({
-                        users: d.users,
-                        submitted: d.submitted_users,
-                    });
-                    if (lastSig === null) { lastSig = sig; return; }
-                    if (sig !== lastSig) {
-                        // Something changed (revoke / remove / re-submit) — reload
-                        // so the computed split reflects the new state.
-                        window.location.reload();
                     }
                 } catch (_e) { /* ignore transient errors */ }
+                if (!document.hidden) timer = setTimeout(tick, 10000);
             }
-            setInterval(tick, 5000);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && !timer) tick();
+            });
+            timer = setTimeout(tick, 10000);
         })();
     </script>
 </body>

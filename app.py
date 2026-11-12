@@ -320,22 +320,42 @@ def _safe_filename(name: str) -> str:
     return (cleaned or "bill")[:50]
 
 
+# Images the PDF template may embed, referenced there as "bbasset/<name>".
+_PDF_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "images")
+_PDF_ASSETS = {
+    "pdf-bear.png", "pdf-watermark.png",
+    "pdf-veg.png", "pdf-nonveg.png", "pdf-egg.png", "pdf-alcohol.png", "pdf-blank.png",
+}
+
+
+def _pdf_link_callback(uri: str, rel: str) -> str:
+    """Resolve our own bundled images; block every other resource the HTML names."""
+    prefix = "bbasset/"
+    if uri.startswith(prefix) and uri[len(prefix):] in _PDF_ASSETS:
+        return os.path.join(_PDF_ASSET_DIR, uri[len(prefix):])
+    return ""
+
+
 def generate_pdf_response(room: dict, room_code: str):
     bill_split = calculate_bill_split(room)
+    all_square = all(w.get("severity") == "ok" for w in audit_bill(room, bill_split))
     html = render_template(
         "results_pdf.html",
         room=room,
         room_code=room_code,
         bill_split=bill_split,
+        all_square=all_square,
         current_date=datetime.now(),
     )
     buf = BytesIO()
     filename = f"{_safe_filename(room['room_name'])}_bill_split.pdf"
     if WEASYPRINT_AVAILABLE and not VERCEL_ENV:
+        from pathlib import Path
+
+        html = html.replace("bbasset/", Path(_PDF_ASSET_DIR).as_uri() + "/")
         weasyprint.HTML(string=html).write_pdf(buf)
     elif XHTML2PDF_AVAILABLE:
-        # link_callback blocks any external resource fetches from the HTML.
-        status = pisa.CreatePDF(html, dest=buf, link_callback=lambda uri, rel: "")
+        status = pisa.CreatePDF(html, dest=buf, link_callback=_pdf_link_callback)
         if status.err:
             raise RuntimeError("xhtml2pdf failed")
     else:

@@ -11,6 +11,8 @@ import unicodedata
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, List, Optional
 
+from .receipt_contracts import normalize_item_category
+
 NAME_MAX = 30
 ROOM_NAME_MAX = 60
 ITEM_NAME_MAX = 80
@@ -113,7 +115,8 @@ def format_price(amount: Optional[Decimal]) -> str:
 
 def clean_items(raw_items: Any, strict_prices: bool = False) -> List[dict]:
     """
-    Normalize a list of {name, price[, id]} into [{id|None, name, price: Decimal|None}].
+    Normalize a list of {name, price[, id, category]} into
+    [{id|None, name, price: Decimal|None, category}].
     Drops nameless rows. With strict_prices, an unparsable price raises ValueError;
     otherwise it becomes None (used for LLM output, which the host reviews).
     """
@@ -137,7 +140,12 @@ def clean_items(raw_items: Any, strict_prices: bool = False) -> List[dict]:
             item_id = int(item_id) if item_id not in (None, "") else None
         except (TypeError, ValueError):
             item_id = None
-        cleaned.append({"id": item_id, "name": name, "price": price})
+        cleaned.append({
+            "id": item_id,
+            "name": name,
+            "price": price,
+            "category": normalize_item_category(raw.get("category")),
+        })
         if len(cleaned) > MAX_ITEMS:
             raise ValueError(f"A bill can have at most {MAX_ITEMS} items.")
     return cleaned

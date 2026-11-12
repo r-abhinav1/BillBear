@@ -35,8 +35,8 @@ def test_parse_price_rejects(raw):
 def test_clean_items_lenient_vs_strict():
     rows = [{"name": "  Tea  ", "price": "x"}, {"name": "", "price": "1"}, {"name": "Dal", "price": "₹10"}]
     assert clean_items(rows) == [
-        {"id": None, "name": "Tea", "price": None},
-        {"id": None, "name": "Dal", "price": Decimal("10.00")},
+        {"id": None, "name": "Tea", "price": None, "category": "other"},
+        {"id": None, "name": "Dal", "price": Decimal("10.00"), "category": "other"},
     ]
     with pytest.raises(ValueError):
         clean_items(rows, strict_prices=True)
@@ -287,3 +287,31 @@ def test_audit_ignores_round_off_but_flags_real_gaps():
     room["ocr_data"]["total"] = "₹880.00"          # ₹5 off: real problem
     titles = [w["title"] for w in audit_bill(room, calculate_bill_split(room))]
     assert "Split total doesn't match bill total" in titles
+
+
+def test_item_category_normalization():
+    from utils.receipt_contracts import normalize_item_category, normalize_receipt_payload
+
+    assert normalize_item_category("Non-Veg") == "nonveg"
+    assert normalize_item_category(" ALCOHOLIC ") == "alcohol"
+    assert normalize_item_category("eggetarian") == "egg"
+    assert normalize_item_category("vegetarian") == "veg"
+    for junk in (None, "", 7, "<script>", "dessert"):
+        assert normalize_item_category(junk) == "other"
+
+    receipt = normalize_receipt_payload({"items": [
+        {"name": "Paneer Tikka", "price": "₹320", "category": "veg"},
+        {"name": "Kingfisher", "price": "₹250", "category": "Alcohol"},
+        {"name": "Cover charge", "price": "₹100"},
+    ]})
+    assert [i["category"] for i in receipt["items"]] == ["veg", "alcohol", "other"]
+    assert [i["category"] for i in clean_items(receipt["items"])] == ["veg", "alcohol", "other"]
+
+
+def test_scan_prompt_asks_for_category():
+    from utils.receipt_rules import build_image_receipt_prompt
+
+    prompt = build_image_receipt_prompt()
+    assert '"category":"[veg|nonveg|egg|alcohol|other]"' in prompt
+    for word in ("nonveg", "egg", "alcohol", "other"):
+        assert f'"{word}"' in prompt

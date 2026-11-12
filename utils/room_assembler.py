@@ -51,6 +51,7 @@ def assemble_room(
             "raw_name": row["name"],
             "price": format_price(row["price"]),
             "amount": row["price"],
+            "category": row.get("category") or "other",
         }
         for idx, row in enumerate(items_sorted)
     ]
@@ -88,7 +89,7 @@ def assemble_room(
     unclaimed = [item["name"] for item in items if item["id"] not in claimed_by_submitted]
 
     ocr_data = dict(room_row.get("ocr_data") or {})
-    ocr_data["items"] = [{"name": i["name"], "price": i["price"]} for i in items]
+    ocr_data["items"] = [{"name": i["name"], "price": i["price"], "category": i["category"]} for i in items]
 
     num_people = int(room_row["num_people"])
     still_editing = [p["name"] for p in people if not p["submitted"]]

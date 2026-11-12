@@ -192,7 +192,9 @@ def test_scan_success_with_ticket(monkeypatch):
     c.get("/create")  # issues the scan ticket
     resp = _scan(c, _jpeg_bytes())
     assert resp.status_code == 200, resp.get_json()
-    assert resp.get_json()["receipt"]["items"] == [{"name": "Tea <script>", "price": "₹30.00"}]
+    assert resp.get_json()["receipt"]["items"] == [
+        {"name": "Tea <script>", "price": "₹30.00", "category": "other"}
+    ]
 
 
 def test_scan_rejects_non_image():

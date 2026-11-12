@@ -304,6 +304,17 @@
             outline: 3px solid #3F51B5;
             outline-offset: 2px;
         }
+        select.item-category {
+            width: 100%;
+            margin-top: 0.4rem;
+            padding: 0.5rem 0.6rem;
+            border: 1px solid #333333;
+            border-radius: 8px;
+            background: #1E1E1E;
+            color: #FFFFFF;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -360,6 +371,11 @@
                                     <input type="hidden" name="item_id" value="{{ item.id or '' }}">
                                     <input type="text" name="item_name" value="{{ item.name }}" required maxlength="80" 
                                            placeholder="Enter item name" aria-label="Item name">
+                                    <select name="item_category" class="item-category" aria-label="Item type">
+                                        {% for value, label in [('veg', 'Veg'), ('nonveg', 'Non-veg'), ('egg', 'Egg'), ('alcohol', 'Alcohol'), ('other', 'Other')] %}
+                                        <option value="{{ value }}" {% if (item.category or 'other') == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
                                 </td>
                                 <td>
                                     <input type="text" name="item_price" value="{{ item.price }}" required 
@@ -467,6 +483,7 @@
                     return {
                         name: (nameInput?.value || '').trim(),
                         price: (priceInput?.value || '').trim(),
+                        category: row.querySelector('select[name="item_category"]')?.value || 'other',
                     };
                 })
                 .filter(it => it.name.length > 0);
@@ -680,6 +697,13 @@
                     <input type="hidden" name="item_id" value="">
                     <input type="text" name="item_name" required maxlength="80" 
                            placeholder="Enter item name" aria-label="Item name">
+                    <select name="item_category" class="item-category" aria-label="Item type">
+                        <option value="veg">Veg</option>
+                        <option value="nonveg">Non-veg</option>
+                        <option value="egg">Egg</option>
+                        <option value="alcohol">Alcohol</option>
+                        <option value="other" selected>Other</option>
+                    </select>
                 </td>
                 <td>
                     <input type="text" name="item_price" required 

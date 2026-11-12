@@ -1,4 +1,6 @@
 """End-to-end room flow over HTTP against a real Postgres."""
+import json
+
 from tests.conftest import item_ids, join, make_room, needs_db, new_client, post_json, room, submit
 
 pytestmark = needs_db
@@ -398,3 +400,36 @@ def test_share_links_prefer_ngrok_tunnel(monkeypatch):
     post_json(host, f"/room/{code}/finalize")
     results = host.get(f"/room/{code}/results").get_data(as_text=True)
     assert "Copy Share Link" not in results and "/results</span>" not in results
+
+
+def test_item_categories_survive_create_and_edit(client):
+    receipt_items = [
+        {"name": "Paneer Tikka", "price": "320", "category": "veg"},
+        {"name": "Chicken 65", "price": "380", "category": "Non-Veg"},
+        {"name": "Old Monk", "price": "250", "category": "alcohol"},
+        {"name": "Cover charge", "price": "100"},
+    ]
+    resp = client.post("/create", data={
+        "host_name": "Alice", "room_name": "Dinner", "num_people": "2",
+        "receipt_json": json.dumps({"items": receipt_items, "subtotal": "1050", "total": "1050"}),
+    })
+    assert resp.status_code == 302
+    code = resp.headers["Location"].rsplit("/", 1)[-1]
+    r = room(code)
+    assert [i["category"] for i in r["items"]] == ["veg", "nonveg", "alcohol", "other"]
+
+    page = client.get(f"/edit/{code}").get_data(as_text=True)
+    for value in ("veg", "nonveg", "alcohol"):
+        assert page.count(f'<option value="{value}" selected>') == 1
+
+    # Host corrects one category and adds an egg dish; a bogus value falls back to "other".
+    ids = [str(i["id"]) for i in r["items"]]
+    resp = client.post(f"/edit/{code}", data={
+        "item_id": ids + [""],
+        "item_name": ["Paneer Tikka", "Chicken 65", "Old Monk", "Cover charge", "Egg Bhurji"],
+        "item_price": ["320", "380", "250", "100", "150"],
+        "item_category": ["veg", "nonveg", "alcohol", "hacked", "egg"],
+        "subtotal": "1200", "total": "1200",
+    })
+    assert resp.status_code == 302
+    assert [i["category"] for i in room(code)["items"]] == ["veg", "nonveg", "alcohol", "other", "egg"]

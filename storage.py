@@ -100,10 +100,13 @@ def _participant_by_name(cur, code: str, name: str) -> Optional[Dict[str, Any]]:
 
 
 def _insert_items(cur, code: str, items: Iterable[dict], start: int = 0) -> None:
-    rows = [(code, start + idx, item["name"], item["price"]) for idx, item in enumerate(items)]
+    rows = [
+        (code, start + idx, item["name"], item["price"], item.get("category") or "other")
+        for idx, item in enumerate(items)
+    ]
     if rows:
         cur.executemany(
-            "INSERT INTO items (room_code, position, name, price) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO items (room_code, position, name, price, category) VALUES (%s, %s, %s, %s, %s)",
             rows,
         )
 
@@ -202,7 +205,8 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
     Diff the host's edited item list against the DB by id: update in place,
     insert new rows, delete removed rows (their claims cascade). If anything
     changed and anyone had submitted, every submission is reset so people
-    reconfirm against the new prices (their picks stay as a draft).
+    reconfirm against the new prices (their picks stay as a draft). Changing
+    only an item's category (veg/nonveg/...) does not reset anyone.
     Returns True if submissions were reset.
     """
     code = normalize_code(code)
@@ -220,13 +224,13 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
             if item_id in existing and item_id not in kept_ids:
                 kept_ids.add(item_id)
                 cur.execute(
-                    "UPDATE items SET position = %s, name = %s, price = %s WHERE id = %s",
-                    (position, item["name"], item["price"], item_id),
+                    "UPDATE items SET position = %s, name = %s, price = %s, category = %s WHERE id = %s",
+                    (position, item["name"], item["price"], item.get("category") or "other", item_id),
                 )
             else:
                 cur.execute(
-                    "INSERT INTO items (room_code, position, name, price) VALUES (%s, %s, %s, %s)",
-                    (code, position, item["name"], item["price"]),
+                    "INSERT INTO items (room_code, position, name, price, category) VALUES (%s, %s, %s, %s, %s)",
+                    (code, position, item["name"], item["price"], item.get("category") or "other"),
                 )
         removed = [item_id for item_id in existing if item_id not in kept_ids]
         if removed:

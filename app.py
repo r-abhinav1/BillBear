@@ -26,7 +26,11 @@ from storage import RoomError  # noqa: E402
 from utils.bill_audit import audit_bill  # noqa: E402
 from utils.bill_split import calculate_bill_split  # noqa: E402
 from utils.image_prep import ImageRejected, prepare_receipt_image  # noqa: E402
-from utils.receipt_contracts import AMOUNT_FIELDS, normalize_receipt_payload  # noqa: E402
+from utils.receipt_contracts import (  # noqa: E402
+    AMOUNT_FIELDS,
+    normalize_item_category,
+    normalize_receipt_payload,
+)
 from utils.receipt_pipeline import VisionFailed, VisionUnavailable, extract_receipt_from_vision  # noqa: E402
 from utils.security import (  # noqa: E402
     RATE_LIMITS,
@@ -402,7 +406,10 @@ def scan_receipt():
         )
 
     items = clean_items(receipt.get("items"))
-    receipt["items"] = [{"name": i["name"], "price": format_price(i["price"])} for i in items]
+    receipt["items"] = [
+        {"name": i["name"], "price": format_price(i["price"]), "category": i["category"]}
+        for i in items
+    ]
     receipt.pop("parser_meta", None)
     return jsonify({"status": "success", "receipt": receipt})
 
@@ -505,9 +512,10 @@ def edit_items(room_code):
         ids = request.form.getlist("item_id")
         names = request.form.getlist("item_name")
         prices = request.form.getlist("item_price")
+        categories = request.form.getlist("item_category")
         rows = [
-            {"id": item_id, "name": name, "price": price}
-            for item_id, name, price in zip_longest(ids, names, prices)
+            {"id": item_id, "name": name, "price": price, "category": category}
+            for item_id, name, price, category in zip_longest(ids, names, prices, categories)
             if name is not None
         ]
         try:
@@ -522,10 +530,21 @@ def edit_items(room_code):
             return redirect(url_for("room_summary", room_code=code))
 
     view = dict(room["ocr_data"])
-    view["items"] = [{"id": i["id"], "name": i["raw_name"], "price": i["price"]} for i in room["items"]]
+    view["items"] = [
+        {"id": i["id"], "name": i["raw_name"], "price": i["price"], "category": i["category"]}
+        for i in room["items"]
+    ]
     if error:
         # Re-show what the host typed so one bad price doesn't wipe their edits.
-        view["items"] = [{"id": r["id"], "name": r["name"], "price": r["price"] or ""} for r in rows]
+        view["items"] = [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "price": r["price"] or "",
+                "category": normalize_item_category(r["category"]),
+            }
+            for r in rows
+        ]
         view.update({field: request.form.get(field, "N/A") for field in AMOUNT_FIELDS})
     return render_template(
         "edit_items.html",

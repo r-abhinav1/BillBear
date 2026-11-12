@@ -1,32 +1,30 @@
+"""
+Vision LLM provider calls. Each call is a *single* HTTP attempt with an
+explicit timeout; retry/fallback policy lives in receipt_pipeline so it can
+respect one overall deadline.
+
+API keys go in headers (never URLs), so they can't leak through exception
+text or request logs.
+"""
 import json
 import os
+import random
 import threading
 import time
 from typing import Any, Dict, List, Optional
 
 import requests
 
-from .receipt_rules import build_image_receipt_prompt, build_text_receipt_prompt
+from .receipt_rules import build_image_receipt_prompt
 
 
 class ProviderCallError(Exception):
-    def __init__(self, message: str, retryable: bool = False):
+    def __init__(self, message: str, retryable: bool = False, billing: bool = False):
         super().__init__(message)
         self.retryable = retryable
-
-
-def _provider_timeout_seconds() -> float:
-    try:
-        return float(os.getenv("OCR_PROVIDER_TIMEOUT_SECONDS", "8"))
-    except ValueError:
-        return 8.0
-
-
-def _provider_max_attempts() -> int:
-    try:
-        return max(1, int(os.getenv("OCR_PROVIDER_MAX_ATTEMPTS", "1")))
-    except ValueError:
-        return 1
+        # True when the provider account can't pay (402 / credits depleted):
+        # an operator problem, not a bad photo.
+        self.billing = billing
 
 
 def _is_retryable_status_code(status_code: int) -> bool:
@@ -34,12 +32,9 @@ def _is_retryable_status_code(status_code: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Gemini circuit breaker
-# Opens when Gemini hits a quota-exhausted 429, stays open for a configurable
-# duration to avoid burning time on every request while quota is gone.
+# Gemini circuit breaker (per instance): opens on hard quota exhaustion.
 # ---------------------------------------------------------------------------
 _GEMINI_CB_LOCK = threading.Lock()
-_gemini_cb_open: bool = False
 _gemini_cb_open_until: float = 0.0
 
 
@@ -50,37 +45,32 @@ def _gemini_circuit_open_seconds() -> float:
         return 300.0
 
 
-def _is_gemini_circuit_open() -> bool:
-    global _gemini_cb_open, _gemini_cb_open_until
+def gemini_circuit_is_open() -> bool:
     with _GEMINI_CB_LOCK:
-        if _gemini_cb_open:
-            if time.time() < _gemini_cb_open_until:
-                return True
-            # Circuit has expired — close it and allow a retry
-            _gemini_cb_open = False
-            print("[receipt_llm] Gemini circuit breaker closed — will retry Gemini")
-        return False
+        return time.time() < _gemini_cb_open_until
 
 
 def _open_gemini_circuit(reason: str) -> None:
-    global _gemini_cb_open, _gemini_cb_open_until
+    global _gemini_cb_open_until
     duration = _gemini_circuit_open_seconds()
     with _GEMINI_CB_LOCK:
-        _gemini_cb_open = True
         _gemini_cb_open_until = time.time() + duration
     print(f"[receipt_llm] Gemini circuit breaker OPEN for {int(duration)}s — {reason}")
 
 
 def _is_quota_exhausted_response(body: str) -> bool:
-    """Return True when Gemini reports a hard quota exhaustion (limit: 0)."""
-    return "limit: 0" in body or "quota_exceeded" in body.lower() or "free_tier" in body.lower()
+    lowered = body.lower()
+    return "limit: 0" in body or "quota_exceeded" in lowered or "free_tier" in lowered
 
+
+# ---------------------------------------------------------------------------
+# JSON extraction from model text
+# ---------------------------------------------------------------------------
 
 def _extract_json_object(text: str) -> Optional[str]:
     start = text.find("{")
     if start == -1:
         return None
-
     depth = 0
     for index in range(start, len(text)):
         char = text[index]
@@ -97,14 +87,12 @@ def _parse_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     normalized = text.strip().strip("`").strip()
     if normalized.startswith("json"):
         normalized = normalized[4:].strip()
-
     try:
         parsed = json.loads(normalized)
         if isinstance(parsed, dict):
             return parsed
     except json.JSONDecodeError:
         pass
-
     json_object = _extract_json_object(normalized)
     if not json_object:
         return None
@@ -115,291 +103,124 @@ def _parse_json_from_text(text: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _collect_gemini_keys() -> List[str]:
-    candidates = [
-        os.getenv("GEMINI_API_KEYS", ""),
-        os.getenv("GEMINI_API_KEY", ""),
-        os.getenv("gemini-api-key", ""),
-    ]
+# ---------------------------------------------------------------------------
+# Credentials
+# ---------------------------------------------------------------------------
+
+def gemini_keys() -> List[str]:
     keys: List[str] = []
-    for candidate in candidates:
-        if not candidate:
-            continue
-        keys.extend([key.strip() for key in candidate.split(",") if key.strip()])
+    for candidate in (os.getenv("GEMINI_API_KEYS", ""), os.getenv("GEMINI_API_KEY", "")):
+        keys.extend(k.strip() for k in candidate.split(",") if k.strip())
+    # de-dupe, keep order
+    return list(dict.fromkeys(keys))
+
+
+def shuffled_gemini_keys() -> List[str]:
+    keys = gemini_keys()
+    random.shuffle(keys)
     return keys
 
 
 def has_gemini_credentials() -> bool:
-    return bool(_collect_gemini_keys())
-
-
-def gemini_circuit_is_open() -> bool:
-    """True when the circuit breaker is open and Gemini calls will be skipped."""
-    return _is_gemini_circuit_open()
+    return bool(gemini_keys())
 
 
 def has_openrouter_credentials() -> bool:
     return bool(os.getenv("OPENROUTER_API_KEY", "").strip())
 
 
-def call_gemini_text_normalizer(raw_text: str) -> Dict[str, Any]:
-    if _is_gemini_circuit_open():
-        raise ProviderCallError("Gemini circuit breaker open — skipping to fallback", retryable=True)
+# ---------------------------------------------------------------------------
+# Provider calls (single attempt each)
+# ---------------------------------------------------------------------------
 
-    keys = _collect_gemini_keys()
-    if not keys:
-        raise ProviderCallError("Gemini API key not configured", retryable=False)
-
-    model = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.0-flash")
-    prompt = build_text_receipt_prompt(raw_text)
-    timeout = _provider_timeout_seconds()
-    # Try each key once; if only one key is configured, one attempt is sufficient
-    # (the circuit breaker handles repeated failures at a higher level)
-    attempts = max(1, len(keys))
-
-    for attempt_index in range(attempts):
-        key = keys[attempt_index % len(keys)]
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-
-        print(f"[receipt_llm] Gemini attempt {attempt_index + 1}/{attempts} (model={model})")
-        try:
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
-        except requests.Timeout as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"Gemini timeout: {exc}", retryable=True) from exc
-        except requests.RequestException as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"Gemini request failed: {exc}", retryable=True) from exc
-
-        if response.status_code == 429:
-            body = response.text
-            if _is_quota_exhausted_response(body):
-                # Hard quota exhaustion — open circuit breaker, no point retrying any key
-                _open_gemini_circuit(f"quota exhausted (HTTP 429)")
-                raise ProviderCallError(
-                    f"Gemini quota exhausted — circuit breaker opened: {body[:200]}",
-                    retryable=True,
-                )
-            # Temporary rate limit — retry with next key if available
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"Gemini rate limited (HTTP 429): {body[:200]}", retryable=True)
-
-        if response.status_code >= 400:
-            retryable = _is_retryable_status_code(response.status_code)
-            message = f"Gemini HTTP {response.status_code}: {response.text[:300]}"
-            if retryable and attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(message, retryable=retryable)
-
-        try:
-            payload_json = response.json()
-            text = payload_json["candidates"][0]["content"]["parts"][0]["text"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderCallError(f"Gemini response parse failed: {exc}", retryable=False) from exc
-
-        parsed_json = _parse_json_from_text(text)
-        if parsed_json is None:
-            raise ProviderCallError("Gemini returned non-JSON output", retryable=False)
-        print("[receipt_llm] Gemini succeeded")
-        return parsed_json
-
-    raise ProviderCallError("Gemini request failed after retries", retryable=True)
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite"
 
 
-def call_openrouter_text_normalizer(raw_text: str) -> Dict[str, Any]:
-    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    if not api_key:
-        raise ProviderCallError("OpenRouter API key not configured", retryable=False)
+def gemini_generation_config() -> Dict[str, Any]:
+    """
+    Gemini 3 guidance: keep temperature at its default (1.0) and let
+    Flash-Lite use its default "minimal" thinking (thinking tokens are billed
+    as output). GEMINI_THINKING_LEVEL (minimal/low/medium/high) overrides it.
+    """
+    config: Dict[str, Any] = {"responseMimeType": "application/json"}
+    level = os.getenv("GEMINI_THINKING_LEVEL", "").strip().lower()
+    if level:
+        config["thinkingConfig"] = {"thinkingLevel": level}
+    return config
 
-    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-    timeout = _provider_timeout_seconds()
-    attempts = _provider_max_attempts()
-    prompt = build_text_receipt_prompt(raw_text)
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    site_url = os.getenv("OPENROUTER_SITE_URL", "").strip()
-    site_name = os.getenv("OPENROUTER_SITE_NAME", "BillBear").strip()
-    if site_url:
-        headers["HTTP-Referer"] = site_url
-    if site_name:
-        headers["X-Title"] = site_name
+def _log_gemini_usage(model: str, body: Dict[str, Any]) -> None:
+    usage = body.get("usageMetadata") or {}
+    print(
+        f"[receipt_llm] gemini usage model={model} "
+        f"in={usage.get('promptTokenCount')} out={usage.get('candidatesTokenCount')} "
+        f"thinking={usage.get('thoughtsTokenCount', 0)} total={usage.get('totalTokenCount')}"
+    )
 
+
+def call_gemini_vision(image_base64: str, mime_type: str, api_key: str, timeout: float) -> Dict[str, Any]:
+    model = os.getenv("GEMINI_IMAGE_MODEL", "").strip() or DEFAULT_GEMINI_IMAGE_MODEL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "You are a strict JSON formatter for receipt data."},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0,
+        "contents": [{
+            "parts": [
+                {"text": build_image_receipt_prompt()},
+                {"inline_data": {"mime_type": mime_type, "data": image_base64}},
+            ]
+        }],
+        "generationConfig": gemini_generation_config(),
     }
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    except requests.Timeout as exc:
+        raise ProviderCallError("Gemini Vision timed out", retryable=True) from exc
+    except requests.RequestException as exc:
+        raise ProviderCallError(f"Gemini Vision request failed: {type(exc).__name__}", retryable=True) from exc
 
-    for attempt_index in range(attempts):
-        print(f"[receipt_llm] OpenRouter attempt {attempt_index + 1}/{attempts} (model={model})")
-        try:
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=timeout,
-            )
-        except requests.Timeout as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"OpenRouter timeout: {exc}", retryable=True) from exc
-        except requests.RequestException as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"OpenRouter request failed: {exc}", retryable=True) from exc
-
-        if response.status_code >= 400:
-            retryable = _is_retryable_status_code(response.status_code)
-            message = f"OpenRouter HTTP {response.status_code}: {response.text[:300]}"
-            if retryable and attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(message, retryable=retryable)
-
-        try:
-            payload_json = response.json()
-            content = payload_json["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderCallError(f"OpenRouter response parse failed: {exc}", retryable=False) from exc
-
-        if isinstance(content, list):
-            text = "".join(
-                str(chunk.get("text", "")) for chunk in content if isinstance(chunk, dict)
-            ).strip()
-        else:
-            text = str(content).strip()
-
-        parsed_json = _parse_json_from_text(text)
-        if parsed_json is None:
-            raise ProviderCallError("OpenRouter returned non-JSON output", retryable=False)
-
-        print("[receipt_llm] OpenRouter succeeded")
-        return parsed_json
-
-    raise ProviderCallError("OpenRouter request failed after retries", retryable=True)
+    if response.status_code == 402 or (
+        response.status_code == 403 and "billing" in response.text.lower()
+    ):
+        _open_gemini_circuit(f"billing problem (HTTP {response.status_code})")
+        raise ProviderCallError(
+            f"Gemini billing error HTTP {response.status_code}: {response.text[:200]}",
+            retryable=False,
+            billing=True,
+        )
+    if response.status_code == 429:
+        if _is_quota_exhausted_response(response.text):
+            _open_gemini_circuit("quota exhausted (HTTP 429)")
+            raise ProviderCallError("Gemini quota exhausted", retryable=False)
+        raise ProviderCallError("Gemini Vision rate limited (HTTP 429)", retryable=True)
+    if response.status_code >= 400:
+        raise ProviderCallError(
+            f"Gemini Vision HTTP {response.status_code}: {response.text[:200]}",
+            retryable=_is_retryable_status_code(response.status_code),
+        )
+    try:
+        body = response.json()
+        parts = body["candidates"][0]["content"]["parts"]
+        # Skip thought parts; join the answer text.
+        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and not p.get("thought"))
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise ProviderCallError("Gemini Vision response parse failed", retryable=False) from exc
+    _log_gemini_usage(model, body)
+    parsed = _parse_json_from_text(text)
+    if parsed is None:
+        raise ProviderCallError("Gemini Vision returned non-JSON output", retryable=False)
+    return parsed
 
 
-# ---------------------------------------------------------------------------
-# Vision LLM calls — accept base64-encoded image, return structured receipt
-# ---------------------------------------------------------------------------
-
-
-def call_gemini_vision(image_base64: str, mime_type: str = "image/jpeg") -> Dict[str, Any]:
-    """Send an image to Gemini Vision and get structured receipt JSON back."""
-    if _is_gemini_circuit_open():
-        raise ProviderCallError("Gemini circuit breaker open — skipping to fallback", retryable=True)
-
-    keys = _collect_gemini_keys()
-    if not keys:
-        raise ProviderCallError("Gemini API key not configured", retryable=False)
-
-    model = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.0-flash")
-    prompt = build_image_receipt_prompt()
-    timeout = _provider_timeout_seconds()
-    attempts = max(1, len(keys))
-
-    for attempt_index in range(attempts):
-        key = keys[attempt_index % len(keys)]
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": mime_type, "data": image_base64}},
-                ]
-            }]
-        }
-
-        print(f"[receipt_llm] Gemini Vision attempt {attempt_index + 1}/{attempts} (model={model})")
-        try:
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
-        except requests.Timeout as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"Gemini Vision timeout: {exc}", retryable=True) from exc
-        except requests.RequestException as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"Gemini Vision request failed: {exc}", retryable=True) from exc
-
-        if response.status_code == 429:
-            body = response.text
-            if _is_quota_exhausted_response(body):
-                _open_gemini_circuit("quota exhausted (HTTP 429)")
-                raise ProviderCallError(
-                    f"Gemini quota exhausted — circuit breaker opened: {body[:200]}",
-                    retryable=True,
-                )
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"Gemini Vision rate limited (HTTP 429): {body[:200]}", retryable=True)
-
-        if response.status_code >= 400:
-            retryable = _is_retryable_status_code(response.status_code)
-            message = f"Gemini Vision HTTP {response.status_code}: {response.text[:300]}"
-            if retryable and attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(message, retryable=retryable)
-
-        try:
-            payload_json = response.json()
-            text = payload_json["candidates"][0]["content"]["parts"][0]["text"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderCallError(f"Gemini Vision response parse failed: {exc}", retryable=False) from exc
-
-        parsed_json = _parse_json_from_text(text)
-        if parsed_json is None:
-            raise ProviderCallError("Gemini Vision returned non-JSON output", retryable=False)
-        print("[receipt_llm] Gemini Vision succeeded")
-        return parsed_json
-
-    raise ProviderCallError("Gemini Vision failed after retries", retryable=True)
-
-
-def call_openrouter_vision(image_base64: str, mime_type: str = "image/jpeg") -> Dict[str, Any]:
-    """Send an image to OpenRouter vision model and get structured receipt JSON back."""
+def call_openrouter_vision(image_base64: str, mime_type: str, timeout: float) -> Dict[str, Any]:
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         raise ProviderCallError("OpenRouter API key not configured", retryable=False)
-
     model = os.getenv("OPENROUTER_VISION_MODEL", "nvidia/nemotron-nano-12b-v2-vl:free")
-    # Vision models on free tier can be slow; use a longer timeout
-    timeout = max(_provider_timeout_seconds(), 60.0)
-    attempts = _provider_max_attempts()
-    prompt = build_image_receipt_prompt()
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     site_url = os.getenv("OPENROUTER_SITE_URL", "").strip()
-    site_name = os.getenv("OPENROUTER_SITE_NAME", "BillBear").strip()
     if site_url:
         headers["HTTP-Referer"] = site_url
-    if site_name:
-        headers["X-Title"] = site_name
-
-    data_url = f"data:{mime_type};base64,{image_base64}"
+    headers["X-Title"] = os.getenv("OPENROUTER_SITE_NAME", "BillBear").strip() or "BillBear"
     payload = {
         "model": model,
         "messages": [
@@ -407,60 +228,35 @@ def call_openrouter_vision(image_base64: str, mime_type: str = "image/jpeg") -> 
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": build_image_receipt_prompt()},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_base64}"}},
                 ],
             },
         ],
         "temperature": 0,
     }
-
-    for attempt_index in range(attempts):
-        print(f"[receipt_llm] OpenRouter Vision attempt {attempt_index + 1}/{attempts} (model={model})")
-        try:
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=timeout,
-            )
-        except requests.Timeout as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"OpenRouter Vision timeout: {exc}", retryable=True) from exc
-        except requests.RequestException as exc:
-            if attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(f"OpenRouter Vision request failed: {exc}", retryable=True) from exc
-
-        if response.status_code >= 400:
-            retryable = _is_retryable_status_code(response.status_code)
-            message = f"OpenRouter Vision HTTP {response.status_code}: {response.text[:300]}"
-            if retryable and attempt_index < attempts - 1:
-                time.sleep(1.5 * (attempt_index + 1))
-                continue
-            raise ProviderCallError(message, retryable=retryable)
-
-        try:
-            payload_json = response.json()
-            content = payload_json["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderCallError(f"OpenRouter Vision response parse failed: {exc}", retryable=False) from exc
-
-        if isinstance(content, list):
-            text = "".join(
-                str(chunk.get("text", "")) for chunk in content if isinstance(chunk, dict)
-            ).strip()
-        else:
-            text = str(content).strip()
-
-        parsed_json = _parse_json_from_text(text)
-        if parsed_json is None:
-            raise ProviderCallError("OpenRouter Vision returned non-JSON output", retryable=False)
-
-        print("[receipt_llm] OpenRouter Vision succeeded")
-        return parsed_json
-
-    raise ProviderCallError("OpenRouter Vision failed after retries", retryable=True)
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=timeout
+        )
+    except requests.Timeout as exc:
+        raise ProviderCallError("OpenRouter Vision timed out", retryable=True) from exc
+    except requests.RequestException as exc:
+        raise ProviderCallError(f"OpenRouter Vision request failed: {type(exc).__name__}", retryable=True) from exc
+    if response.status_code >= 400:
+        raise ProviderCallError(
+            f"OpenRouter Vision HTTP {response.status_code}: {response.text[:200]}",
+            retryable=_is_retryable_status_code(response.status_code),
+        )
+    try:
+        content = response.json()["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise ProviderCallError("OpenRouter Vision response parse failed", retryable=False) from exc
+    if isinstance(content, list):
+        text = "".join(str(c.get("text", "")) for c in content if isinstance(c, dict)).strip()
+    else:
+        text = str(content).strip()
+    parsed = _parse_json_from_text(text)
+    if parsed is None:
+        raise ProviderCallError("OpenRouter Vision returned non-JSON output", retryable=False)
+    return parsed

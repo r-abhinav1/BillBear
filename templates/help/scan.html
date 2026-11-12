@@ -1,0 +1,36 @@
+{% extends 'help/_layout.html' %}
+{% from 'help/_layout.html' import say, tag, mock_stepper with context %}
+{% block topic %}
+    {{ say("I read your bill with an AI model. I'm quick, not perfect, so check my work.") }}
+
+    <section class="receipt">
+        <div class="paper stack">
+            <h2>What happens to the photo</h2>
+            <p class="help__small">It is sent to an AI model that reads the dishes, prices, quantities and totals, and marks each dish veg, non-veg, egg or alcohol. BillBear does not keep the photo.</p>
+            <hr class="dash">
+            <h2>Where it slips</h2>
+            <ul class="points">
+                <li>Blurry, folded or badly lit bills.</li>
+                <li>Quantities. "Idly (2 pcs)" is one plate, not two.</li>
+                <li>Dishes it can't classify are left unmarked.</li>
+            </ul>
+            <hr class="dash">
+            <h2>What you can do</h2>
+            <ul class="points">
+                <li>Fix anything on the check screen. It tells you when the dishes don't add up to the subtotal.</li>
+                <li>Type the dishes in yourself. Scans are limited each day.</li>
+                <li>Save the scan to a file and open it later without scanning again.</li>
+            </ul>
+        </div>
+        <div class="tear"></div>
+    </section>
+
+    <section class="card stack">
+        <h2>For a clean read</h2>
+        <ul class="points">
+            <li>Lay the bill flat and fit all of it in the frame.</li>
+            <li>Avoid shadows and glare across the prices.</li>
+            <li>A long bill is fine. One photo of the whole thing beats several pieces.</li>
+        </ul>
+    </section>
+{% endblock %}

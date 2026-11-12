@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% block title %}{{ title or 'Something went wrong' }}, BillBear{% endblock %}
+{% block content %}
+<main class="stack stack--lg">
+    <div class="center"><span class="bear-spot" style="transform: rotate(-3deg)">{{ ui.bear(200, 'Bill Bear chewing on a receipt') }}</span></div>
+    <section class="receipt">
+        <div class="paper paper--bitten stack">
+            <h1>{{ title or 'Something went wrong' }}</h1>
+            <p>{{ message }}</p>
+            <div class="actions">
+                {% if link %}<a class="btn btn--primary btn--block" href="{{ link }}">{{ link_text or 'Continue' }}</a>{% endif %}
+                <a class="btn btn--block{% if not link %} btn--primary{% endif %}" href="/">Go to home</a>
+            </div>
+        </div>
+        <div class="tear"></div>
+    </section>
+</main>
+{% endblock %}

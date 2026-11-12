@@ -1,0 +1,56 @@
+{% import '_ui.html' as ui with context %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{% block title %}BillBear{% endblock %}</title>
+    <meta name="description" content="{% block description %}Split a restaurant bill by what each person ate. Scan the bill, share a code, tap your dishes.{% endblock %}">
+    <meta name="theme-color" content="#F6C445">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/icon-192.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/icon-192.png') }}">
+    <script>
+        // Apply the saved theme before first paint; otherwise the device setting decides.
+        (function () {
+            try {
+                var saved = localStorage.getItem('bb_theme');
+                if (saved === 'dark' || saved === 'light') document.documentElement.setAttribute('data-theme', saved);
+            } catch (_e) {}
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/billbear.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="page {% block page_class %}{% endblock %}">
+        <header class="topbar">
+            {% block topbar_left %}<a class="brand" href="/">BillBear</a>{% endblock %}
+            <nav aria-label="Site">
+                {% block nav %}{% endblock %}
+                <button type="button" class="theme-toggle" id="themeToggle" aria-label="Switch between light and dark theme">
+                    <span class="moon">{{ ui.icon('moon', 20) }}</span><span class="sun">{{ ui.icon('sun', 20) }}</span>
+                </button>
+            </nav>
+        </header>
+        {% block content %}{% endblock %}
+    </div>
+    <script>
+        (function () {
+            var root = document.documentElement;
+            function current() {
+                var set = root.getAttribute('data-theme');
+                if (set) return set;
+                return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            document.getElementById('themeToggle').addEventListener('click', function () {
+                var next = current() === 'dark' ? 'light' : 'dark';
+                root.setAttribute('data-theme', next);
+                try { localStorage.setItem('bb_theme', next); } catch (_e) {}
+            });
+        })();
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

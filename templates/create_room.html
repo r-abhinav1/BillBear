@@ -1,796 +1,330 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Room - Bill Bear</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% block title %}{% if mode == 'json' %}Open a saved scan{% else %}Start a split{% endif %}, BillBear{% endblock %}
+{% block topbar_left %}<a class="backlink" href="/">{{ ui.icon('back', 18) }} Home</a>{% endblock %}
+{% block head %}
+<style>
+    form.loading { opacity: 0.6; pointer-events: none; }
+    .scan-lines { display: flex; flex-direction: column; gap: 9px; padding: 4px 0; }
+    .scan-lines div { display: flex; justify-content: space-between; }
+    .scan-lines span { height: 10px; border-radius: 5px; background: var(--rule); }
+    @keyframes scan-read { 0%, 100% { background: var(--rule); } 50% { background: var(--ink); } }
+    .is-reading .scan-lines span { animation: scan-read 1.6s ease-in-out infinite; }
+    .is-reading .scan-lines div:nth-child(2) span { animation-delay: 0.2s; }
+    .is-reading .scan-lines div:nth-child(3) span { animation-delay: 0.4s; }
+    .is-reading .scan-lines div:nth-child(4) span { animation-delay: 0.6s; }
+</style>
+{% endblock %}
+{% block content %}
+<main class="stack stack--lg">
+    <h1>{% if mode == 'json' %}Open a saved scan{% else %}Start a split{% endif %}</h1>
 
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #121212;
-            color: #FFFFFF;
-            line-height: 1.6;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-        }
+    {% if error %}<div class="notice notice--error" role="alert">{{ error }}</div>{% endif %}
 
-        .container {
-            background: #1E1E1E;
-            border-radius: 16px;
-            padding: 2rem;
-            width: 100%;
-            max-width: 500px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-            border: 1px solid #333333;
-            animation: fadeIn 0.6s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .header h1 {
-            font-size: clamp(1.8rem, 5vw, 2.5rem);
-            font-weight: 700;
-            color: #FFFFFF;
-            margin-bottom: 0.5rem;
-        }
-
-        .header p {
-            color: #CCCCCC;
-            font-size: 1.1rem;
-            font-weight: 400;
-        }
-
-        .form-container {
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .form-group label {
-            font-weight: 600;
-            color: #FFFFFF;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .form-input {
-            padding: 1rem;
-            background: #2D2D2D;
-            border: 2px solid #333333;
-            border-radius: 8px;
-            color: #FFFFFF;
-            font-size: 1rem;
-            font-family: inherit;
-            transition: all 0.3s ease;
-            min-height: 48px;
-        }
-
-        .form-input:focus {
-            outline: none;
-            border-color: #3F51B5;
-            box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
-            background: #333333;
-        }
-
-        .form-input:hover {
-            border-color: #555555;
-        }
-
-        .form-input::placeholder {
-            color: #999999;
-        }
-
-        /* Custom file input styling */
-        .file-input-wrapper {
-            position: relative;
-            overflow: hidden;
-            display: inline-block;
-            width: 100%;
-        }
-
-        .file-input-wrapper input[type="file"] {
-            position: absolute;
-            left: -9999px;
-            opacity: 0;
-        }
-
-        .file-input-label {
-            display: block;
-            padding: 1rem;
-            background: #2D2D2D;
-            border: 2px dashed #555555;
-            border-radius: 8px;
-            color: #CCCCCC;
-            font-size: 1rem;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            min-height: 48px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-        }
-
-        .file-input-label:hover {
-            border-color: #3F51B5;
-            background: #333333;
-            color: #FFFFFF;
-        }
-
-        .file-input-label.has-file {
-            border-color: #4CAF50;
-            background: rgba(76, 175, 80, 0.1);
-            color: #4CAF50;
-        }
-
-        .submit-btn {
-            padding: 1rem 2rem;
-            background: linear-gradient(135deg, #3F51B5 0%, #5C6BC0 100%);
-            color: #FFFFFF;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            min-height: 56px;
-            margin-top: 1rem;
-            box-shadow: 0 4px 15px rgba(63, 81, 181, 0.3);
-        }
-
-        .submit-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(63, 81, 181, 0.4);
-        }
-
-        .submit-btn:active {
-            transform: translateY(0);
-        }
-
-        .submit-btn:disabled {
-            background: #555555;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .back-link {
-            text-align: center;
-            margin-top: 1.5rem;
-        }
-
-        .back-link a {
-            color: #3F51B5;
-            text-decoration: none;
-            font-weight: 500;
-            transition: color 0.3s ease;
-        }
-
-        .back-link a:hover {
-            color: #5C6BC0;
-        }
-
-        .loading {
-            opacity: 0.7;
-            pointer-events: none;
-        }
-
-        .ocr-status {
-            margin-top: 0.5rem;
-            font-size: 0.85rem;
-            color: #B0BEC5;
-            min-height: 1.2rem;
-        }
-
-        .ocr-status.error {
-            color: #EF5350;
-        }
-
-        .ocr-status.success {
-            color: #66BB6A;
-        }
-
-        /* Vision fallback removed — OCR-only mode to avoid paid vision API calls */
-
-        .skip-ocr-btn {
-            padding: 0.75rem 1.5rem;
-            background: transparent;
-            color: #B0BEC5;
-            border: 1px solid #555555;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
-            margin-top: 0.5rem;
-        }
-
-        .skip-ocr-btn:hover {
-            border-color: #B0BEC5;
-            color: #FFFFFF;
-            background: #2D2D2D;
-        }
-
-        .loading .submit-btn {
-            position: relative;
-            color: transparent;
-        }
-
-        .loading .submit-btn::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 20px;
-            height: 20px;
-            border: 2px solid #FFFFFF;
-            border-top: 2px solid transparent;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            transform: translate(-50%, -50%);
-        }
-
-        @keyframes spin {
-            0% { transform: translate(-50%, -50%) rotate(0deg); }
-            100% { transform: translate(-50%, -50%) rotate(360deg); }
-        }
-
-        @media (min-width: 768px) {
-            .container {
-                padding: 3rem;
-            }
-
-            .form-container {
-                gap: 2rem;
-            }
-        }
-
-        /* Accessibility improvements */
-        input:focus, button:focus {
-            outline: 3px solid #3F51B5;
-            outline-offset: 2px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            {% if mode == 'json' %}
-            <h1>Upload Saved Scan</h1>
-            <p>Resume with a previously saved bill scan (.billbear.json)</p>
-            {% else %}
-            <h1>Upload Bill</h1>
-            <p>Scan a new bill to create a room</p>
-            {% endif %}
+    <form method="POST" action="/create" class="stack stack--lg" id="createForm" novalidate>
+        <div class="stack">
+            <div class="field">
+                <label for="host_name">Your name</label>
+                <input type="text" id="host_name" name="host_name" class="input" maxlength="30" autocomplete="given-name"
+                       placeholder="What your friends call you" value="{{ form.get('host_name', '') }}" required>
+            </div>
+            <div class="field-row">
+                <div class="field grow">
+                    <label for="room_name">What's the occasion?</label>
+                    <input type="text" id="room_name" name="room_name" class="input" maxlength="60"
+                           placeholder="Friday dinner" value="{{ form.get('room_name', '') }}" required>
+                </div>
+                <div class="field" style="width: 96px">
+                    <label for="num_people">People</label>
+                    <input type="number" id="num_people" name="num_people" class="input input--mono" min="1" max="50"
+                           inputmode="numeric" placeholder="4" value="{{ form.get('num_people', '') }}" required
+                           aria-describedby="peopleHint">
+                </div>
+            </div>
+            <p class="small soft" id="peopleHint" style="margin-top: -8px">Count yourself too.</p>
         </div>
 
-        <form method="POST" enctype="multipart/form-data" class="form-container" id="createForm">
-            <div class="form-group">
-                <label for="host_name">Host Name</label>
-                <input type="text" id="host_name" name="host_name" class="form-input"
-                       placeholder="Enter your name" required>
-            </div>
-
-            <div class="form-group">
-                <label for="room_name">Room Name</label>
-                <input type="text" id="room_name" name="room_name" class="form-input"
-                       placeholder="Give your room a name" required>
-            </div>
-
-            <div class="form-group">
-                <label for="num_people">Number of People</label>
-                <input type="number" id="num_people" name="num_people" class="form-input"
-                       placeholder="How many people will join?" min="1" max="20" required>
-            </div>
-
-            {% if mode == 'json' %}
-            <div class="form-group">
-                <label for="scan_json">Saved Scan File</label>
-                <div class="file-input-wrapper">
-                    <input type="file" id="scan_json" accept=".json,application/json" required>
-                    <label for="scan_json" class="file-input-label" id="jsonLabel">
-                        Choose .billbear.json file
-                    </label>
+        <div id="scanPanel">
+            <div class="bear-peek" style="width: 140px; height: 88px; margin: 0 auto">{{ ui.bear(140) }}</div>
+            <section class="receipt">
+                <div class="paper stack">
+                    {% if mode == 'json' %}
+                    <h2><label for="scan_json">Saved scan file</label></h2>
+                    <input type="file" id="scan_json" class="visually-hidden" accept=".json,application/json">
+                    <label for="scan_json" class="file-drop" id="jsonLabel">{{ ui.icon('file') }} <span id="jsonLabelText">Choose a .billbear.json file</span></label>
+                    {% else %}
+                    <h2><label for="bill_image">Photo of the bill</label></h2>
+                    <input type="file" id="bill_image" class="visually-hidden" accept="image/*">
+                    <label for="bill_image" class="file-drop" id="fileLabel">{{ ui.icon('camera') }} <span id="fileLabelText">Take or choose a photo</span></label>
+                    <div class="scan-lines" id="scanLines" hidden aria-hidden="true">
+                        <div><span style="width: 62%"></span><span style="width: 16%"></span></div>
+                        <div><span style="width: 44%"></span><span style="width: 14%"></span></div>
+                        <div><span style="width: 55%"></span><span style="width: 16%"></span></div>
+                        <div><span style="width: 38%"></span><span style="width: 14%"></span></div>
+                    </div>
+                    {% endif %}
+                    <div id="ocrStatus" class="status-line" aria-live="polite"></div>
+                    {% if mode != 'json' %}
+                    <button type="button" class="btn btn--honey btn--block" id="retryScanBtn" hidden>Scan it again</button>
+                    {% endif %}
                 </div>
-                <div id="ocrStatus" class="ocr-status"></div>
-            </div>
-            <!-- dummy disabled image input so existing JS that references it doesn't crash -->
-            <input type="file" id="bill_image" name="bill_image" accept="image/*" style="display:none;">
-            {% else %}
-            <div class="form-group">
-                <label for="bill_image">Bill Image</label>
-                <div class="file-input-wrapper">
-                    <input type="file" id="bill_image" name="bill_image" accept="image/*" required>
-                    <label for="bill_image" class="file-input-label" id="fileLabel">
-                        Choose bill image
-                    </label>
-                </div>
-                <div id="ocrStatus" class="ocr-status"></div>
-            </div>
-            {% endif %}
-            <input type="hidden" id="ocr_payload" name="ocr_payload">
-            <input type="hidden" id="mode" name="mode" value="{{ mode }}">
+                <div class="tear"></div>
+            </section>
+        </div>
 
-            <button type="submit" class="submit-btn" id="submitBtn">
-                {% if mode == 'json' %}Continue to Edit{% else %}Create Room{% endif %}
+        {% if turnstile_site_key %}
+        <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-size="flexible"></div>
+        {% endif %}
+
+        <input type="hidden" id="receipt_json" name="receipt_json" value="">
+        <input type="hidden" id="skip_ocr" name="skip_ocr" value="">
+        <input type="hidden" name="mode" value="{{ mode }}">
+
+        <div class="actions actions--center">
+            <button type="submit" class="btn btn--primary btn--block" id="submitBtn" disabled>
+                {% if mode == 'json' %}Check the items{% else %}Create room{% endif %}
             </button>
             {% if mode != 'json' %}
-            <button type="button" class="skip-ocr-btn" id="skipOcrBtn" style="display:none;">
-                Skip OCR — enter items manually
-            </button>
+            <button type="button" class="link-btn" id="skipOcrBtn">Enter items manually instead</button>
+            <a class="textlink" href="/create?mode=json">Open a saved scan</a>
+            {% else %}
+            <a class="textlink" href="/create?mode=image">Scan a new bill instead</a>
             {% endif %}
-            <input type="hidden" id="skip_ocr" name="skip_ocr" value="">
-
-            <div class="mode-switch" style="text-align:center; margin-top:1rem; font-size:0.9rem; color:#B0BEC5;">
-                {% if mode == 'json' %}
-                Want to scan a new bill instead?
-                <a href="/create?mode=image" style="color:#3F51B5; font-weight:600; text-decoration:none;">Upload Bill</a>
-                {% else %}
-                Have a saved scan?
-                <a href="/create?mode=json" style="color:#FF4081; font-weight:600; text-decoration:none;">Upload Saved JSON</a>
-                {% endif %}
-            </div>
-
-            <!-- Vision fallback removed to avoid paid API calls -->
-        </form>
-
-        <div class="back-link">
-            <a href="/">← Back to Home</a>
         </div>
-    </div>
-
-    {% if client_ocr_enabled %}
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    {% endif %}
+    </form>
+</main>
+{% endblock %}
+{% block scripts %}
+{% if turnstile_site_key %}
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+{% endif %}
     <script>
-        const clientOcrEnabled = {{ (client_ocr_enabled or false) | tojson }};
-        const legacyImageOcrEnabled = {{ (legacy_image_ocr_enabled or false) | tojson }};
-        const mode = {{ mode | tojson }};
-        let submissionLocked = false;
+        const MODE = {{ mode | tojson }};
+        const MAX_WIDTH = 1600;
+        const MAX_HEIGHT = 4000;
+        const TARGET_BYTES = 3.5 * 1024 * 1024;   // Vercel body limit is 4.5 MB incl. multipart overhead
+        const SCAN_TIMEOUT_MS = 35000;            // server budget is ~25s
 
         const form = document.getElementById('createForm');
         const submitBtn = document.getElementById('submitBtn');
+        const statusEl = document.getElementById('ocrStatus');
+        const receiptInput = document.getElementById('receipt_json');
+        const skipInput = document.getElementById('skip_ocr');
         const fileInput = document.getElementById('bill_image');
         const fileLabel = document.getElementById('fileLabel');
-        const ocrPayloadInput = document.getElementById('ocr_payload');
-        const ocrStatus = document.getElementById('ocrStatus');
-        const skipOcrBtn = document.getElementById('skipOcrBtn');
-        const skipOcrInput = document.getElementById('skip_ocr');
+        const fileLabelText = document.getElementById('fileLabelText');
+        const retryBtn = document.getElementById('retryScanBtn');
+        const skipBtn = document.getElementById('skipOcrBtn');
         const jsonInput = document.getElementById('scan_json');
         const jsonLabel = document.getElementById('jsonLabel');
-        // Vision fallback removed — no elements to bind
+        const jsonLabelText = document.getElementById('jsonLabelText');
+        let scanController = null;
+        let submitted = false;
 
-        function setLoading(isLoading) {
-            if (isLoading) {
-                form.classList.add('loading');
-                submitBtn.disabled = true;
-            } else {
-                form.classList.remove('loading');
-                submitBtn.disabled = false;
+        const scanPanel = document.getElementById('scanPanel');
+        const scanLines = document.getElementById('scanLines');
+
+        function setStatus(message, type) {
+            statusEl.textContent = message || '';
+            statusEl.classList.remove('error', 'success');
+            if (type) statusEl.classList.add(type);
+        }
+
+        // Bear chews and the placeholder lines show while a scan is running.
+        function setReading(on) {
+            if (!scanPanel) return;
+            scanPanel.classList.toggle('is-reading', on);
+            if (scanLines) scanLines.hidden = !on;
+        }
+
+        function turnstileToken() {
+            if (!window.turnstile) return '';
+            try { return window.turnstile.getResponse() || ''; } catch (_e) { return ''; }
+        }
+
+        function turnstileReset() {
+            if (window.turnstile) { try { window.turnstile.reset(); } catch (_e) {} }
+        }
+
+        function detailsFilled() {
+            return ['host_name', 'room_name', 'num_people'].every(id => document.getElementById(id).value.trim());
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Downscale (never upscale) to JPEG before upload                     */
+        /* ------------------------------------------------------------------ */
+
+        async function decodeImage(file) {
+            if (window.createImageBitmap) {
+                try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+                catch (_e) { /* fall through */ }
             }
-        }
-
-        function setOcrStatus(message, type = '') {
-            ocrStatus.textContent = message || '';
-            ocrStatus.classList.remove('error', 'success');
-            if (type) ocrStatus.classList.add(type);
-        }
-
-        function showVisionButton(show) {
-            // Vision fallback disabled — no-op
-        }
-
-        if (fileLabel) {
-            fileInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (file) {
-                    fileLabel.textContent = `${file.name}`;
-                    fileLabel.classList.add('has-file');
-                    ocrPayloadInput.value = '';
-                    setOcrStatus('');
-                    showVisionButton(true);
-                } else {
-                    fileLabel.textContent = 'Choose bill image';
-                    fileLabel.classList.remove('has-file');
-                    showVisionButton(false);
-                }
-            });
-        }
-
-        /* ------------------------------------------------------------------ */
-        /* Image preprocessing                                                 */
-        /* ------------------------------------------------------------------ */
-
-        function loadImageFromFile(file) {
-            return new Promise((resolve, reject) => {
+            return await new Promise((resolve, reject) => {
                 const img = new Image();
                 img.onload = () => resolve(img);
-                img.onerror = () => reject(new Error('Failed to load image'));
+                img.onerror = () => reject(new Error('decode failed'));
                 img.src = URL.createObjectURL(file);
             });
         }
 
-        function preprocessCanvas(sourceCanvas, rotationDeg) {
-            // Applies grayscale + contrast stretch + sharpen to a canvas.
-            // If rotationDeg is non-zero, rotates first.
-            const sw = sourceCanvas.width;
-            const sh = sourceCanvas.height;
-            const isRotated = (rotationDeg % 180 !== 0);
-            const outW = isRotated ? sh : sw;
-            const outH = isRotated ? sw : sh;
+        function canvasToBlob(canvas, quality) {
+            return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+        }
 
-            const canvas = document.createElement('canvas');
-            canvas.width = outW;
-            canvas.height = outH;
-            const ctx = canvas.getContext('2d');
-
-            ctx.translate(outW / 2, outH / 2);
-            ctx.rotate((rotationDeg * Math.PI) / 180);
-            ctx.drawImage(sourceCanvas, -sw / 2, -sh / 2);
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-            // Grayscale
-            const imageData = ctx.getImageData(0, 0, outW, outH);
-            const data = imageData.data;
-
-            for (let i = 0; i < data.length; i += 4) {
-                const l = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-                data[i] = l; data[i + 1] = l; data[i + 2] = l;
+        async function downscaleToJpeg(file) {
+            let source;
+            try {
+                source = await decodeImage(file);
+            } catch (_e) {
+                // e.g. HEIC on Chrome/Android: send the original if it's small enough.
+                if (file.size <= TARGET_BYTES) return file;
+                throw new Error("This photo format can't be processed in your browser. Take a screenshot of it or use a JPG.");
             }
-
-            // Contrast stretch with 2% cutoff
-            const hist = new Array(256).fill(0);
-            const totalPixels = outW * outH;
-            for (let i = 0; i < data.length; i += 4) hist[data[i]]++;
-
-            const cutoff = Math.floor(totalPixels * 0.02);
-            let cumLow = 0, cumHigh = 0, lo = 0, hi = 255;
-            for (let t = 0; t < 256; t++) { cumLow += hist[t]; if (cumLow > cutoff) { lo = t; break; } }
-            for (let t = 255; t >= 0; t--) { cumHigh += hist[t]; if (cumHigh > cutoff) { hi = t; break; } }
-            const range = hi - lo || 1;
-
-            for (let i = 0; i < data.length; i += 4) {
-                let v = Math.round(((data[i] - lo) / range) * 255);
-                v = Math.max(0, Math.min(255, v));
-                data[i] = v; data[i + 1] = v; data[i + 2] = v;
+            let scale = Math.min(1, MAX_WIDTH / source.width, MAX_HEIGHT / source.height);
+            for (let attempt = 0; attempt < 4; attempt++) {
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(source.width * scale));
+                canvas.height = Math.max(1, Math.round(source.height * scale));
+                canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+                const blob = await canvasToBlob(canvas, attempt === 0 ? 0.85 : 0.75);
+                if (blob && blob.size <= TARGET_BYTES) return blob;
+                scale *= 0.8;
             }
-
-            ctx.putImageData(imageData, 0, 0);
-            return canvas;
-        }
-
-        function scaleImage(img) {
-            // Scale up to ~3000px on longest side
-            const MAX_DIM = 3000;
-            let { width, height } = img;
-            const scale = Math.max(1, MAX_DIM / Math.max(width, height));
-            const w = Math.round(width * scale);
-            const h = Math.round(height * scale);
-            const c = document.createElement('canvas');
-            c.width = w; c.height = h;
-            c.getContext('2d').drawImage(img, 0, 0, w, h);
-            return c;
-        }
-
-        function canvasToBlob(canvas, type, quality) {
-            return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+            throw new Error('Photo is too large even after compressing. Try cropping it.');
         }
 
         /* ------------------------------------------------------------------ */
-        /* Quality check: does OCR text look like a real receipt?              */
+        /* Scan via the server (vision model)                                  */
         /* ------------------------------------------------------------------ */
 
-        function ocrLooksUsable(text, confidence) {
-            if (!text || text.length < 20) return false;
-            // Must contain at least one number (receipts always have prices)
-            const hasNumbers = /\d+\.\d{2}/.test(text) || /\d{2,}/.test(text);
-            // Must have a few lines
-            const lineCount = text.split('\n').filter(l => l.trim().length > 2).length;
-            if (lineCount < 3) return false;
-            if (!hasNumbers) return false;
-            // Low confidence from Tesseract is a strong signal
-            if (confidence !== null && confidence < 40) return false;
-            return true;
-        }
+        async function scanFile(file) {
+            if (scanController) scanController.abort();
+            scanController = new AbortController();
+            const timer = setTimeout(() => scanController.abort(), SCAN_TIMEOUT_MS);
+            receiptInput.value = '';
+            submitBtn.disabled = true;
+            retryBtn.hidden = true;
 
-        /* ------------------------------------------------------------------ */
-        /* OCR runner: tries original, then 3 rotations if needed             */
-        /* ------------------------------------------------------------------ */
-
-        async function runOcrOnCanvas(canvas, worker) {
-            const blob = await canvasToBlob(canvas, 'image/png', 1.0);
-            const result = await worker.recognize(blob);
-            return result;
-        }
-
-        async function runClientOcr(file) {
-            if (typeof Tesseract === 'undefined') {
-                throw new Error('Browser OCR engine failed to load.');
-            }
-
-            const timings = {};
-            const t0 = performance.now();
-
-            // Load and scale
-            setOcrStatus('Preprocessing image...');
-            const img = await loadImageFromFile(file);
-            const scaled = scaleImage(img);
-            URL.revokeObjectURL(img.src);
-
-            timings.preprocess_ms = Math.round(performance.now() - t0);
-
-            // Create Tesseract worker once — reuse for rotation attempts
-            setOcrStatus('Loading OCR engine...');
-            const worker = await Tesseract.createWorker('eng', 1, {
-                logger: (m) => {
-                    if (m.status === 'recognizing text') {
-                        setOcrStatus(`OCR in progress... ${Math.round((m.progress || 0) * 100)}%`);
-                    } else if (m.status === 'loading language traineddata') {
-                        setOcrStatus('Loading language data...');
-                    }
+            try {
+                setReading(true);
+                setStatus('Getting the photo ready…');
+                const blob = await downscaleToJpeg(file);
+                const body = new FormData();
+                body.append('image', blob, 'receipt.jpg');
+                body.append('cf-turnstile-response', turnstileToken());
+                setStatus('Bear is reading your bill. This can take up to 20 seconds, so keep this page open.');
+                const resp = await fetch('/api/receipt/scan', {
+                    method: 'POST',
+                    body,
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'fetch' },
+                    signal: scanController.signal,
+                });
+                let data = null;
+                try { data = await resp.json(); } catch (_e) {}
+                if (!resp.ok || !data || data.status !== 'success') {
+                    throw new Error((data && data.message) || `Scan failed (HTTP ${resp.status}).`);
                 }
-            });
-            await worker.setParameters({ tessedit_pageseg_mode: '6' });
-
-            // Try original orientation first, then 90, 180, 270 if needed
-            const rotations = [0, 90, 270, 180];
-            let bestResult = null;
-            let bestConfidence = -1;
-            let bestRotation = 0;
-
-            const tOcr = performance.now();
-
-            for (const deg of rotations) {
-                setOcrStatus(deg === 0
-                    ? 'Running OCR on original orientation...'
-                    : `Trying ${deg} rotation...`);
-
-                const processed = preprocessCanvas(scaled, deg);
-                const result = await runOcrOnCanvas(processed, worker);
-                const text = (result.data.text || '').trim();
-                const conf = result.data.confidence || 0;
-
-                if (ocrLooksUsable(text, conf)) {
-                    bestResult = result;
-                    bestConfidence = conf;
-                    bestRotation = deg;
-                    // Good enough — stop trying rotations
-                    if (conf > 60) break;
-                }
-
-                // Track best attempt even if not "usable"
-                if (conf > bestConfidence) {
-                    bestResult = result;
-                    bestConfidence = conf;
-                    bestRotation = deg;
-                }
+                const count = (data.receipt.items || []).length;
+                receiptInput.value = JSON.stringify(data.receipt);
+                setStatus(`Found ${count} item${count === 1 ? '' : 's'}. You can fix anything on the next screen.`, 'success');
+                submitBtn.disabled = false;
+            } catch (err) {
+                const msg = err.name === 'AbortError'
+                    ? 'Scanning took too long.'
+                    : (err.message || 'Scan failed.');
+                setStatus(`${msg} Retry, or enter items manually.`, 'error');
+                retryBtn.hidden = false;
+            } finally {
+                setReading(false);
+                clearTimeout(timer);
+                turnstileReset();
             }
-
-            await worker.terminate();
-
-            timings.ocr_ms = Math.round(performance.now() - tOcr);
-            timings.total_client_ms = Math.round(performance.now() - t0);
-
-            const rawText = bestResult ? (bestResult.data.text || '').trim() : '';
-
-            // Check if result is usable
-            if (!ocrLooksUsable(rawText, bestConfidence)) {
-                const err = new Error('OCR could not read this receipt (possibly rotated, blurry, or low contrast).');
-                err.showVisionFallback = true;
-                err.timings = timings;
-                throw err;
-            }
-
-            const lines = Array.isArray(bestResult.data.lines)
-                ? bestResult.data.lines.map(l => (l.text || '').trim()).filter(l => l.length > 0)
-                : [];
-
-            const rotMsg = bestRotation ? ` (rotated ${bestRotation} deg)` : '';
-            setOcrStatus(
-                `OCR done${rotMsg} — preprocess ${timings.preprocess_ms}ms, OCR ${timings.ocr_ms}ms`,
-                'success'
-            );
-
-            return {
-                raw_text: rawText,
-                lines,
-                confidence: typeof bestConfidence === 'number'
-                    ? Number(bestConfidence.toFixed ? bestConfidence.toFixed(2) : bestConfidence)
-                    : null,
-                metadata: {
-                    source: 'browser_tesseract',
-                    model: 'tesseract.js@5',
-                    file_name: file.name,
-                    preprocessed: true,
-                    rotation_applied: bestRotation,
-                    timings,
-                }
-            };
         }
 
-        /* Vision AI fallback disabled — OCR-only mode to avoid paid API calls */
-        function setVisionStatus() {}
-        function triggerVisionFallback() {}
-
-        /* ------------------------------------------------------------------ */
-        /* JSON-mode handler: parse the saved scan file into ocr_payload     */
-        /* ------------------------------------------------------------------ */
-
-        function validateSavedScan(obj) {
-            if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON root');
-            if (!Array.isArray(obj.items) || obj.items.length === 0) {
-                throw new Error('Scan file has no items');
-            }
-            for (const it of obj.items) {
-                if (!it || typeof it.name !== 'string' || !it.name.trim()) {
-                    throw new Error('An item is missing a name');
-                }
-            }
-            return true;
-        }
-
-        function savedScanToOcrPayload(obj) {
-            // Use the server's _vision_receipt short-circuit in
-            // extract_receipt_from_text_payload — it skips raw_text validation
-            // and trusts a pre-extracted receipt, which is exactly our case.
-            return {
-                _vision_receipt: {
-                    items: obj.items,
-                    subtotal: obj.subtotal || 'N/A',
-                    serviceCharge: obj.serviceCharge || 'N/A',
-                    discount: obj.discount || 'N/A',
-                    cgst: obj.cgst || 'N/A',
-                    sgst: obj.sgst || 'N/A',
-                    igst: obj.igst || 'N/A',
-                    total: obj.total || 'N/A',
-                    restaurant_name: obj.restaurant_name || 'N/A',
-                    parser_meta: {
-                        source: 'user_saved_json',
-                        used_fallback: false,
-                        fallback_provider: 'none',
-                        confidence: 1.0,
-                    },
-                    extraction_meta: {
-                        mode: 'saved_json',
-                        source: 'user_saved_json',
-                        provider: 'none',
-                    },
-                },
-            };
-        }
-
-        if (jsonInput) {
-            jsonInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
+        if (fileInput) {
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files[0];
                 if (!file) {
-                    jsonLabel.textContent = 'Choose .billbear.json file';
-                    jsonLabel.classList.remove('has-file');
-                    ocrPayloadInput.value = '';
-                    setOcrStatus('');
+                    fileLabelText.textContent = 'Take or choose a photo';
+                    fileLabel.classList.remove('has-file');
                     return;
                 }
-                jsonLabel.textContent = file.name;
+                fileLabelText.textContent = file.name || 'Photo selected';
+                fileLabel.classList.add('has-file');
+                scanFile(file);
+            });
+            retryBtn.addEventListener('click', () => {
+                if (fileInput.files[0]) scanFile(fileInput.files[0]);
+            });
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Saved-scan JSON mode                                                */
+        /* ------------------------------------------------------------------ */
+
+        if (jsonInput) {
+            jsonInput.addEventListener('change', () => {
+                const file = jsonInput.files[0];
+                receiptInput.value = '';
+                submitBtn.disabled = true;
+                if (!file) { jsonLabelText.textContent = 'Choose a .billbear.json file'; return; }
+                jsonLabelText.textContent = file.name;
                 jsonLabel.classList.add('has-file');
+                if (file.size > 512 * 1024) { setStatus('That file is too large to be a saved scan.', 'error'); return; }
                 const reader = new FileReader();
                 reader.onload = () => {
                     try {
-                        const parsed = JSON.parse(reader.result);
-                        validateSavedScan(parsed);
-                        ocrPayloadInput.value = JSON.stringify(savedScanToOcrPayload(parsed));
-                        setOcrStatus(`Loaded ${parsed.items.length} item(s) — continue to edit.`, 'success');
+                        const obj = JSON.parse(reader.result);
+                        if (!obj || !Array.isArray(obj.items) || !obj.items.length) throw new Error('Scan file has no items');
+                        obj.extraction_meta = { mode: 'saved_json', source: 'user_saved_json', provider: 'none' };
+                        receiptInput.value = JSON.stringify(obj);
+                        setStatus(`Loaded ${obj.items.length} item${obj.items.length === 1 ? '' : 's'}. Continue to check them.`, 'success');
+                        submitBtn.disabled = false;
                     } catch (err) {
-                        ocrPayloadInput.value = '';
-                        setOcrStatus(`Invalid scan file: ${err.message}`, 'error');
+                        setStatus(`Invalid scan file: ${err.message}`, 'error');
                     }
                 };
-                reader.onerror = () => {
-                    ocrPayloadInput.value = '';
-                    setOcrStatus('Could not read file.', 'error');
-                };
+                reader.onerror = () => setStatus('Could not read file.', 'error');
                 reader.readAsText(file);
             });
         }
 
-        if (skipOcrBtn) skipOcrBtn.addEventListener('click', function() {
-            const hostName = document.getElementById('host_name').value.trim();
-            const roomName = document.getElementById('room_name').value.trim();
-            const numPeople = document.getElementById('num_people').value.trim();
-            if (!hostName || !roomName || !numPeople) {
-                setOcrStatus('Please fill in your name, room name, and number of people first.', 'error');
-                return;
-            }
-            skipOcrInput.value = 'true';
-            fileInput.removeAttribute('required');
-            submissionLocked = true;
-            setLoading(true);
-            form.submit();
-        });
-
         /* ------------------------------------------------------------------ */
-        /* Form submission handler                                             */
+        /* Submit                                                              */
         /* ------------------------------------------------------------------ */
 
-        form.addEventListener('submit', async function(e) {
-            if (submissionLocked) return;
-
-            setLoading(true);
-            setVisionStatus('');
-
-            if (!clientOcrEnabled || ocrPayloadInput.value.trim()) return;
-
-            const file = fileInput.files[0];
-            if (!file) {
-                e.preventDefault();
-                setLoading(false);
-                setOcrStatus('Please choose a bill image before submitting.', 'error');
-                return;
-            }
-
-            e.preventDefault();
-            setOcrStatus('Starting image preprocessing...');
-
-            try {
-                const payload = await runClientOcr(file);
-                ocrPayloadInput.value = JSON.stringify(payload);
-                setOcrStatus(
-                    `Done! Submitting to server... (client: ${payload.metadata.timings.total_client_ms}ms)`,
-                    'success'
-                );
-                submissionLocked = true;
+        if (skipBtn) {
+            skipBtn.addEventListener('click', () => {
+                if (!detailsFilled()) {
+                    setStatus('Fill in your name, the occasion and how many people first.', 'error');
+                    return;
+                }
+                if (scanController) scanController.abort();
+                skipInput.value = 'true';
+                receiptInput.value = '';
+                submitted = true;
+                form.classList.add('loading');
                 form.submit();
-            } catch (error) {
-                setLoading(false);
+            });
+        }
 
-                if (error.showVisionFallback) {
-                    const t = error.timings || {};
-                    setOcrStatus(
-                        `OCR couldn't read this receipt (tried 4 orientations, ${t.total_client_ms || '?'}ms). Try a clearer photo or use the button below to enter items manually.`,
-                        'error'
-                    );
-                    skipOcrBtn.style.display = 'block';
-                    return;
-                }
-
-                if (legacyImageOcrEnabled) {
-                    setOcrStatus('Client OCR failed. Falling back to server OCR...', 'error');
-                    submissionLocked = true;
-                    form.submit();
-                    return;
-                }
-
-                setOcrStatus(`OCR failed: ${error.message}. Try a clearer photo or enter items manually.`, 'error');
+        form.addEventListener('submit', (e) => {
+            if (submitted) { e.preventDefault(); return; }
+            if (!detailsFilled()) {
+                e.preventDefault();
+                setStatus('Fill in your name, the occasion and how many people.', 'error');
+                return;
             }
+            if (!receiptInput.value && skipInput.value !== 'true') {
+                e.preventDefault();
+                setStatus(MODE === 'json' ? 'Choose a saved scan file first.' : 'Add a bill photo first, or enter items manually.', 'error');
+                return;
+            }
+            submitted = true;
+            form.classList.add('loading');
         });
 
         document.getElementById('host_name').focus();
     </script>
-</body>
-</html>
-    
+{% endblock %}

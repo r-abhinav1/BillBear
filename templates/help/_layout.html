@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{# One help topic per page. `topic` is the current entry of `topics`; `next_topic` the one after it. #}
+{% macro say(text) -%}
+<div class="say"><span class="bear-spot say__bear">{{ ui.bear(62) }}</span><p class="say__bubble">{{ text }}</p></div>
+{%- endmacro %}
+{% macro tag(text, plain=false) -%}<span class="tag{% if plain %} tag--plain{% endif %}">{{ text }}</span>{%- endmacro %}
+{% macro mock_stepper(value, minus_off=false, plus_off=false) -%}
+<span class="stepper stepper--mock" aria-hidden="true"><span{% if minus_off %} class="is-off"{% endif %}>−</span><b>{{ value }}</b><span{% if plus_off %} class="is-off"{% endif %}>+</span></span>
+{%- endmacro %}
+{% block title %}{{ topic.title }}, BillBear help{% endblock %}
+{% block description %}{{ topic.blurb }}. How BillBear splits a restaurant bill.{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('help_index') }}">{{ ui.icon('back', 18) }} Help</a>{% endblock %}
+{% block nav %}<a href="/">Home</a>{% endblock %}
+{% block content %}
+<main class="stack stack--lg help">
+    <header class="stack" style="gap: 8px">
+        <p class="eyebrow">Help, part {{ position }} of {{ topics | length }}</p>
+        <h1>{{ topic.title }}</h1>
+    </header>
+    {% block topic %}{% endblock %}
+
+    <nav class="stack" aria-label="More help" style="gap: 12px; margin-top: 10px">
+        <ol class="trail" aria-label="Part {{ position }} of {{ topics | length }}">
+            {% for t in topics %}
+            <li{% if loop.index == position %} aria-current="page"{% endif %} class="{{ 'is-done' if loop.index <= position else '' }}">
+                <a href="{{ url_for('help_topic', topic=t.slug) }}" aria-label="{{ t.title }}">{{ ui.paw_svg() }}</a>
+            </li>
+            {% endfor %}
+        </ol>
+        {% if next_topic %}
+        <a class="nextup" href="{{ url_for('help_topic', topic=next_topic.slug) }}">
+            <span class="nextup__text"><span class="nextup__kicker">Next</span><b>{{ next_topic.title }}</b><span>{{ next_topic.blurb }}</span></span>
+            <span class="nextup__paw">{{ ui.paw_svg() }}</span>
+        </a>
+        {% else %}
+        <a class="nextup" href="/create?mode=image">
+            <span class="nextup__text"><span class="nextup__kicker">That's all of it</span><b>Scan a bill</b><span>Try it on tonight's dinner</span></span>
+            <span class="nextup__paw">{{ ui.paw_svg() }}</span>
+        </a>
+        {% endif %}
+        <a class="textlink" href="{{ url_for('help_index') }}" style="align-self: center">All help topics</a>
+    </nav>
+</main>
+{% endblock %}

@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "regions": ["bom1"],
   "builds": [
     {
       "src": "app.py",
@@ -10,6 +11,12 @@
     {
       "src": "/(.*)",
       "dest": "app.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/cleanup",
+      "schedule": "17 3 * * *"
     }
   ]
 }

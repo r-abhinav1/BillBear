@@ -1,425 +1,193 @@
+{#- PDF of the split. Rendered by xhtml2pdf in production, so the layout is
+    tables only, with the built-in Helvetica and Courier (no rupee glyph: "Rs."). -#}
+{%- set t = bill_split.totals -%}
+{%- set people = bill_split.user_breakdown -%}
+{%- set MARKS = {'veg': 'Veg', 'nonveg': 'Non-veg', 'egg': 'Egg', 'alcohol': 'Alcohol'} -%}
+{%- set cats = {} -%}
+{%- for item in room['items'] -%}{%- set _ = cats.update({item.name: item.category}) -%}{%- endfor -%}
+{%- set ns = namespace(longest=0, marked=false) -%}
+{%- for item in room['items'] -%}{%- if item.category in MARKS -%}{%- set ns.marked = true -%}{%- endif -%}{%- endfor -%}
+{%- for user, d in people.items() -%}{%- if d.item_details | length > ns.longest -%}{%- set ns.longest = d.item_details | length -%}{%- endif -%}{%- endfor -%}
+{#- A table cell cannot break across pages, so long lists drop to one column. -#}
+{%- set two_up = ns.longest <= 16 and people | length > 1 -%}
+{%- set bill_side_by_side = room['items'] | length <= 18 -%}
+
+{%- macro money(value) -%}{{ "{:,.2f}".format(value) }}{%- endmacro -%}
+
+{%- macro mark(category) -%}
+{%- if category in MARKS -%}<img src="bbasset/pdf-{{ category }}.png" width="{{ 10 if category == 'alcohol' else 8 }}" height="{{ 10 if category == 'alcohol' else 8 }}" style="vertical-align: middle" alt="{{ MARKS[category] }}">&nbsp;{%- elif ns.marked -%}<img src="bbasset/pdf-blank.png" width="8" height="8" style="vertical-align: middle" alt="">&nbsp;{% endif -%}
+{%- endmacro -%}
+
+{%- macro space(points=12) -%}
+<table cellspacing="0"><tr><td style="height: {{ points }}pt; font-size: 1pt; line-height: {{ points }}pt">&nbsp;</td></tr></table>
+{%- endmacro -%}
+
+{%- macro charge(label, value) -%}
+<tr><td class="line soft box-l" width="72%">{{ label }}</td><td class="amount soft box-r" width="28%">{{ value }}</td></tr>
+{%- endmacro -%}
+
+{%- macro person_block(user, d) -%}
+<table cellspacing="0">
+    <tr>
+        <td class="person-name box-l box-t" width="46%">{{ user }}</td>
+        <td class="person-total box-r box-t" width="54%">Rs. {{ money(d.final_amount) }}</td>
+    </tr>
+</table>
+<table cellspacing="0">
+    {% for item in d.item_details %}
+    <tr>
+        <td class="line box-l" width="72%">{{ mark(cats.get(item.name)) }}{{ item.name }}{% if item.mode == 'units' %} <span class="soft">({{ item.portions }} of {{ item.quantity }})</span>{% elif item.mode == 'shared' %} <span class="soft">(shared {{ item.sharers }} {{ 'way' if item.sharers == 1 else 'ways' }})</span>{% elif item.shared_by > 1 %} <span class="soft">(1 of {{ item.shared_by }})</span>{% endif %}</td>
+        <td class="amount box-r" width="28%">{{ money(item.your_share) }}</td>
+    </tr>
+    {% else %}
+    {{ charge('Nothing picked', '&nbsp;' | safe) }}
+    {% endfor %}
+    {% if d.service_charge > 0 %}{{ charge('Service charge', money(d.service_charge)) }}{% endif %}
+    {% if (d.cgst + d.sgst) > 0 %}{{ charge('CGST and SGST', money(d.cgst + d.sgst)) }}{% endif %}
+    {% if d.igst > 0 %}{{ charge('IGST', money(d.igst)) }}{% endif %}
+    {% if d.discount > 0 %}{{ charge('Discount', '-' + money(d.discount)) }}{% endif %}
+    <tr><td class="box-l box-b last" width="72%">&nbsp;</td><td class="box-r box-b last" width="28%">&nbsp;</td></tr>
+</table>
+{{ space(12) }}
+{%- endmacro -%}
+
+{%- macro dishes_table() -%}
+<table cellspacing="0">
+    {% for item in room['items'] %}
+    <tr>
+        <td class="plain-line" width="72%">{{ mark(item.category) }}{{ item.name }}{% if item.quantity > 1 %} <span class="soft">x{{ item.quantity }}</span>{% endif %}</td>
+        <td class="plain-amount" width="28%">{{ item.price | replace('₹', '') }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{%- endmacro -%}
+
+{%- macro total_row(label, value) -%}
+<tr><td class="plain-line" width="50%">{{ label }}</td><td class="plain-amount" width="50%">{{ value }}</td></tr>
+{%- endmacro -%}
+
+{%- macro totals_table() -%}
+<table cellspacing="0">
+    {{ total_row('Dishes', money(t.subtotal)) }}
+    {% if t.service_charge > 0 %}{{ total_row('Service charge', money(t.service_charge)) }}{% endif %}
+    {% if t.cgst > 0 %}{{ total_row('CGST', money(t.cgst)) }}{% endif %}
+    {% if t.sgst > 0 %}{{ total_row('SGST', money(t.sgst)) }}{% endif %}
+    {% if t.igst > 0 %}{{ total_row('IGST', money(t.igst)) }}{% endif %}
+    {% if t.discount > 0 %}{{ total_row('Discount', '-' + money(t.discount)) }}{% endif %}
+    <tr><td class="grand" width="50%">Bill total</td><td class="grand grand-amount" width="50%">Rs. {{ money(t.grand_total) }}</td></tr>
+</table>
+{%- endmacro -%}
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Bill Bear — {{ room['room_name'] }}</title>
-    <style>
-        @page {
-            size: A4;
-            margin: 15mm 18mm;
-        }
+<meta charset="UTF-8">
+<title>{{ room['room_name'] }}, split with BillBear</title>
+<style>
+    @page {
+        size: a4 portrait;
+        margin: 1.5cm 1.6cm 1.8cm 1.6cm;
+        background-image: url("bbasset/pdf-watermark.png");
+        @frame footer { -pdf-frame-content: footer; left: 1.6cm; width: 17.8cm; top: 28.2cm; height: 0.9cm; }
+    }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #2B1B0E; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; padding: 0; }
+    .soft { color: #6B4A2B; }
 
-        body {
-            font-family: Arial, sans-serif;
-            font-size: 11px;
-            color: #1a1a1a;
-            margin: 0;
-            padding: 0;
-            line-height: 1.5;
-        }
+    .title { font-size: 22pt; font-weight: bold; line-height: 1.1; }
+    .subtitle { font-size: 10pt; color: #6B4A2B; padding-top: 3pt; }
+    .meta { text-align: right; font-size: 9.5pt; line-height: 1.5; color: #4A3319; }
+    .bar { background-color: #F6C445; height: 6pt; font-size: 1pt; line-height: 6pt; }
 
-        /* ── Header ── */
-        .header {
-            border-bottom: 2px solid #3F51B5;
-            padding-bottom: 10px;
-            margin-bottom: 14px;
-        }
+    .heading { font-size: 15pt; font-weight: bold; }
+    .heading-note { text-align: right; font-size: 10pt; color: #4A3319; vertical-align: bottom; }
+    .mono { font-family: Courier; }
+    .strong { font-weight: bold; color: #2B1B0E; }
 
-        .header-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .header-title {
-            font-size: 20px;
-            font-weight: bold;
-            color: #3F51B5;
-            letter-spacing: 1px;
-        }
-
-        .header-sub {
-            font-size: 10px;
-            color: #666;
-            margin-top: 2px;
-        }
-
-        .header-meta {
-            text-align: right;
-            font-size: 10px;
-            color: #555;
-            vertical-align: top;
-        }
-
-        /* ── Section headings ── */
-        .section-heading {
-            background-color: #3F51B5;
-            color: #ffffff;
-            font-size: 11px;
-            font-weight: bold;
-            padding: 5px 8px;
-            margin: 14px 0 6px 0;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-        }
-
-        /* ── Info strip ── */
-        .info-strip {
-            width: 100%;
-            border-collapse: collapse;
-            background: #f5f5f5;
-            border: 1px solid #ddd;
-            margin-bottom: 14px;
-        }
-
-        .info-strip td {
-            padding: 7px 10px;
-            font-size: 10px;
-        }
-
-        .info-strip .label {
-            color: #666;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.4px;
-            font-size: 9px;
-            width: 30%;
-        }
-
-        .info-strip .value {
-            color: #1a1a1a;
-            font-size: 11px;
-            font-weight: bold;
-        }
-
-        /* ── Generic data table ── */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 10.5px;
-        }
-
-        .data-table th {
-            background-color: #ECEFF1;
-            color: #333;
-            padding: 7px 8px;
-            text-align: left;
-            border: 1px solid #ccc;
-            font-weight: bold;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-        }
-
-        .data-table td {
-            padding: 6px 8px;
-            border: 1px solid #ddd;
-            vertical-align: top;
-        }
-
-        .data-table tr:nth-child(even) td {
-            background-color: #fafafa;
-        }
-
-        .text-right {
-            text-align: right;
-        }
-
-        .text-center {
-            text-align: center;
-        }
-
-        .bold {
-            font-weight: bold;
-        }
-
-        /* ── Bill totals summary ── */
-        .totals-table {
-            width: 50%;
-            border-collapse: collapse;
-            margin-left: auto;
-            font-size: 10.5px;
-        }
-
-        .totals-table td {
-            padding: 5px 10px;
-            border: 1px solid #ddd;
-        }
-
-        .totals-table .label-col {
-            color: #555;
-            width: 60%;
-        }
-
-        .totals-table .amount-col {
-            text-align: right;
-            font-weight: bold;
-            color: #1a1a1a;
-        }
-
-        .totals-table .grand-row td {
-            background-color: #3F51B5;
-            color: #ffffff;
-            font-size: 12px;
-            font-weight: bold;
-            border-color: #3F51B5;
-        }
-
-        /* ── Per-person breakdown ── */
-        .person-block {
-            margin-bottom: 10px;
-            border: 1px solid #ddd;
-            page-break-inside: avoid;
-        }
-
-        .person-header {
-            background-color: #ECEFF1;
-            padding: 5px 8px;
-            font-weight: bold;
-            font-size: 11px;
-            color: #3F51B5;
-            border-bottom: 1px solid #ddd;
-        }
-
-        .person-detail-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 10px;
-        }
-
-        .person-detail-table td {
-            padding: 4px 8px;
-            border-bottom: 1px solid #f0f0f0;
-        }
-
-        .person-detail-table .detail-label {
-            color: #555;
-            width: 45%;
-        }
-
-        .person-detail-table .detail-amount {
-            text-align: right;
-            color: #1a1a1a;
-            width: 27.5%;
-        }
-
-        .person-detail-table .total-row td {
-            background-color: #E8F5E9;
-            font-weight: bold;
-            color: #2e7d32;
-            border-top: 1px solid #c8e6c9;
-        }
-
-        .person-items {
-            font-size: 9.5px;
-            color: #666;
-            padding: 3px 8px 4px 8px;
-            border-bottom: 1px solid #f0f0f0;
-        }
-
-        /* ── Footer ── */
-        .footer {
-            margin-top: 20px;
-            border-top: 1px solid #ddd;
-            padding-top: 8px;
-            text-align: center;
-            font-size: 9px;
-            color: #888;
-        }
-    </style>
+    .box-l { border-left: 1.2pt solid #2B1B0E; }
+    .box-r { border-right: 1.2pt solid #2B1B0E; }
+    .box-t { border-top: 1.2pt solid #2B1B0E; }
+    .box-b { border-bottom: 1.2pt solid #2B1B0E; }
+    .person-name { background-color: #F6C445; border-bottom: 1.2pt solid #2B1B0E; font-size: 13pt; font-weight: bold; padding: 7pt 4pt 4pt 9pt; }
+    .person-total { background-color: #F6C445; border-bottom: 1.2pt solid #2B1B0E; font-family: Courier; font-size: 12pt; font-weight: bold; text-align: right; padding: 8pt 9pt 4pt 2pt; }
+    .line { font-size: 10pt; padding: 5pt 4pt 0 9pt; }
+    .amount { font-family: Courier; font-size: 10pt; text-align: right; padding: 5pt 9pt 0 2pt; }
+    .last { font-size: 3pt; line-height: 5pt; }
+    .plain-line { font-size: 10pt; padding: 4pt 4pt 0 0; }
+    .plain-amount { font-family: Courier; font-size: 10pt; text-align: right; padding: 4pt 0 0 2pt; }
+    .grand { font-size: 12pt; font-weight: bold; padding-top: 7pt; border-top: 1.2pt solid #2B1B0E; }
+    .grand-amount { font-family: Courier; text-align: right; }
+    .footer { font-size: 8.5pt; color: #4A3319; border-top: 0.75pt solid #2B1B0E; padding-top: 5pt; }
+</style>
 </head>
 <body>
 
-    <!-- ── Header ── -->
-    <div class="header">
-        <table class="header-table">
-            <tr>
-                <td>
-                    <div class="header-title">BILL BEAR</div>
-                    <div class="header-sub">Bill Splitting Receipt</div>
-                </td>
-                <td class="header-meta">
-                    <strong>{{ room['room_name'] }}</strong><br>
-                    Room Code: {{ room_code }}<br>
-                    Host: {{ room['host_name'] }}<br>
-                    {{ current_date.strftime('%d %b %Y, %I:%M %p') }}
-                </td>
-            </tr>
-        </table>
-    </div>
+<table cellspacing="0">
+    <tr>
+        <td style="width: 54pt"><img src="bbasset/pdf-bear.png" width="46" height="60" alt=""></td>
+        <td style="vertical-align: middle">
+            <div class="title">{{ room['room_name'] }}</div>
+            <div class="subtitle">Split with BillBear</div>
+        </td>
+        <td class="meta" style="width: 32%; vertical-align: middle">
+            Room {{ room_code }}<br>
+            Hosted by {{ room['host_name'] }}<br>
+            {{ current_date.strftime('%d %b %Y, %I:%M %p') }}
+        </td>
+    </tr>
+</table>
+{{ space(12) }}
+<table cellspacing="0"><tr><td class="bar">&nbsp;</td></tr></table>
+{{ space(12) }}
 
-    <!-- ── Bill Items ── -->
-    <div class="section-heading">Bill Items</div>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th style="width:60%">Item</th>
-                <th class="text-right" style="width:40%">Price</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in room['items'] %}
-            <tr>
-                <td>{{ item.name }}</td>
-                <td class="text-right">Rs. {{ item.price | replace('₹','') }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<table cellspacing="0">
+    <tr>
+        <td class="heading">Who pays what</td>
+        <td class="heading-note">Bill total <span class="mono strong">Rs. {{ money(t.grand_total) }}</span>, split between {{ people | length }} {{ 'person' if people | length == 1 else 'people' }}</td>
+    </tr>
+</table>
+{{ space(12) }}
 
-    <!-- ── Bill Summary ── -->
-    <div class="section-heading">Bill Summary</div>
-    <table class="totals-table">
-        <tr>
-            <td class="label-col">Subtotal</td>
-            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.subtotal) }}</td>
-        </tr>
-        {% if bill_split.totals.service_charge > 0 %}
-        <tr>
-            <td class="label-col">Service Charge</td>
-            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.service_charge) }}</td>
-        </tr>
-        {% endif %}
-        {% if bill_split.totals.cgst > 0 %}
-        <tr>
-            <td class="label-col">CGST</td>
-            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.cgst) }}</td>
-        </tr>
-        {% endif %}
-        {% if bill_split.totals.sgst > 0 %}
-        <tr>
-            <td class="label-col">SGST</td>
-            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.sgst) }}</td>
-        </tr>
-        {% endif %}
-        {% if bill_split.totals.igst > 0 %}
-        <tr>
-            <td class="label-col">IGST</td>
-            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.igst) }}</td>
-        </tr>
-        {% endif %}
-        {% if bill_split.totals.discount > 0 %}
-        <tr>
-            <td class="label-col">Discount</td>
-            <td class="amount-col">- Rs. {{ "%.2f"|format(bill_split.totals.discount) }}</td>
-        </tr>
-        {% endif %}
-        <tr class="grand-row">
-            <td class="label-col">Grand Total</td>
-            <td class="amount-col">Rs. {{ "%.2f"|format(bill_split.totals.grand_total) }}</td>
-        </tr>
-    </table>
-
-    <!-- ── Split Summary Table ── -->
-    <div class="section-heading">Split Summary</div>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th style="width:18%">Person</th>
-                <th style="width:38%">Items Selected</th>
-                <th class="text-right" style="width:15%">Item Total</th>
-                <th class="text-right" style="width:10%">Share</th>
-                <th class="text-right" style="width:19%">Amount Due</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for user, details in bill_split.user_breakdown.items() %}
-            <tr>
-                <td class="bold">{{ user }}</td>
-                <td>
-                    {% if details.selected_items %}
-                        {{ details.selected_items | join(', ') }}
-                    {% else %}
-                        <em style="color:#999">No items</em>
-                    {% endif %}
-                </td>
-                <td class="text-right">Rs. {{ "%.2f"|format(details.item_total) }}</td>
-                <td class="text-right">{{ details.percentage }}%</td>
-                <td class="text-right bold" style="color:#2e7d32">Rs. {{ "%.2f"|format(details.final_amount) }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <!-- ── Per-person Detailed Breakdown ── -->
-    <div class="section-heading">Detailed Breakdown</div>
-    {% for user, details in bill_split.user_breakdown.items() %}
-    <div class="person-block">
-        <div class="person-header">{{ user }}</div>
-        <table class="person-detail-table">
-            <!-- Item-by-item rows -->
-            <tr style="background:#f0f4ff;">
-                <td class="detail-label" style="color:#3F51B5; font-weight:bold; font-size:9px; text-transform:uppercase; letter-spacing:0.3px;">Item</td>
-                <td class="detail-amount" style="color:#3F51B5; font-weight:bold; font-size:9px; text-transform:uppercase;">Calculation</td>
-                <td class="detail-amount" style="color:#3F51B5; font-weight:bold; font-size:9px; text-transform:uppercase;">Your Share</td>
-            </tr>
-            {% if details.item_details %}
-                {% for item in details.item_details %}
-                <tr>
-                    <td class="detail-label">{{ item.name }}</td>
-                    <td class="detail-amount" style="color:#888; font-size:9px;">
-                        {% if item.shared_by > 1 %}Rs. {{ "%.2f"|format(item.full_price) }} &divide; {{ item.shared_by }}{% endif %}
-                    </td>
-                    <td class="detail-amount">Rs. {{ "%.2f"|format(item.your_share) }}</td>
-                </tr>
-                {% endfor %}
-            {% else %}
-                <tr><td colspan="3" class="detail-label" style="color:#999; font-style:italic;">No items selected</td></tr>
-            {% endif %}
-            <!-- Subtotal row -->
-            <tr style="background:#fafafa;">
-                <td class="detail-label" style="font-weight:bold;">Item Subtotal</td>
-                <td></td>
-                <td class="detail-amount" style="font-weight:bold;">Rs. {{ "%.2f"|format(details.item_total) }}</td>
-            </tr>
-            <!-- Charges -->
-            {% if details.service_charge > 0 %}
-            <tr>
-                <td class="detail-label">+ Service Charge (split)</td>
-                <td></td>
-                <td class="detail-amount">Rs. {{ "%.2f"|format(details.service_charge) }}</td>
-            </tr>
-            {% endif %}
-            {% if details.cgst > 0 %}
-            <tr>
-                <td class="detail-label">+ CGST (split)</td>
-                <td></td>
-                <td class="detail-amount">Rs. {{ "%.2f"|format(details.cgst) }}</td>
-            </tr>
-            {% endif %}
-            {% if details.sgst > 0 %}
-            <tr>
-                <td class="detail-label">+ SGST (split)</td>
-                <td></td>
-                <td class="detail-amount">Rs. {{ "%.2f"|format(details.sgst) }}</td>
-            </tr>
-            {% endif %}
-            {% if details.igst > 0 %}
-            <tr>
-                <td class="detail-label">+ IGST (split)</td>
-                <td></td>
-                <td class="detail-amount">Rs. {{ "%.2f"|format(details.igst) }}</td>
-            </tr>
-            {% endif %}
-            {% if details.discount > 0 %}
-            <tr>
-                <td class="detail-label">- Discount</td>
-                <td></td>
-                <td class="detail-amount">- Rs. {{ "%.2f"|format(details.discount) }}</td>
-            </tr>
-            {% endif %}
-            <tr class="total-row">
-                <td class="detail-label">Amount Due</td>
-                <td></td>
-                <td class="detail-amount">Rs. {{ "%.2f"|format(details.final_amount) }}</td>
-            </tr>
-        </table>
-    </div>
+{% if two_up %}
+<table cellspacing="0">
+    {% for pair in people.items() | batch(2) %}
+    <tr>
+        <td width="48%">{{ person_block(pair[0][0], pair[0][1]) }}</td>
+        <td width="4%"></td>
+        <td width="48%">{% if pair | length > 1 %}{{ person_block(pair[1][0], pair[1][1]) }}{% endif %}</td>
+    </tr>
     {% endfor %}
+</table>
+{% else %}
+{% for user, d in people.items() %}{{ person_block(user, d) }}{% endfor %}
+{% endif %}
 
-    <!-- ── Footer ── -->
-    <div class="footer">
-        Generated by BillBear &nbsp;|&nbsp; Room: {{ room_code }} &nbsp;|&nbsp; {{ current_date.strftime('%d %b %Y at %I:%M %p') }}
-    </div>
+{{ space(12) }}
+<table cellspacing="0"><tr><td class="heading">The bill</td></tr></table>
+{{ space(12) }}
+
+{% if bill_side_by_side %}
+<table cellspacing="0">
+    <tr>
+        <td width="47%">{{ dishes_table() }}</td>
+        <td width="6%"></td>
+        <td width="47%">{{ totals_table() }}</td>
+    </tr>
+</table>
+{% else %}
+{{ dishes_table() }}
+{{ space(12) }}
+<table cellspacing="0"><tr><td style="width: 50%"></td><td style="width: 50%">{{ totals_table() }}</td></tr></table>
+{% endif %}
+
+<div id="footer">
+    <table cellspacing="0">
+        <tr>
+            <td class="footer">{% if all_square %}Shares add up to the bill total. {% endif %}{% if (t.service_charge + t.cgst + t.sgst + t.igst) > 0 %}Taxes and service charge split {{ 'equally' if t.tax_split == 'equal' else 'by what each person had' }}. {% endif %}Amounts in rupees.</td>
+            <td class="footer" style="text-align: right">billbear.me</td>
+        </tr>
+    </table>
+</div>
 
 </body>
 </html>

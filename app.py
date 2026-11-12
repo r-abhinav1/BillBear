@@ -1,46 +1,66 @@
 import base64
 import json
 import os
-import random
-import string
-import uuid
+import re
+import sys
 from datetime import datetime
 from io import BytesIO
+from itertools import zip_longest
 
 import qrcode
 from dotenv import load_dotenv
 from flask import Flask, jsonify, make_response, redirect, render_template, request, url_for
-from flask_cors import CORS
-from werkzeug.utils import secure_filename
-
-from storage import get_room, room_exists, save_room
-from utils.bill_audit import audit_bill
-from utils.bill_split import calculate_bill_split
-from utils.receipt_contracts import normalize_receipt_payload
-from utils.receipt_pipeline import extract_receipt_from_text_payload
-from utils.session import (
-    clear_session_cookie,
-    issue_user_id,
-    read_session_cookie,
-    set_session_cookie,
-)
+from werkzeug.exceptions import RequestEntityTooLarge
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Feature flags
-# ---------------------------------------------------------------------------
+# Write log lines immediately even when stdout is redirected to a file.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
-VERCEL_ENV = os.getenv("VERCEL", False)
+import db  # noqa: E402
+import storage  # noqa: E402
+from storage import RoomError  # noqa: E402
+from utils.bill_audit import audit_bill  # noqa: E402
+from utils.bill_split import calculate_bill_split  # noqa: E402
+from utils.image_prep import ImageRejected, prepare_receipt_image  # noqa: E402
+from utils.receipt_contracts import (  # noqa: E402
+    AMOUNT_FIELDS,
+    normalize_item_category,
+    normalize_receipt_payload,
+)
+from utils.receipt_pipeline import VisionFailed, VisionUnavailable, extract_receipt_from_vision  # noqa: E402
+from utils.security import (  # noqa: E402
+    RATE_LIMITS,
+    apply_security_headers,
+    client_ip,
+    is_same_origin,
+    scan_daily_cap,
+    turnstile_enabled,
+    turnstile_site_key,
+    verify_turnstile,
+)
+from utils.session import (  # noqa: E402
+    get_secret_key,
+    has_valid_scan_ticket,
+    read_hostkey_cookie,
+    read_session_cookie,
+    set_hostkey_cookie,
+    set_scan_ticket,
+    set_session_cookie,
+)
+from utils.validation import (  # noqa: E402
+    clean_items,
+    normalize_quantity,
+    format_price,
+    normalize_person_name,
+    normalize_room_name,
+    parse_price,
+)
 
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
-
-
-OCR_TEXT_INGESTION_ENABLED = _env_flag("OCR_TEXT_INGESTION_ENABLED", True)
-LEGACY_IMAGE_OCR_ENABLED = _env_flag("LEGACY_IMAGE_OCR_ENABLED", False)
-CLIENT_OCR_ENABLED = _env_flag("CLIENT_OCR_ENABLED", True)
+VERCEL_ENV = bool(os.getenv("VERCEL"))
 
 # ---------------------------------------------------------------------------
 # PDF library detection
@@ -55,7 +75,6 @@ if not VERCEL_ENV:
         import weasyprint
         WEASYPRINT_AVAILABLE = True
         PDF_AVAILABLE = True
-        print("WeasyPrint available for PDF generation")
     except Exception as exc:
         print(f"WeasyPrint not available, trying xhtml2pdf... ({exc})")
 
@@ -64,187 +83,292 @@ if not PDF_AVAILABLE:
         from xhtml2pdf import pisa
         XHTML2PDF_AVAILABLE = True
         PDF_AVAILABLE = True
-        print("xhtml2pdf available for PDF generation")
     except Exception as exc:
         print(f"xhtml2pdf not available ({exc})")
-
-if not PDF_AVAILABLE:
-    print("Warning: No PDF libraries available. PDF generation will be disabled.")
-elif VERCEL_ENV:
-    print("Running on Vercel - using xhtml2pdf for PDF generation")
 
 # ---------------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-# CORS is applied only to the API routes; the HTML pages don't need it.
-CORS(app, resources={r"/api/*": {"origins": os.getenv("ALLOWED_ORIGINS", "*")}})
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
+if VERCEL_ENV or os.getenv("TRUST_PROXY", "").lower() in {"1", "true", "yes"}:
+    # Behind Vercel / ngrok, TLS ends at the proxy. Trust its X-Forwarded-Proto/Host
+    # so request.host_url (same-origin check, QR links) is the public https URL.
+    from werkzeug.middleware.proxy_fix import ProxyFix
 
-if VERCEL_ENV:
-    app.config["UPLOAD_FOLDER"] = "/tmp"
-else:
-    app.config["UPLOAD_FOLDER"] = os.path.join("static", "uploads")
-    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.config["SECRET_KEY"] = get_secret_key()  # raises on Vercel if missing/weak
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+db.init_app(app)
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
 
 # ---------------------------------------------------------------------------
-# Small app-level helpers
+# Request plumbing: CSRF origin check, headers, errors
 # ---------------------------------------------------------------------------
 
-def generate_room_code(length: int = 6) -> str:
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
-
-
-def generate_qr_base64(link: str) -> str:
-    qr = qrcode.make(link)
-    buf = BytesIO()
-    qr.save(buf, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-
-
-def parse_text_payload_from_form():
-    """Parse the ocr_payload JSON field from the current form submission."""
-    raw = request.form.get("ocr_payload", "").strip()
-    if not raw:
-        return None
+def wants_json() -> bool:
+    if (
+        request.headers.get("X-Requested-With") == "fetch"
+        or request.accept_mimetypes.best == "application/json"
+        or request.path.startswith("/api/")
+        or request.is_json
+    ):
+        return True
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid OCR payload JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("OCR payload must be a JSON object")
-    return payload
+        return request.form.get("ajax") == "1"
+    except Exception:  # e.g. body too large — don't re-raise while building an error page
+        return False
 
 
-def process_uploaded_image(file) -> dict:
-    """
-    Run legacy Gemini Vision OCR on an uploaded image file.
-    Only used when LEGACY_IMAGE_OCR_ENABLED=true.
-    """
-    from utils.ocr_image import OcrBillMaker
+def error_response(message: str, status: int, code: str = "ERROR", **extra):
+    if wants_json():
+        body = {"status": "error", "code": code, "message": message}
+        body.update(extra)
+        return jsonify(body), status
+    return render_template("message.html", title="Something went wrong", message=message), status
 
-    extractor = OcrBillMaker()
 
-    try:
-        file.seek(0)
-        result = extractor.get_text(BytesIO(file.read()))
-        return normalize_receipt_payload(result)
-    except Exception as memory_error:
-        print(f"In-memory OCR failed: {memory_error}. Retrying with temp file.")
+@app.before_request
+def _csrf_origin_check():
+    if request.method in UNSAFE_METHODS and not is_same_origin(request):
+        return error_response("Cross-site request blocked.", 403, "BAD_ORIGIN")
+    return None
 
-    file.seek(0)
-    temp_filename = secure_filename(f"{uuid.uuid4().hex}_{file.filename}")
-    temp_dir = "/tmp" if VERCEL_ENV else app.config["UPLOAD_FOLDER"]
-    temp_path = os.path.join(temp_dir, temp_filename)
-    file.save(temp_path)
-    try:
-        result = extractor.get_text(temp_path)
-        return normalize_receipt_payload(result)
-    finally:
-        try:
-            os.remove(temp_path)
-        except OSError as exc:
-            print(f"Temp file cleanup failed: {exc}")
+
+@app.after_request
+def _security_headers(response):
+    return apply_security_headers(response, turnstile=turnstile_enabled())
+
+
+@app.errorhandler(RoomError)
+def _room_error(exc: RoomError):
+    if exc.code == "NOT_FOUND" and not wants_json():
+        return render_template(
+            "message.html",
+            title="Bear ate this room",
+            message="This room doesn't exist or has expired. Rooms are cleared 24 hours after the last activity, so check the code with your host or start a new split.",
+        ), 404
+    return error_response(exc.message, exc.status, exc.code, **exc.extra)
+
+
+@app.errorhandler(db.DatabaseUnavailable)
+def _db_down(exc):
+    return error_response("The database is temporarily unavailable. Please try again in a moment.", 503, "DB_DOWN")
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def _too_large(exc):
+    return error_response("Upload is too large (max 4 MB).", 413, "TOO_LARGE")
+
+
+@app.errorhandler(Exception)
+def _unhandled(exc):
+    from werkzeug.exceptions import HTTPException
+
+    if isinstance(exc, HTTPException):
+        return exc
+    app.logger.exception("Unhandled error")
+    return error_response("Something went wrong on our side. Please try again.", 500, "SERVER_ERROR")
 
 
 # ---------------------------------------------------------------------------
-# Identity & room-shape helpers (added for session-resilience + host controls)
+# Helpers
 # ---------------------------------------------------------------------------
 
-def ensure_room_shape(room: dict) -> dict:
-    """
-    Guarantee a room dict has the fields the new features rely on.
-    Old rooms created before these features don't have them — we fill defaults
-    in-place so routes can read them without .get() everywhere.
-    """
-    room.setdefault("users", [])
-    room.setdefault("selections", {})
-    if not isinstance(room.get("submitted_users"), set):
-        room["submitted_users"] = set(room.get("submitted_users", []))
-    room.setdefault("user_ids", {})
-    room.setdefault("submission_ids", {})
-    room.setdefault("last_selections", {})
-    room.setdefault("host_user_id", None)
-    room.setdefault("schema_version", 1)
+def rate_limited(name: str) -> bool:
+    """Count a hit; True if the caller is over the limit."""
+    limit, window = RATE_LIMITS[name]
+    return not storage.rate_limit_hit(f"{name}:{client_ip(request)}", limit, window)
+
+
+def _miss_blocked() -> bool:
+    limit, window = RATE_LIMITS["miss"]
+    return not storage.rate_limit_peek(f"miss:{client_ip(request)}", limit, window)
+
+
+def load_room(code: str) -> dict:
+    """Load an alive room or raise. Repeated misses from one IP get a 429 (code guessing)."""
+    code = storage.normalize_code(code)
+    if _miss_blocked():
+        raise RoomError("RATE_LIMITED", "Too many attempts. Wait a few minutes and try again.", status=429)
+    room = storage.get_room(code) if re.fullmatch(r"[A-Z0-9]{6}", code) else None
+    if room is None:
+        rate_limited("miss")
+        raise RoomError("NOT_FOUND", "This room doesn't exist or has expired.", status=404)
     return room
 
 
-def current_user(room_code: str, room: dict):
+def caller_uid(code: str):
+    payload = read_session_cookie(request, code)
+    return payload.get("uid") if payload else None
+
+
+def caller(room: dict):
+    """The participant this browser is, verified against the DB, or None."""
+    return storage.participant_for_uid(room, caller_uid(room["code"]))
+
+
+def require_caller(room: dict) -> tuple:
+    uid = caller_uid(room["code"])
+    me = storage.participant_for_uid(room, uid)
+    if not me:
+        raise RoomError("NOT_MEMBER", "This device isn't part of this room. Rejoin from the room link.", status=403)
+    return me, uid
+
+
+def require_host(room: dict) -> str:
+    me, uid = require_caller(room)
+    if not me["is_host"]:
+        raise RoomError("NOT_HOST", "Only the host can do that.", status=403)
+    return uid
+
+
+def _lan_ip():
+    """This machine's Wi-Fi/LAN address (no packets are sent)."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))
+            return sock.getsockname()[0]
+    except OSError:
+        return None
+
+
+_NGROK_CACHE = {"url": None, "checked": 0.0}
+
+
+def _ngrok_public_url():
     """
-    Returns the (user_id, user_name) of the caller for this room, based on
-    the cookie. Verifies the user_id is still present in room.user_ids.
-    Returns (None, None) if no valid session.
+    Local dev only: the https URL of a running `ngrok http` tunnel, read from
+    ngrok's local agent API (localhost:4040). Cached for 30s; None if no tunnel.
     """
-    payload = read_session_cookie(request, room_code)
-    if not payload:
-        return None, None
-    uid = payload.get("uid")
-    name = payload.get("name")
-    # Cookie must map to a user still registered in this room
-    if room.get("user_ids", {}).get(name) != uid:
-        return None, None
-    return uid, name
+    import time
+
+    import requests as _requests
+
+    now = time.monotonic()
+    if now - _NGROK_CACHE["checked"] < 30:
+        return _NGROK_CACHE["url"]
+    url = None
+    try:
+        tunnels = _requests.get("http://127.0.0.1:4040/api/tunnels", timeout=0.3).json().get("tunnels", [])
+        https = [t.get("public_url", "") for t in tunnels if str(t.get("public_url", "")).startswith("https://")]
+        url = https[0].rstrip("/") if https else None
+    except Exception:
+        url = None
+    _NGROK_CACHE.update(url=url, checked=now)
+    return url
 
 
-def is_host(room: dict, user_name: str) -> bool:
-    return bool(user_name) and user_name == room.get("host_name")
-
-
-def require_host(room_code: str, room: dict) -> bool:
-    """True if the caller's cookie identifies them as the room's host."""
-    uid, name = current_user(room_code, room)
-    if not uid or not name:
-        return False
-    if not is_host(room, name):
-        return False
-    # Extra belt-and-braces: host_user_id must match if it was recorded.
-    host_uid = room.get("host_user_id")
-    if host_uid and host_uid != uid:
-        return False
-    return True
-
-
-def generate_pdf_response(room: dict, room_code: str) -> tuple:
+def share_url(endpoint: str, **values) -> str:
     """
-    Render results_pdf.html and return (response, status_code).
-    Tries WeasyPrint first, falls back to xhtml2pdf.
+    Absolute URL for links other people open (QR code, join link).
+    Order: PUBLIC_BASE_URL if set. In local dev, when the page was opened via
+    localhost: a running ngrok tunnel (works on mobile data too), else this
+    machine's Wi-Fi address (same network only). Otherwise the current host.
     """
+    path = url_for(endpoint, **values)
+    base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if base:
+        return base + path
+    host = request.host.split(":")[0]
+    if not VERCEL_ENV and host in {"localhost", "127.0.0.1", "::1", "[::1]"}:
+        tunnel = _ngrok_public_url()
+        if tunnel:
+            return tunnel + path
+        lan = _lan_ip()
+        if lan:
+            port = request.host.split(":")[1] if ":" in request.host else ""
+            return f"{request.scheme}://{lan}{':' + port if port else ''}{path}"
+    return url_for(endpoint, _external=True, **values)
+
+
+def generate_qr_base64(link: str) -> str:
+    buf = BytesIO()
+    qrcode.make(link).save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def host_recovery_url(room_code: str):
+    token = read_hostkey_cookie(request, room_code)
+    if not token:
+        return None
+    return url_for("host_recover", room_code=room_code, k=token, _external=True)
+
+
+def _receipt_totals(normalized: dict) -> dict:
+    totals = {field: normalized.get(field, "N/A") for field in AMOUNT_FIELDS}
+    for field in ("restaurant", "date", "time"):
+        value = normalized.get(field)
+        if isinstance(value, str) and value:
+            totals[field] = value[:120]
+    return totals
+
+
+def _redirect_for(room: dict, me: dict):
+    if room["finalized"]:
+        return redirect(url_for("results_page", room_code=room["code"]))
+    if me["submitted"]:
+        return redirect(url_for("waiting_room", room_code=room["code"], user_name=me["name"]))
+    return redirect(url_for("select_items", room_code=room["code"], user_name=me["name"]))
+
+
+def _safe_filename(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9 _-]+", "", name).strip().replace(" ", "_")
+    return (cleaned or "bill")[:50]
+
+
+# Images the PDF template may embed, referenced there as "bbasset/<name>".
+_PDF_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "images")
+_PDF_ASSETS = {
+    "pdf-bear.png", "pdf-watermark.png",
+    "pdf-veg.png", "pdf-nonveg.png", "pdf-egg.png", "pdf-alcohol.png", "pdf-blank.png",
+}
+
+
+def _pdf_link_callback(uri: str, rel: str) -> str:
+    """Resolve our own bundled images; block every other resource the HTML names."""
+    prefix = "bbasset/"
+    if uri.startswith(prefix) and uri[len(prefix):] in _PDF_ASSETS:
+        return os.path.join(_PDF_ASSET_DIR, uri[len(prefix):])
+    return ""
+
+
+def generate_pdf_response(room: dict, room_code: str):
     bill_split = calculate_bill_split(room)
+    all_square = all(w.get("severity") in ("ok", "note") for w in audit_bill(room, bill_split))
     html = render_template(
         "results_pdf.html",
         room=room,
         room_code=room_code,
         bill_split=bill_split,
+        all_square=all_square,
         current_date=datetime.now(),
     )
-
     buf = BytesIO()
-    filename = f'{room["room_name"]}_bill_split.pdf'
-
+    filename = f"{_safe_filename(room['room_name'])}_bill_split.pdf"
     if WEASYPRINT_AVAILABLE and not VERCEL_ENV:
+        from pathlib import Path
+
+        html = html.replace("bbasset/", Path(_PDF_ASSET_DIR).as_uri() + "/")
         weasyprint.HTML(string=html).write_pdf(buf)
-        buf.seek(0)
-        response = make_response(buf.read())
-        response.headers["Content-Type"] = "application/pdf"
-        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response, 200
-
-    if XHTML2PDF_AVAILABLE:
-        status = pisa.CreatePDF(html, dest=buf)
+    elif XHTML2PDF_AVAILABLE:
+        status = pisa.CreatePDF(html, dest=buf, link_callback=_pdf_link_callback)
         if status.err:
-            return "Error generating PDF with xhtml2pdf", 500
-        buf.seek(0)
-        response = make_response(buf.read())
-        response.headers["Content-Type"] = "application/pdf"
-        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response, 200
-
-    return "No PDF generation library available", 500
+            raise RuntimeError("xhtml2pdf failed")
+    else:
+        raise RuntimeError("No PDF library")
+    response = make_response(buf.getvalue())
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 # ---------------------------------------------------------------------------
-# Routes — static pages
+# Static pages
 # ---------------------------------------------------------------------------
 
 @app.route("/")
@@ -252,9 +376,39 @@ def index():
     return render_template("index.html")
 
 
+# Help: an index and one page per topic, read in this order.
+HELP_TOPICS = [
+    {"slug": "basics", "title": "The basics", "blurb": "From scan to split in five steps"},
+    {"slug": "sharing", "title": "Shared or yours", "blurb": "When the bill has several of one dish"},
+    {"slug": "tax", "title": "Tax and service", "blurb": "Who pays how much of the charges"},
+    {"slug": "host", "title": "For the host", "blurb": "Everything you can do in the room"},
+    {"slug": "scan", "title": "The scan", "blurb": "How Bear reads the bill, and where it slips"},
+]
+
+
+@app.route("/help")
+def help_index():
+    return render_template("help/index.html", topics=HELP_TOPICS)
+
+
+@app.route("/help/<topic>")
+def help_topic(topic):
+    index = next((i for i, t in enumerate(HELP_TOPICS) if t["slug"] == topic), None)
+    if index is None:
+        return redirect(url_for("help_index"))
+    return render_template(
+        f"help/{HELP_TOPICS[index]['slug']}.html",
+        topics=HELP_TOPICS,
+        topic=HELP_TOPICS[index],
+        position=index + 1,
+        next_topic=HELP_TOPICS[index + 1] if index + 1 < len(HELP_TOPICS) else None,
+    )
+
+
 @app.route("/about")
 def about():
-    return render_template("about.html")
+    # The About page was folded into Help.
+    return redirect(url_for("help_index"), code=301)
 
 
 @app.route("/terms")
@@ -263,764 +417,660 @@ def terms():
 
 
 # ---------------------------------------------------------------------------
-# Routes — OCR API
+# Receipt scan (vision only). No room is touched here.
 # ---------------------------------------------------------------------------
 
-@app.route("/api/ocr/ingest", methods=["POST"])
-def ingest_ocr_text():
-    if not OCR_TEXT_INGESTION_ENABLED:
-        return jsonify({"status": "error", "message": "OCR text ingestion is disabled"}), 404
+@app.route("/api/receipt/scan", methods=["POST"])
+def scan_receipt():
+    if not has_valid_scan_ticket(request):
+        return error_response("Scan session expired. Reload the page and try again.", 403, "NO_TICKET")
+    if not verify_turnstile(request.form.get("cf-turnstile-response", ""), client_ip(request)):
+        return error_response("Bot check failed. Reload the page and try again.", 403, "BOT_CHECK")
+    if rate_limited("scan") or rate_limited("scan_day"):
+        return error_response(
+            "Too many scans from this network. Wait a bit, or enter items manually.", 429, "RATE_LIMITED"
+        )
+    # Global budget ceiling (checked after per-IP limits so one abuser can't
+    # burn everyone's daily allowance with rejected requests).
+    if not storage.rate_limit_hit("scan_global:all", scan_daily_cap(), 86400):
+        return error_response(
+            "Bill scanning has hit today's limit. Please enter items manually — it resets tomorrow.",
+            429,
+            "DAILY_CAP",
+        )
 
-    payload = request.get_json(silent=True)
-    if not payload:
-        return jsonify({"status": "error", "message": "Missing JSON payload"}), 400
+    upload = request.files.get("image")
+    if not upload:
+        return error_response("No image uploaded.", 400, "NO_IMAGE")
+    try:
+        image_b64, mime = prepare_receipt_image(upload.read())
+    except ImageRejected as exc:
+        return error_response(str(exc), 400, "BAD_IMAGE")
 
     try:
-        receipt = extract_receipt_from_text_payload(payload)
-        receipt = normalize_receipt_payload(receipt)
-        parser_meta = receipt.get("parser_meta", {})
-        extraction_meta = receipt.get("extraction_meta", {})
-        print(
-            "OCR ingest: "
-            f"source={extraction_meta.get('source', 'unknown')} "
-            f"provider={parser_meta.get('fallback_provider', 'none')} "
-            f"used_fallback={parser_meta.get('used_fallback', False)} "
-            f"confidence={parser_meta.get('confidence', 'N/A')}"
+        receipt = extract_receipt_from_vision(image_b64, mime)
+    except VisionUnavailable as exc:
+        return error_response(str(exc), 503, "SCAN_UNAVAILABLE")
+    except VisionFailed as exc:
+        return error_response(
+            f"{exc} Try a clearer, well-lit photo, or enter items manually.", 502, "SCAN_FAILED"
         )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"status": "error", "message": f"OCR ingestion failed: {exc}"}), 500
 
+    items = clean_items(receipt.get("items"))
+    receipt["items"] = [
+        {"name": i["name"], "price": format_price(i["price"]), "category": i["category"],
+         "quantity": i["quantity"]}
+        for i in items
+    ]
+    receipt.pop("parser_meta", None)
     return jsonify({"status": "success", "receipt": receipt})
 
 
 # ---------------------------------------------------------------------------
-# Routes — room creation and editing
+# Room creation and item editing (host only)
 # ---------------------------------------------------------------------------
+
+def _render_create(mode: str, error: str = "", status: int = 200, form=None):
+    response = make_response(
+        render_template(
+            "create_room.html",
+            mode=mode,
+            error=error,
+            form=form or {},
+            turnstile_site_key=turnstile_site_key() if turnstile_enabled() else "",
+        ),
+        status,
+    )
+    set_scan_ticket(response)
+    return response
+
 
 @app.route("/create", methods=["GET", "POST"])
 def create_room():
-    if request.method == "POST":
-        host_name = request.form.get("host_name", "").strip()
-        room_name = request.form.get("room_name", "").strip()
-        num_people = request.form.get("num_people", "").strip()
-        file = request.files.get("bill_image")
-
-        if not host_name or not room_name or not num_people:
-            return "Missing required room details", 400
-
-        try:
-            num_people_int = int(num_people)
-            if not (1 <= num_people_int <= 50):
-                return "Number of people must be between 1 and 50", 400
-        except ValueError:
-            return "Number of people must be a valid integer", 400
-
-        try:
-            ocr_result = None
-            extraction_source = "unknown"
-            skip_ocr = request.form.get("skip_ocr", "").strip().lower() == "true"
-
-            text_payload = parse_text_payload_from_form() if OCR_TEXT_INGESTION_ENABLED else None
-            saved_scan = (
-                text_payload.get("_vision_receipt") if isinstance(text_payload, dict) else None
-            )
-            if (
-                isinstance(saved_scan, dict)
-                and saved_scan.get("items")
-                and saved_scan.get("extraction_meta", {}).get("source") == "user_saved_json"
-            ):
-                # Saved-JSON short-circuit: trust the user's uploaded scan.
-                # Missing subtotal/total are allowed here — edit_items lets the
-                # user fix them before proceeding.
-                ocr_result = normalize_receipt_payload(saved_scan)
-                ocr_result["parser_meta"] = saved_scan.get("parser_meta", {
-                    "source": "user_saved_json",
-                    "used_fallback": False,
-                })
-                ocr_result["extraction_meta"] = saved_scan.get("extraction_meta", {
-                    "mode": "saved_json",
-                    "source": "user_saved_json",
-                    "provider": "none",
-                })
-                extraction_source = "user_saved_json"
-            elif text_payload:
-                ocr_result = extract_receipt_from_text_payload(text_payload)
-                ocr_result = normalize_receipt_payload(ocr_result)
-                extraction_source = ocr_result.get("extraction_meta", {}).get("source", "ocr_text")
-            elif LEGACY_IMAGE_OCR_ENABLED and file and file.filename:
-                ocr_result = process_uploaded_image(file)
-                extraction_source = "legacy_image_ocr"
-                ocr_result["extraction_meta"] = {
-                    "mode": "image",
-                    "source": extraction_source,
-                    "provider": "gemini",
-                }
-            elif skip_ocr:
-                ocr_result = {
-                    "items": [],
-                    "extraction_meta": {"mode": "manual", "source": "user_skipped_ocr"},
-                }
-                extraction_source = "manual"
-            else:
-                if OCR_TEXT_INGESTION_ENABLED and not LEGACY_IMAGE_OCR_ENABLED:
-                    return "No OCR text payload provided and legacy image OCR is disabled", 400
-                return "No file uploaded", 400
-
-            items = ocr_result.get("items", [])
-            parser_meta = ocr_result.get("parser_meta", {})
-            extraction_meta = ocr_result.get("extraction_meta", {})
-            print(
-                "Create room OCR: "
-                f"source={extraction_meta.get('source', extraction_source)} "
-                f"provider={parser_meta.get('fallback_provider', 'none')} "
-                f"used_fallback={parser_meta.get('used_fallback', False)} "
-                f"confidence={parser_meta.get('confidence', 'N/A')}"
-            )
-
-            room_code = generate_room_code()
-            host_uid = issue_user_id()
-            room_data = {
-                "host_name": host_name,
-                "room_name": room_name,
-                "num_people": num_people_int,
-                "bill_image": None,
-                "items": items,
-                "ocr_data": ocr_result,
-                "ocr_source": extraction_source,
-                "users": [host_name],
-                "selections": {},
-                "submitted_users": set(),
-                # Session-resilience fields (schema v2)
-                "user_ids": {host_name: host_uid},
-                "host_user_id": host_uid,
-                "submission_ids": {},
-                "last_selections": {},
-                "schema_version": 2,
-            }
-
-            if not save_room(room_code, room_data):
-                return "Error saving room data", 500
-
-            response = make_response(
-                render_template("edit_items.html", room_code=room_code, items=ocr_result)
-            )
-            set_session_cookie(response, room_code, host_uid, host_name)
-            return response
-
-        except ValueError as exc:
-            return f"Invalid request: {exc}", 400
-        except Exception as exc:
-            print(f"Error processing file: {exc}")
-            return f"Error processing uploaded file: {exc}", 500
-
-    mode = (request.args.get("mode") or "image").lower()
+    mode = (request.values.get("mode") or "image").lower()
     if mode not in {"image", "json"}:
         mode = "image"
-    return render_template(
-        "create_room.html",
-        client_ocr_enabled=CLIENT_OCR_ENABLED and OCR_TEXT_INGESTION_ENABLED,
-        legacy_image_ocr_enabled=LEGACY_IMAGE_OCR_ENABLED,
-        mode=mode,
+    if request.method == "GET":
+        return _render_create(mode)
+
+    form = request.form
+    if rate_limited("create"):
+        return _render_create(mode, "Too many rooms created from this network. Try again later.", 429, form)
+    if not verify_turnstile(form.get("cf-turnstile-response", ""), client_ip(request)):
+        return _render_create(mode, "Bot check failed. Please try again.", 403, form)
+
+    try:
+        host_name = normalize_person_name(form.get("host_name"))
+        room_name = normalize_room_name(form.get("room_name"))
+        try:
+            num_people = int(form.get("num_people", "").strip())
+        except ValueError:
+            raise ValueError("Number of people must be a whole number.")
+        if not 1 <= num_people <= 50:
+            raise ValueError("Number of people must be between 1 and 50.")
+
+        if form.get("skip_ocr", "").lower() == "true":
+            receipt, source = {}, "manual"
+        else:
+            raw = form.get("receipt_json", "").strip()
+            if not raw:
+                raise ValueError("Scan the bill first, or tap 'Enter items manually'.")
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                raise ValueError("The scanned receipt data was corrupted. Please scan again.")
+            if not isinstance(parsed, dict):
+                raise ValueError("The scanned receipt data was invalid. Please scan again.")
+            receipt = parsed.get("_vision_receipt") if isinstance(parsed.get("_vision_receipt"), dict) else parsed
+            meta_source = (receipt.get("extraction_meta") or {}).get("source")
+            source = meta_source if meta_source in {"vision_llm", "user_saved_json"} else "client_json"
+
+        normalized = normalize_receipt_payload(receipt)
+        items = clean_items(normalized.get("items"))
+    except ValueError as exc:
+        return _render_create(mode, str(exc), 400, form)
+
+    code, host_uid, recovery_token = storage.create_room(
+        room_name=room_name,
+        host_name=host_name,
+        num_people=num_people,
+        items=items,
+        ocr_data=_receipt_totals(normalized),
+        ocr_source=source,
     )
+    response = make_response(redirect(url_for("edit_items", room_code=code)))
+    set_session_cookie(response, code, host_uid, host_name)
+    set_hostkey_cookie(response, code, recovery_token)
+    return response
 
 
 @app.route("/edit/<room_code>", methods=["GET", "POST"])
 def edit_items(room_code):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
+    room = load_room(room_code)
+    require_host(room)
+    code = room["code"]
 
+    if room["finalized"]:
+        return render_template(
+            "message.html",
+            title="Bill is finalized",
+            message="Reopen selections from the results page before editing items.",
+            link=url_for("results_page", room_code=code),
+            link_text="Go to results",
+        ), 409
+
+    error = ""
     if request.method == "POST":
+        ids = request.form.getlist("item_id")
         names = request.form.getlist("item_name")
         prices = request.form.getlist("item_price")
-        items = [
-            {"name": name.strip(), "price": price}
-            for name, price in zip(names, prices)
-            if name.strip()
+        categories = request.form.getlist("item_category")
+        quantities = request.form.getlist("item_quantity")
+        rows = [
+            {"id": item_id, "name": name, "price": price, "category": category, "quantity": quantity}
+            for item_id, name, price, category, quantity in zip_longest(ids, names, prices, categories, quantities)
+            if name is not None
         ]
+        try:
+            items = clean_items(rows, strict_prices=True)
+            totals = {}
+            for field in AMOUNT_FIELDS:
+                totals[field] = format_price(parse_price(request.form.get(field)))
+            # The switch is a checkbox, so "off" arrives as a missing field; the
+            # marker says the form had the switch at all.
+            if "tax_split_set" in request.form:
+                totals["taxSplit"] = "proportional" if request.form.get("tax_proportional") else "equal"
+        except ValueError as exc:
+            error = str(exc)
+        else:
+            storage.replace_items(code, items, totals)
+            return redirect(url_for("room_summary", room_code=code))
 
-        def _safe_form_value(field: str, default: str = "N/A") -> str:
-            value = request.form.get(field, default).strip()
-            return value or default
-
-        if "ocr_data" not in room:
-            room["ocr_data"] = {}
-
-        room["ocr_data"].update({
-            "subtotal": _safe_form_value("subtotal"),
-            "serviceCharge": _safe_form_value("serviceCharge"),
-            "discount": _safe_form_value("discount"),
-            "cgst": _safe_form_value("cgst"),
-            "sgst": _safe_form_value("sgst"),
-            "igst": _safe_form_value("igst"),
-            "total": _safe_form_value("total"),
-        })
-
-        room["items"] = items
-        room["ocr_data"]["items"] = items
-
-        if not save_room(room_code, room):
-            return "Error saving room data", 500
-
-        return redirect(url_for("room_summary", room_code=room_code))
-
-    ocr_data = normalize_receipt_payload(room.get("ocr_data", {}))
-    return render_template("edit_items.html", room_code=room_code, items=ocr_data)
+    view = dict(room["ocr_data"])
+    view["items"] = [
+        {"id": i["id"], "name": i["raw_name"], "price": i["price"], "category": i["category"],
+         "quantity": i["quantity"]}
+        for i in room["items"]
+    ]
+    if error:
+        # Re-show what the host typed so one bad price doesn't wipe their edits.
+        view["items"] = [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "price": r["price"] or "",
+                "category": normalize_item_category(r["category"]),
+                "quantity": normalize_quantity(r["quantity"]),
+            }
+            for r in rows
+        ]
+        view.update({field: request.form.get(field, "N/A") for field in AMOUNT_FIELDS})
+        if "tax_split_set" in request.form:
+            view["taxSplit"] = "proportional" if request.form.get("tax_proportional") else "equal"
+    return render_template(
+        "edit_items.html",
+        room_code=code,
+        items=view,
+        error=error,
+        submitted_count=len(room["submitted_users"]),
+    ), (400 if error else 200)
 
 
 # ---------------------------------------------------------------------------
-# Routes — room lobby and status
+# Lobby and status
 # ---------------------------------------------------------------------------
 
 @app.route("/room/<room_code>")
 def room_summary(room_code):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
+    room = load_room(room_code)
+    me = caller(room)
+    join_url = share_url("join_room", room_code=room["code"])
+    return render_template(
+        "room_summary.html",
+        room=room,
+        room_code=room["code"],
+        qr_b64=generate_qr_base64(join_url),
+        join_url=join_url,
+        me=me,
+        is_host=bool(me and me["is_host"]),
+        host_link=host_recovery_url(room["code"]) if me and me["is_host"] else None,
+    )
 
-    if "users" not in room:
-        room["users"] = []
-    if room["host_name"] not in room["users"]:
-        room["users"].insert(0, room["host_name"])
 
-    room.setdefault("selections", {})
-    room.setdefault("submitted_users", set())
-    save_room(room_code, room)
-
-    join_url = url_for("join_room", room_code=room_code, _external=True)
-    qr_b64 = generate_qr_base64(join_url)
-    return render_template("room_summary.html", room=room, room_code=room_code, qr_b64=qr_b64, join_url=join_url)
+def _picks_for_host(room: dict) -> dict:
+    """Each person's sent picks as display strings, e.g. "Masala Dosa ×2" or "Naan (sharing)"."""
+    several = {item["name"] for item in room["items"] if item["quantity"] > 1}
+    picks = {}
+    for name, dishes in room["selections"].items():
+        counts = room["portions"].get(name, {})
+        shown = []
+        for dish in dishes:
+            if dish not in several:
+                shown.append(dish)
+            elif counts.get(dish, 0) == 0:
+                shown.append(f"{dish} (sharing)")
+            else:
+                shown.append(f"{dish} ×{counts[dish]}")
+        picks[name] = shown
+    return picks
 
 
 @app.route("/room/<room_code>/status")
 def room_status(room_code):
-    room = get_room(room_code)
-    if not room:
-        return jsonify({"error": "Room not found"}), 404
-    ensure_room_shape(room)
-
-    users = room.get("users", [])
-    submitted_users = list(room.get("submitted_users", set()))
-    expected_people = int(room.get("num_people", 1))
-    enough_joined = len(users) >= expected_people
-    all_submitted = len(submitted_users) == len(users) > 0
-
-    # Caller identity (for kicked-user detection on the client)
-    _, caller_name = current_user(room_code, room)
-    caller_in_room = bool(caller_name) and caller_name in users
-    caller_is_host = is_host(room, caller_name) if caller_name else False
-
+    room = load_room(room_code)
+    me = caller(room)
+    users = room["users"]
+    submitted = [u for u in users if u in room["submitted_users"]]
     return jsonify({
         "status": "success",
         "users": users,
-        "submitted_users": submitted_users,
-        "all_submitted": all_submitted,
-        "enough_users_joined": enough_joined,
-        "ready_to_proceed": enough_joined and all_submitted,
+        "submitted_users": submitted,
+        "devices": {p["name"]: p["has_device"] for p in room["participants"]},
+        "all_submitted": bool(users) and len(submitted) == len(users),
+        "enough_users_joined": room["waiting_for"] == 0,
+        "ready_to_proceed": room["can_finalize"],
+        "can_finalize": room["can_finalize"],
+        "finalized": room["finalized"],
+        "still_editing": room["still_editing"],
+        "waiting_for": room["waiting_for"],
+        "unclaimed_items": room["unclaimed_items"],
         "total_users": len(users),
-        "expected_people": expected_people,
-        "submitted_count": len(submitted_users),
-        "host_name": room.get("host_name", ""),
-        "caller_name": caller_name,
-        "caller_in_room": caller_in_room,
-        "caller_is_host": caller_is_host,
+        "expected_people": room["num_people"],
+        "submitted_count": len(submitted),
+        "host_name": room["host_name"],
+        "caller_name": me["name"] if me else None,
+        "caller_in_room": bool(me),
+        "caller_is_host": bool(me and me["is_host"]),
+        # What each person has sent, for the host's Manage sheet. Guests only
+        # see everyone's picks once the bill is final.
+        "picks": _picks_for_host(room) if me and me["is_host"] else None,
+        # Dishes where the portions sent don't add up to the bill's quantity.
+        "quantity_mismatches": room["quantity_mismatches"] if me and me["is_host"] else [],
+        # For dishes the bill lists several of: what each *other* person has sent
+        # (units claimed, or 0 for sharing), so someone picking can see what is left.
+        "taken": {
+            str(item_id): [h for h in holders if h["name"] != me["name"]]
+            for item_id, holders in room["taken"].items()
+        } if me else {},
     })
 
 
 # ---------------------------------------------------------------------------
-# Routes — joining a room
+# Joining
 # ---------------------------------------------------------------------------
+
+def _do_join(code: str, raw_name: str):
+    """Shared join logic. Returns a response on success, raises ValueError/RoomError otherwise."""
+    name = normalize_person_name(raw_name)
+    if rate_limited("join"):
+        raise RoomError("RATE_LIMITED", "Too many join attempts. Wait a few minutes.", status=429)
+    status, row, uid = storage.join_participant(code, name)
+    print(f"[join] {status} room={code}")
+    response = make_response(redirect(url_for("user_room", room_code=code, user_name=row["name"])))
+    set_session_cookie(response, code, uid, row["name"])
+    return response
+
 
 @app.route("/join", methods=["GET", "POST"])
 def join():
-    if request.method == "POST":
-        user_name = request.form.get("user_name", "").strip()
-        room_code = request.form.get("room_code", "").strip().upper()
-
-        if not user_name:
-            return render_template("join_room.html", error="Please enter your name")
-        if not room_code:
-            return render_template("join_room.html", error="Please enter a room code")
-        if not room_exists(room_code):
-            return render_template("join_room.html", error="Room not found. Please check the room code.")
-
-        room = get_room(room_code)
-        if not room:
-            return render_template("join_room.html", error="Room not found. Please check the room code.")
-        ensure_room_shape(room)
-
-        # Cookie reclaim: if the caller already has a valid session for this
-        # room, send them back to their existing state instead of creating a
-        # duplicate entry. This is the primary fix for the "submit appeared
-        # to fail, user rejoined and got a duplicate" bug.
-        _, cookie_name = current_user(room_code, room)
-        if cookie_name and cookie_name in room.get("users", []):
-            return redirect(url_for("user_room", room_code=room_code, user_name=cookie_name))
-
-        if user_name in room.get("users", []):
-            return render_template(
-                "join_room.html",
-                error=f"'{user_name}' already joined from another device. Open that device's original link to resume, or pick a different name.",
-            )
-        if len(room.get("users", [])) >= int(room.get("num_people", 1)):
-            return render_template("join_room.html", error="Room is full.")
-
-        uid = issue_user_id()
-        room.setdefault("users", []).append(user_name)
-        room["user_ids"][user_name] = uid
-        if not save_room(room_code, room):
-            return render_template("join_room.html", error="Error joining room. Please try again.")
-
-        response = make_response(
-            redirect(url_for("user_room", room_code=room_code, user_name=user_name))
-        )
-        set_session_cookie(response, room_code, uid, user_name)
-        return response
-
-    return render_template("join_room.html")
+    if request.method == "GET":
+        return render_template("join_room.html")
+    code = storage.normalize_code(request.form.get("room_code", ""))
+    if not code:
+        return render_template("join_room.html", error="Please enter a room code"), 400
+    try:
+        room = load_room(code)
+    except RoomError as exc:
+        return render_template("join_room.html", error=exc.message), exc.status
+    me = caller(room)
+    if me:
+        return _redirect_for(room, me)
+    try:
+        return _do_join(room["code"], request.form.get("user_name"))
+    except (ValueError, RoomError) as exc:
+        message = exc.message if isinstance(exc, RoomError) else str(exc)
+        return render_template("join_room.html", error=message), getattr(exc, "status", 400)
 
 
 @app.route("/join/<room_code>", methods=["GET", "POST"])
 def join_room(room_code):
-    room_code = room_code.upper()
-    room = get_room(room_code)
-    if not room:
-        return render_template("join_room_direct.html", error="Room not found", room_code=room_code)
-    ensure_room_shape(room)
-
-    # Cookie reclaim: if the user already holds a valid session for this room,
-    # jump them straight back to their current state (select-items / waiting)
-    # regardless of whether this is a GET or POST.
-    _, cookie_name = current_user(room_code, room)
-    if cookie_name and cookie_name in room.get("users", []):
-        return redirect(url_for("user_room", room_code=room_code, user_name=cookie_name))
-
-    if request.method == "POST":
-        user_name = request.form.get("user_name", "").strip()
-
-        if not user_name:
-            return render_template("join_room_direct.html", error="Please enter your name", room=room, room_code=room_code)
-        if user_name in room.get("users", []):
+    try:
+        room = load_room(room_code)
+    except RoomError as exc:
+        if exc.code in {"NOT_FOUND", "RATE_LIMITED"}:
             return render_template(
-                "join_room_direct.html",
-                error=f"'{user_name}' already joined from another device. Open that device's original link to resume, or pick a different name.",
-                room=room,
-                room_code=room_code,
-            )
-        if len(room.get("users", [])) >= int(room.get("num_people", 1)):
-            return render_template("join_room_direct.html", error="Room is full.", room=room, room_code=room_code)
-
-        uid = issue_user_id()
-        room.setdefault("users", []).append(user_name)
-        room["user_ids"][user_name] = uid
-        if not save_room(room_code, room):
-            return render_template("join_room_direct.html", error="Error joining room. Please try again.", room=room, room_code=room_code)
-
-        print(f"User '{user_name}' joined room '{room_code}' ({room['room_name']})")
-        response = make_response(
-            redirect(url_for("user_room", room_code=room_code, user_name=user_name))
+                "join_room_direct.html", error=exc.message, room_code=storage.normalize_code(room_code)
+            ), exc.status
+        raise
+    code = room["code"]
+    me = caller(room)
+    if me:
+        return _redirect_for(room, me)
+    if request.method == "POST":
+        try:
+            return _do_join(code, request.form.get("user_name"))
+        except (ValueError, RoomError) as exc:
+            message = exc.message if isinstance(exc, RoomError) else str(exc)
+            return render_template(
+                "join_room_direct.html", error=message, room=room, room_code=code
+            ), getattr(exc, "status", 400)
+    if room["finalized"]:
+        return render_template(
+            "join_room_direct.html",
+            error="This bill has already been finalized. If you were part of it, ask the host to move you to a new phone (Manage, next to your name), then join with the same name.",
+            room=room,
+            room_code=code,
         )
-        set_session_cookie(response, room_code, uid, user_name)
-        return response
+    return render_template("join_room_direct.html", room=room, room_code=code)
 
-    return render_template("join_room_direct.html", room=room, room_code=room_code)
+
+@app.route("/room/<room_code>/host", methods=["GET", "POST"])
+def host_recover(room_code):
+    """
+    Host recovery link. GET only shows a confirm button: link-preview bots
+    (WhatsApp, Slack) fetch URLs, and a GET that rotated the host device would
+    log the real host out.
+    """
+    room = load_room(room_code)
+    code = room["code"]
+    token = request.values.get("k", "")
+    if request.method == "GET":
+        return render_template("host_recover.html", room=room, room_code=code, token=token)
+    try:
+        uid = storage.recover_host(code, token)
+    except RoomError as exc:
+        if exc.code == "BAD_TOKEN":
+            rate_limited("miss")
+        raise
+    response = make_response(redirect(url_for("room_summary", room_code=code)))
+    set_session_cookie(response, code, uid, room["host_name"])
+    set_hostkey_cookie(response, code, token)
+    return response
 
 
 # ---------------------------------------------------------------------------
-# Routes — user item selection and waiting
+# Item selection and waiting
 # ---------------------------------------------------------------------------
+
+def _not_linked_page(room: dict):
+    return render_template(
+        "message.html",
+        title="Rejoin this room",
+        message="This device isn't linked to that name. Join with your name; if it says the name is taken, ask the host to tap Manage next to it and choose 'Move them to a new phone'.",
+        link=url_for("join_room", room_code=room["code"]),
+        link_text="Join room",
+    ), 403
+
 
 @app.route("/room/<room_code>/user/<user_name>")
 def user_room(room_code, user_name):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
+    room = load_room(room_code)
+    me = caller(room)
+    if not me:
+        return _not_linked_page(room)
+    return _redirect_for(room, me)
 
-    if user_name in room.get("submitted_users", set()):
-        return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
 
-    return redirect(url_for("select_items", room_code=room_code, user_name=user_name))
+def _resolve_item_ids(room: dict, values: list) -> list:
+    """Checkbox values are item ids; plain names are accepted from pages rendered before the upgrade."""
+    by_display = {i["name"]: i["id"] for i in room["items"]}
+    raw_counts = {}
+    for item in room["items"]:
+        raw_counts[item["raw_name"]] = raw_counts.get(item["raw_name"], 0) + 1
+    ids = []
+    for value in values:
+        value = (value or "").strip()
+        if value.isdigit():
+            ids.append(int(value))
+        elif value in by_display and raw_counts.get(value, 0) <= 1:
+            ids.append(by_display[value])
+        else:
+            raise RoomError("ITEMS_CHANGED", "The item list changed. Reload the page and pick again.", status=409)
+    return ids
 
 
 @app.route("/room/<room_code>/user/<user_name>/select-items", methods=["GET", "POST"])
 def select_items(room_code, user_name):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
-    ensure_room_shape(room)
-
-    # Cookie > URL: if a session exists for a different name, redirect to
-    # that user's own URL. Prevents accidental spoofing via URL-editing and
-    # also recovers users who landed on the wrong URL.
-    _, cookie_name = current_user(room_code, room)
-    if cookie_name and cookie_name != user_name:
-        return redirect(url_for("select_items", room_code=room_code, user_name=cookie_name))
-
-    # Pre-fill previous selections so revoke-and-reselect doesn't wipe state.
-    prev_selections = list(
-        room.get("selections", {}).get(user_name)
-        or room.get("last_selections", {}).get(user_name)
-        or []
-    )
-
-    wants_json = (
-        request.accept_mimetypes.best == "application/json"
-        or request.headers.get("X-Requested-With") == "fetch"
-        or request.form.get("ajax") == "1"
-    )
+    room = load_room(room_code)
+    code = room["code"]
 
     if request.method == "POST":
-        selected_items = request.form.getlist("selected_items")
-        submission_id = request.form.get("submission_id", "").strip()
+        me, uid = require_caller(room)
+        if me["name"] != user_name:
+            raise RoomError("NOT_YOUR_SESSION", "You can only submit your own selection.", status=403)
+        item_ids = _resolve_item_ids(room, request.form.getlist("selected_items"))
+        # "portions_<item id>": whole units of a several-of dish the caller had to
+        # themselves; 0 or absent means they are sharing whatever nobody claims.
+        portions = {}
+        for item_id in item_ids:
+            raw = request.form.get(f"portions_{item_id}", "").strip()
+            if raw.isdigit():
+                portions[item_id] = min(int(raw), 99)
+        result = storage.submit_selection(
+            code, uid, item_ids, request.form.get("submission_id", "").strip(), portions
+        )
+        target = url_for("waiting_room", room_code=code, user_name=me["name"])
+        if wants_json():
+            return jsonify({"status": "success", "idempotent": result["idempotent"], "redirect": target})
+        return redirect(target)
 
-        existing_submission_id = room.get("submission_ids", {}).get(user_name)
-        if submission_id and existing_submission_id == submission_id:
-            # Idempotent retry: server already has this exact submission.
-            # Treat as success without re-writing state.
-            print(f"Idempotent submit no-op for {user_name} (submission_id={submission_id[:8]}…)")
-            if wants_json:
-                return jsonify({
-                    "status": "success",
-                    "idempotent": True,
-                    "redirect": url_for("waiting_room", room_code=room_code, user_name=user_name),
-                })
-            return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
-
-        room["selections"][user_name] = selected_items
-        room["submitted_users"].add(user_name)
-        if submission_id:
-            room["submission_ids"][user_name] = submission_id
-        # Also stash into last_selections so a future revoke→edit has a draft
-        room["last_selections"][user_name] = list(selected_items)
-
-        if not save_room(room_code, room):
-            if wants_json:
-                return jsonify({"status": "error", "message": "Error saving selections."}), 500
-            return "Error saving selections. Please try again.", 500
-
-        print(f"User {user_name} selected: {selected_items}")
-        if wants_json:
-            return jsonify({
-                "status": "success",
-                "idempotent": False,
-                "redirect": url_for("waiting_room", room_code=room_code, user_name=user_name),
-            })
-        return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
-
-    # GET: if already submitted AND there's no cookie session asking to edit,
-    # send them to the waiting room. The revoke flow clears submitted_users
-    # before sending them here, so users who landed here intentionally edit.
-    if user_name in room.get("submitted_users", set()):
-        return redirect(url_for("waiting_room", room_code=room_code, user_name=user_name))
-
+    me = caller(room)
+    if not me:
+        return _not_linked_page(room)
+    if me["name"] != user_name or room["finalized"] or me["submitted"]:
+        return _redirect_for(room, me)
     return render_template(
         "select_items.html",
         room=room,
-        room_code=room_code,
-        user_name=user_name,
-        pre_selected=prev_selections,
+        room_code=code,
+        user_name=me["name"],
+        pre_selected=me["claim_ids"],
+        pre_portions=me["claim_portions"],
     )
 
 
 @app.route("/api/room/<room_code>/my-status")
 def my_status(room_code):
-    """
-    Client-side resilience endpoint. After a submit whose response was lost
-    (flaky network, backgrounded mobile tab), the client calls this to check
-    whether the server actually persisted its submission — rather than
-    showing a confusing error and driving the user to rejoin with a new name.
-    """
-    room = get_room(room_code)
-    if not room:
-        return jsonify({"status": "error", "message": "Room not found"}), 404
-    ensure_room_shape(room)
-
-    uid, name = current_user(room_code, room)
-    if not uid or not name:
-        return jsonify({
-            "status": "success",
-            "authenticated": False,
-            "in_room": False,
-            "submitted": False,
-        })
-
-    in_room = name in room.get("users", [])
-    submitted = name in room.get("submitted_users", set())
-    selections = room.get("selections", {}).get(name, [])
-    submission_id = room.get("submission_ids", {}).get(name, "")
-
+    room = load_room(room_code)
+    me = caller(room)
+    if not me:
+        return jsonify({"status": "success", "authenticated": False, "in_room": False, "submitted": False})
+    names = {i["id"]: i["name"] for i in room["items"]}
+    if room["finalized"]:
+        target = url_for("results_page", room_code=room["code"])
+    elif me["submitted"]:
+        target = url_for("waiting_room", room_code=room["code"], user_name=me["name"])
+    else:
+        target = url_for("select_items", room_code=room["code"], user_name=me["name"])
     return jsonify({
         "status": "success",
         "authenticated": True,
-        "user_name": name,
-        "in_room": in_room,
-        "submitted": submitted,
-        "selections": selections,
-        "submission_id": submission_id,
-        "redirect": (
-            url_for("waiting_room", room_code=room_code, user_name=name) if submitted
-            else url_for("select_items", room_code=room_code, user_name=name) if in_room
-            else url_for("index")
-        ),
+        "user_name": me["name"],
+        "in_room": True,
+        "submitted": me["submitted"],
+        "selections": [names[i] for i in me["claim_ids"] if i in names],
+        "submission_id": me["submission_id"],
+        "redirect": target,
     })
 
 
 @app.route("/room/<room_code>/waiting")
 @app.route("/room/<room_code>/waiting/<user_name>")
 def waiting_room(room_code, user_name=None):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
-
-    if not user_name:
-        user_name = request.args.get("user", "")
-
-    join_url = url_for("join_room", room_code=room_code, _external=True)
-    qr_b64 = generate_qr_base64(join_url)
-
+    room = load_room(room_code)
+    me = caller(room)
+    if not me:
+        return _not_linked_page(room)
+    if room["finalized"]:
+        return redirect(url_for("results_page", room_code=room["code"]))
+    if user_name != me["name"]:
+        return redirect(url_for("waiting_room", room_code=room["code"], user_name=me["name"]))
+    join_url = share_url("join_room", room_code=room["code"])
     return render_template(
         "waiting_room.html",
         room=room,
-        room_code=room_code,
-        user_name=user_name,
-        is_host=(user_name == room.get("host_name", "")),
-        qr_b64=qr_b64,
+        room_code=room["code"],
+        user_name=me["name"],
+        is_host=me["is_host"],
+        qr_b64=generate_qr_base64(join_url),
         join_url=join_url,
+        host_link=host_recovery_url(room["code"]) if me["is_host"] else None,
     )
 
 
 # ---------------------------------------------------------------------------
-# Routes — results and host controls
+# Self-service revoke and host controls
 # ---------------------------------------------------------------------------
 
-@app.route("/room/<room_code>/force-complete/<user_name>", methods=["POST"])
-def force_complete(room_code, user_name):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
-    if user_name != room.get("host_name"):
-        return "Only the host can force completion", 403
+def _json_body() -> dict:
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    return request.form.to_dict()
 
-    users = room.get("users", [])
-    submitted = room.get("submitted_users", set())
-    selections = room.get("selections", {})
-
-    for user in users:
-        if user not in submitted:
-            selections[user] = []
-            submitted.add(user)
-
-    room["selections"] = selections
-    room["submitted_users"] = submitted
-
-    if not save_room(room_code, room):
-        return "Error saving room data", 500
-
-    print(f"Host {user_name} forced completion for room {room_code}")
-    return redirect(url_for("results_page", room_code=room_code))
-
-
-# ---------------------------------------------------------------------------
-# Routes — self-service revoke, host controls (added for session-resilience)
-# ---------------------------------------------------------------------------
 
 @app.route("/room/<room_code>/user/<user_name>/revoke", methods=["POST"])
 def revoke_own_selection(room_code, user_name):
-    """
-    Let a guest un-submit their own selection so they can re-pick items.
-    Must come from the same cookie that originally submitted.
-    """
-    room = get_room(room_code)
-    if not room:
-        return jsonify({"status": "error", "message": "Room not found"}), 404
-    ensure_room_shape(room)
-
-    _, cookie_name = current_user(room_code, room)
-    if cookie_name != user_name:
-        return jsonify({"status": "error", "message": "Not your session."}), 403
-    if user_name not in room.get("users", []):
-        return jsonify({"status": "error", "message": "You are no longer in this room."}), 404
-
-    # Preserve the user's last selection so the edit screen can pre-check it.
-    if user_name in room.get("selections", {}):
-        room["last_selections"][user_name] = list(room["selections"][user_name])
-    room.get("submitted_users", set()).discard(user_name)
-    room.get("selections", {}).pop(user_name, None)
-    # Clear the submission_id so the resubmit doesn't collide with the prior one.
-    room.get("submission_ids", {}).pop(user_name, None)
-
-    if not save_room(room_code, room):
-        return jsonify({"status": "error", "message": "Save failed. Try again."}), 500
-
-    print(f"User {user_name} revoked own selection in {room_code}")
+    room = load_room(room_code)
+    me, uid = require_caller(room)
+    if me["name"] != user_name:
+        raise RoomError("NOT_YOUR_SESSION", "Not your session.", status=403)
+    storage.revoke_own(room["code"], uid)
     return jsonify({
         "status": "success",
-        "redirect": url_for("select_items", room_code=room_code, user_name=user_name),
+        "redirect": url_for("select_items", room_code=room["code"], user_name=me["name"]),
     })
 
 
 @app.route("/room/<room_code>/host/remove-user", methods=["POST"])
 def host_remove_user(room_code):
-    """Host removes another participant (e.g. accidental duplicate)."""
-    room = get_room(room_code)
-    if not room:
-        return jsonify({"status": "error", "message": "Room not found"}), 404
-    ensure_room_shape(room)
-
-    if not require_host(room_code, room):
-        return jsonify({"status": "error", "message": "Host only."}), 403
-
-    target = (request.get_json(silent=True) or request.form).get("target_user", "").strip()
+    room = load_room(room_code)
+    uid = require_host(room)
+    target = str(_json_body().get("target_user", "")).strip()
     if not target:
-        return jsonify({"status": "error", "message": "Missing target_user"}), 400
-    if target == room.get("host_name"):
-        return jsonify({"status": "error", "message": "Cannot remove the host."}), 400
-    if target not in room.get("users", []):
-        return jsonify({"status": "error", "message": "User not in room."}), 404
+        raise RoomError("BAD_REQUEST", "Missing target_user", status=400)
+    removed = storage.remove_participant(room["code"], uid, target)
+    return jsonify({"status": "success", "removed": removed})
 
-    room["users"] = [u for u in room["users"] if u != target]
-    room.get("selections", {}).pop(target, None)
-    room.get("submitted_users", set()).discard(target)
-    room.get("user_ids", {}).pop(target, None)
-    room.get("submission_ids", {}).pop(target, None)
-    room.get("last_selections", {}).pop(target, None)
 
-    if not save_room(room_code, room):
-        return jsonify({"status": "error", "message": "Save failed."}), 500
-
-    print(f"Host removed user {target} from {room_code}")
-    return jsonify({"status": "success", "removed": target})
+@app.route("/room/<room_code>/host/reset-device", methods=["POST"])
+def host_reset_device(room_code):
+    room = load_room(room_code)
+    uid = require_host(room)
+    target = str(_json_body().get("target_user", "")).strip()
+    if not target:
+        raise RoomError("BAD_REQUEST", "Missing target_user", status=400)
+    name = storage.reset_device(room["code"], uid, target)
+    return jsonify({"status": "success", "reset": name})
 
 
 @app.route("/room/<room_code>/host/num-people", methods=["POST"])
 def host_update_num_people(room_code):
-    """Host adjusts the expected headcount for the room."""
-    room = get_room(room_code)
-    if not room:
-        return jsonify({"status": "error", "message": "Room not found"}), 404
-    ensure_room_shape(room)
-
-    if not require_host(room_code, room):
-        return jsonify({"status": "error", "message": "Host only."}), 403
-
-    data = request.get_json(silent=True) or request.form
+    room = load_room(room_code)
+    uid = require_host(room)
     try:
-        new_value = int(str(data.get("num_people", "")).strip())
+        value = int(str(_json_body().get("num_people", "")).strip())
     except (TypeError, ValueError):
-        return jsonify({"status": "error", "message": "num_people must be an integer"}), 400
-
-    if new_value < 1 or new_value > 50:
-        return jsonify({"status": "error", "message": "num_people must be between 1 and 50"}), 400
-    if new_value < len(room.get("users", [])):
-        return jsonify({
-            "status": "error",
-            "message": f"Cannot set below current joined count ({len(room.get('users', []))}). Remove users first.",
-        }), 400
-
-    room["num_people"] = new_value
-    if not save_room(room_code, room):
-        return jsonify({"status": "error", "message": "Save failed."}), 500
-
-    print(f"Host set num_people={new_value} on {room_code}")
-    return jsonify({"status": "success", "num_people": new_value})
+        raise RoomError("BAD_REQUEST", "num_people must be an integer", status=400)
+    if not 1 <= value <= 50:
+        raise RoomError("BAD_REQUEST", "num_people must be between 1 and 50", status=400)
+    storage.set_num_people(room["code"], uid, value)
+    return jsonify({"status": "success", "num_people": value})
 
 
 @app.route("/room/<room_code>/host/reopen-selections", methods=["POST"])
 def host_reopen_selections(room_code):
-    """
-    Revert the computed split: move everyone back to the selections stage so
-    they can modify their picks. Preserves each user's prior selection into
-    last_selections so their boxes start pre-checked.
-    """
-    room = get_room(room_code)
-    if not room:
-        return jsonify({"status": "error", "message": "Room not found"}), 404
-    ensure_room_shape(room)
-
-    if not require_host(room_code, room):
-        return jsonify({"status": "error", "message": "Host only."}), 403
-
-    # Snapshot each user's selections into last_selections before clearing.
-    for user, picks in list(room.get("selections", {}).items()):
-        room["last_selections"][user] = list(picks or [])
-
-    room["selections"] = {}
-    room["submitted_users"] = set()
-    room["submission_ids"] = {}
-
-    if not save_room(room_code, room):
-        return jsonify({"status": "error", "message": "Save failed."}), 500
-
-    print(f"Host reopened selections on {room_code}")
+    room = load_room(room_code)
+    uid = require_host(room)
+    storage.reopen_all(room["code"], uid)
     return jsonify({"status": "success"})
 
 
 @app.route("/room/<room_code>/host/revoke/<target_user>", methods=["POST"])
 def host_revoke_user(room_code, target_user):
-    """Host forces another user back to unsubmitted so they can re-pick."""
-    room = get_room(room_code)
-    if not room:
-        return jsonify({"status": "error", "message": "Room not found"}), 404
-    ensure_room_shape(room)
-
-    if not require_host(room_code, room):
-        return jsonify({"status": "error", "message": "Host only."}), 403
-    if target_user not in room.get("users", []):
-        return jsonify({"status": "error", "message": "User not in room."}), 404
-
-    if target_user in room.get("selections", {}):
-        room["last_selections"][target_user] = list(room["selections"][target_user])
-    room.get("submitted_users", set()).discard(target_user)
-    room.get("selections", {}).pop(target_user, None)
-    room.get("submission_ids", {}).pop(target_user, None)
-
-    if not save_room(room_code, room):
-        return jsonify({"status": "error", "message": "Save failed."}), 500
-
-    print(f"Host revoked submission for {target_user} in {room_code}")
+    room = load_room(room_code)
+    uid = require_host(room)
+    storage.host_revoke(room["code"], uid, target_user)
     return jsonify({"status": "success", "revoked": target_user})
+
+
+@app.route("/room/<room_code>/finalize", methods=["POST"])
+def finalize(room_code):
+    room = load_room(room_code)
+    uid = require_host(room)
+    result = storage.finalize_room(room["code"], uid)
+    return jsonify({
+        "status": "success",
+        "already_finalized": result["already"],
+        "redirect": url_for("results_page", room_code=room["code"]),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Results (only after the host finalizes)
+# ---------------------------------------------------------------------------
+
+def _results_gate(room: dict):
+    me = caller(room)
+    if not me:
+        return None, _not_linked_page(room)
+    if not room["finalized"]:
+        return me, _redirect_for(room, me)
+    return me, None
 
 
 @app.route("/room/<room_code>/results")
 def results_page(room_code):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
-    ensure_room_shape(room)
-
-    _, caller_name = current_user(room_code, room)
-    caller_is_host = is_host(room, caller_name) if caller_name else False
-
+    room = load_room(room_code)
+    me, blocked = _results_gate(room)
+    if blocked:
+        return blocked
     bill_split = calculate_bill_split(room)
-    audit_warnings = audit_bill(room, bill_split)
     return render_template(
         "results.html",
         room=room,
-        room_code=room_code,
+        room_code=room["code"],
         bill_split=bill_split,
         pdf_available=PDF_AVAILABLE,
-        caller_name=caller_name or "",
-        caller_is_host=caller_is_host,
-        audit_warnings=audit_warnings,
+        caller_name=me["name"],
+        caller_is_host=me["is_host"],
+        audit_warnings=audit_bill(room, bill_split),
     )
 
 
 @app.route("/room/<room_code>/download")
 def download_pdf(room_code):
-    room = get_room(room_code)
-    if not room:
-        return "Room not found", 404
+    room = load_room(room_code)
+    _me, blocked = _results_gate(room)
+    if blocked:
+        return blocked
     if not PDF_AVAILABLE:
-        return "PDF generation not available. Install weasyprint or xhtml2pdf.", 500
-
+        return error_response("PDF download isn't available on this server.", 503, "NO_PDF")
     try:
-        response, status = generate_pdf_response(room, room_code)
-        return response, status
+        return generate_pdf_response(room, room["code"])
     except Exception as exc:
         print(f"PDF generation error: {exc}")
-        return f"Error generating PDF: {exc}", 500
+        return error_response("Couldn't generate the PDF. Please try again.", 500, "PDF_FAILED")
+
+
+# ---------------------------------------------------------------------------
+# Cron (daily, vercel.json): heartbeat write so the free Supabase project is
+# never paused for inactivity, then delete expired rooms and old rate limits.
+# ---------------------------------------------------------------------------
+
+@app.route("/api/cron/cleanup")
+def cron_cleanup():
+    import hmac
+
+    secret = os.getenv("CRON_SECRET", "").strip()
+    if not secret:
+        return jsonify({"status": "error", "message": "CRON_SECRET not configured"}), 503
+    provided = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(provided.encode(), f"Bearer {secret}".encode()):
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    result = storage.delete_expired()
+    print(f"[cron] cleanup {result}")
+    return jsonify({"status": "success", **result})
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,38 @@ BASE_RECEIPT_TEMPLATE: Dict[str, Any] = {
     "total": MISSING_VALUE,
 }
 
+# Dietary class of a line item. "other" covers non-food lines (cover charge,
+# board games) and anything the scanner could not tell.
+ITEM_CATEGORIES = ("veg", "nonveg", "egg", "alcohol", "other")
+DEFAULT_ITEM_CATEGORY = "other"
+_CATEGORY_ALIASES = {
+    "vegetarian": "veg", "vegan": "veg", "jain": "veg",
+    "nonvegetarian": "nonveg", "meat": "nonveg", "chicken": "nonveg", "fish": "nonveg", "seafood": "nonveg",
+    "eggetarian": "egg", "eggs": "egg",
+    "alcoholic": "alcohol", "liquor": "alcohol", "beer": "alcohol", "wine": "alcohol",
+    "unknown": "other", "na": "other", "none": "other",
+}
+
+
+def normalize_item_quantity(value: Any) -> int:
+    """Quantity printed on the bill for a line; 1 when missing or unreadable."""
+    if isinstance(value, bool) or value is None:
+        return 1
+    match = re.search(r"\d+", str(value))
+    if not match:
+        return 1
+    return min(max(int(match.group()), 1), 99)
+
+
+def normalize_item_category(value: Any) -> str:
+    """Map whatever a model or form sent ("Non-Veg", "ALCOHOLIC", None) to an ITEM_CATEGORIES value."""
+    if not isinstance(value, str):
+        return DEFAULT_ITEM_CATEGORY
+    key = re.sub(r"[^a-z]", "", value.lower())
+    key = _CATEGORY_ALIASES.get(key, key)
+    return key if key in ITEM_CATEGORIES else DEFAULT_ITEM_CATEGORY
+
+
 AMOUNT_PATTERN = re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
 
 
@@ -77,9 +109,13 @@ def normalize_receipt_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, An
             if isinstance(raw_item, dict):
                 name = _normalize_text_field(raw_item.get("name"))
                 raw_price = raw_item.get("price")
+                category = normalize_item_category(raw_item.get("category"))
+                quantity = normalize_item_quantity(raw_item.get("quantity"))
             else:
                 name = _normalize_text_field(raw_item)
                 raw_price = None
+                category = DEFAULT_ITEM_CATEGORY
+                quantity = 1
 
             if name == MISSING_VALUE:
                 continue
@@ -94,7 +130,7 @@ def normalize_receipt_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, An
             else:
                 price = format_currency(numeric_price)
 
-            items.append({"name": name, "price": price})
+            items.append({"name": name, "price": price, "category": category, "quantity": quantity})
 
     normalized["items"] = items
 

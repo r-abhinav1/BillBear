@@ -27,7 +27,7 @@ if not os.path.exists(VENV_PYTHON):
 
 # 2. Make sure core packages are installed
 check = subprocess.run(
-    [VENV_PYTHON, "-c", "import flask, redis, qrcode, PIL, xhtml2pdf"],
+    [VENV_PYTHON, "-c", "import flask, psycopg, qrcode, PIL, xhtml2pdf"],
     capture_output=True, text=True, cwd=ROOT
 )
 if check.returncode != 0:

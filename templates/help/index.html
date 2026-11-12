@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% block title %}Help, BillBear{% endblock %}
+{% block description %}How BillBear splits a restaurant bill: sharing dishes, tax and service charge, what the host can do, and how the scan works.{% endblock %}
+{% block nav %}<a href="/">Home</a><a href="/terms">Terms</a>{% endblock %}
+{% block head %}
+<style>
+    .help-hero { position: relative; min-height: 190px; }
+    .help-hero h1, .help-hero .lede { max-width: calc(100% - 150px); }
+    .help-hero .lede { margin-top: 10px; }
+    .help-hero .bear-spot { position: absolute; right: -6px; top: -4px; transform: rotate(4deg); }
+    @media (max-width: 359px) { .help-hero h1, .help-hero .lede { max-width: calc(100% - 112px); } .help-hero .bear-spot img { width: 104px; } }
+</style>
+{% endblock %}
+{% block content %}
+<main class="stack stack--lg help">
+    <section class="help-hero">
+        <h1>How BillBear works</h1>
+        <p class="lede">Who pays what, how sharing is counted, and what the host can do.</p>
+        <span class="bear-spot">{{ ui.bear(140, 'Bill Bear holding a receipt') }}</span>
+    </section>
+
+    <section class="receipt">
+        <div class="paper paper--tight">
+            {% for t in topics %}
+            <a class="topic" href="{{ url_for('help_topic', topic=t.slug) }}">
+                <span class="topic__num">{{ loop.index }}</span>
+                <span class="grow"><b>{{ t.title }}</b><span>{{ t.blurb }}</span></span>
+                {{ ui.icon('back', 18) }}
+            </a>
+            {% endfor %}
+        </div>
+        <div class="tear"></div>
+    </section>
+
+    <a class="nextup" href="{{ url_for('help_topic', topic=topics[0].slug) }}">
+        <span class="nextup__text"><span class="nextup__kicker">Start here</span><b>{{ topics[0].title }}</b><span>{{ topics[0].blurb }}</span></span>
+        <span class="nextup__paw">{{ ui.paw_svg() }}</span>
+    </a>
+</main>
+{% endblock %}

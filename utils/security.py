@@ -105,6 +105,28 @@ def turnstile_enabled() -> bool:
     return bool(os.getenv("TURNSTILE_SECRET_KEY", "").strip() and turnstile_site_key())
 
 
+LOAD_TEST_HEADER = "X-Load-Test"
+_LOAD_TEST_MIN_LENGTH = 32
+
+
+def load_test_pass(request) -> bool:
+    """
+    True for a request from the k6 load test (loadtest/): it carries the
+    LOAD_TEST_TOKEN secret in the X-Load-Test header. Such requests skip the bot
+    check and the per-network limits, which would otherwise stop a test from one
+    machine within seconds. Nothing else changes: scans keep every limit, since
+    each one is a paid model call. Off unless LOAD_TEST_TOKEN is set (at least 32
+    characters); set it only for a test and delete it straight after.
+    """
+    import hmac
+
+    token = os.getenv("LOAD_TEST_TOKEN", "").strip()
+    if len(token) < _LOAD_TEST_MIN_LENGTH:
+        return False
+    sent = request.headers.get(LOAD_TEST_HEADER, "")
+    return bool(sent) and hmac.compare_digest(sent.encode(), token.encode())
+
+
 def verify_turnstile(token: str, remote_ip: str) -> bool:
     if not turnstile_enabled():
         return True
@@ -122,5 +144,7 @@ def verify_turnstile(token: str, remote_ip: str) -> bool:
         )
         return bool(resp.ok and resp.json().get("success"))
     except Exception as exc:
-        print(f"[security] turnstile verify failed: {exc}")
+        import logging
+
+        logging.getLogger("billbear.security").warning("turnstile verify failed: %s", type(exc).__name__)
         return False

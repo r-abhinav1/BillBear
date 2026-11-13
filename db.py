@@ -16,6 +16,8 @@ import psycopg
 from flask import g
 from psycopg.rows import dict_row
 
+from utils.observability import distribution_sampled
+
 
 class DatabaseUnavailable(Exception):
     """Raised when we cannot reach Postgres (mapped to HTTP 503)."""
@@ -33,14 +35,18 @@ def _connect() -> psycopg.Connection:
     last_exc = None
     # Transient pooler/network hiccup: retry once.
     for attempt in range(2):
+        started = time.monotonic()
         try:
-            return psycopg.connect(
+            conn = psycopg.connect(
                 url,
                 autocommit=True,
                 row_factory=dict_row,
                 prepare_threshold=None,
                 connect_timeout=5,
             )
+            # One connection per request, so this is the first thing to slow down under load.
+            distribution_sampled("db.connect", (time.monotonic() - started) * 1000, "millisecond", retried=attempt > 0)
+            return conn
         except psycopg.OperationalError as exc:
             last_exc = exc
             if attempt == 0:

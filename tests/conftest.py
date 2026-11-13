@@ -24,6 +24,9 @@ os.environ.pop("VERCEL", None)
 os.environ.pop("TURNSTILE_SECRET_KEY", None)
 os.environ.pop("TURNSTILE_SITE_KEY", None)
 os.environ["CRON_SECRET"] = "test-cron-secret"
+# Tests never report to Sentry, even with a DSN in .env (empty, so app.py's
+# load_dotenv can't fill it back in).
+os.environ["SENTRY_DSN"] = ""
 
 import psycopg  # noqa: E402
 

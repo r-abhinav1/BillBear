@@ -2,6 +2,8 @@ Flask==2.3.3
 gunicorn==23.0.0
 requests==2.32.4
 python-dotenv==1.1.1
+# Error tracking; off unless SENTRY_DSN is set (utils/observability.py)
+sentry-sdk[flask]==2.75.0
 qrcode==8.2
 psycopg[binary]==3.2.3
 Pillow==11.2.1

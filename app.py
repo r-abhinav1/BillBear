@@ -9,7 +9,7 @@ from itertools import zip_longest
 
 import qrcode
 from dotenv import load_dotenv
-from flask import Flask, jsonify, make_response, redirect, render_template, request, url_for
+from flask import Flask, g, jsonify, make_response, redirect, render_template, request, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
 
 load_dotenv()
@@ -26,6 +26,16 @@ from storage import RoomError  # noqa: E402
 from utils.bill_audit import audit_bill  # noqa: E402
 from utils.bill_split import calculate_bill_split  # noqa: E402
 from utils.image_prep import ImageRejected, prepare_receipt_image  # noqa: E402
+from utils.observability import (  # noqa: E402
+    capture,
+    count,
+    count_sampled,
+    cron_monitor,
+    distribution,
+    flush,
+    init_sentry,
+    tag,
+)
 from utils.bill_totals import (  # noqa: E402
     MAX_CHARGES,
     as_number,
@@ -53,6 +63,7 @@ from utils.security import (  # noqa: E402
     apply_security_headers,
     client_ip,
     is_same_origin,
+    load_test_pass,
     scan_daily_cap,
     turnstile_enabled,
     turnstile_site_key,
@@ -104,6 +115,9 @@ if not PDF_AVAILABLE:
 # ---------------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------------
+
+# Error tracking: on only when SENTRY_DSN is set (utils/observability.py).
+init_sentry(VERCEL_ENV)
 
 app = Flask(__name__)
 if VERCEL_ENV or os.getenv("TRUST_PROXY", "").lower() in {"1", "true", "yes"}:
@@ -166,6 +180,14 @@ def error_response(message: str, status: int, code: str = "ERROR", **extra):
 
 
 @app.before_request
+def _mark_load_test():
+    # The k6 load test (loadtest/) identifies itself with a secret header; see load_test_pass.
+    g.load_test = load_test_pass(request)
+    if g.load_test:
+        tag(load_test=True)
+
+
+@app.before_request
 def _csrf_origin_check():
     if request.method in UNSAFE_METHODS and not is_same_origin(request):
         return error_response("Cross-site request blocked.", 403, "BAD_ORIGIN")
@@ -190,6 +212,7 @@ def _room_error(exc: RoomError):
 
 @app.errorhandler(db.DatabaseUnavailable)
 def _db_down(exc):
+    capture(exc, kind="db_down")
     return error_response("The database is temporarily unavailable. Please try again in a moment.", 503, "DB_DOWN")
 
 
@@ -205,6 +228,7 @@ def _unhandled(exc):
     if isinstance(exc, HTTPException):
         return exc
     app.logger.exception("Unhandled error")
+    capture(exc, kind="unhandled")
     return error_response("Something went wrong on our side. Please try again.", 500, "SERVER_ERROR")
 
 
@@ -214,6 +238,8 @@ def _unhandled(exc):
 
 def rate_limited(name: str) -> bool:
     """Count a hit; True if the caller is over the limit."""
+    if g.get("load_test") and not name.startswith("scan"):
+        return False      # scans keep their limits: each one is a paid model call
     limit, window = RATE_LIMITS[name]
     return not storage.rate_limit_hit(f"{name}:{client_ip(request)}", limit, window)
 
@@ -496,11 +522,32 @@ def _daily_cap_response():
 
 @app.route("/api/receipt/scan", methods=["POST"])
 def scan_receipt():
+    """The scan, plus its metrics: every exit below records its outcome in g.scan."""
+    import time
+
+    g.scan = {"outcome": "error"}
+    started = time.monotonic()
+    try:
+        return _scan_receipt()
+    finally:
+        scan = g.scan
+        attrs = {"outcome": scan["outcome"], "provider": scan.get("provider")}
+        count("scan.result", currency=scan.get("currency"), currency_confirmed=scan.get("confirmed"), **attrs)
+        if scan.get("model_called"):
+            distribution("scan.duration", (time.monotonic() - started) * 1000, "millisecond", **attrs)
+        if "dishes" in scan:
+            distribution("scan.dishes", scan["dishes"], None, provider=scan.get("provider"))
+
+
+def _scan_receipt():
     if not has_valid_scan_ticket(request):
+        g.scan["outcome"] = "no_ticket"
         return error_response("Scan session expired. Reload the page and try again.", 403, "NO_TICKET")
     if not verify_turnstile(request.form.get("cf-turnstile-response", ""), client_ip(request)):
+        g.scan["outcome"] = "bot_check"
         return error_response("Bot check failed. Reload the page and try again.", 403, "BOT_CHECK")
     if rate_limited("scan") or rate_limited("scan_day"):
+        g.scan["outcome"] = "rate_limited"
         return error_response(
             "Too many scans from this network. Wait a bit, or enter items manually.", 429, "RATE_LIMITED"
         )
@@ -508,25 +555,34 @@ def scan_receipt():
     # is gone, turn callers away before spending any effort decoding their image.
     cap = scan_daily_cap()
     if not storage.rate_limit_peek("scan_global:all", cap, 86400):
+        g.scan["outcome"] = "daily_cap"
         return _daily_cap_response()
 
     upload = request.files.get("image")
     if not upload:
+        g.scan["outcome"] = "no_image"
         return error_response("No image uploaded.", 400, "NO_IMAGE")
     try:
         image_b64, mime = prepare_receipt_image(upload.read())
     except ImageRejected as exc:
+        g.scan["outcome"] = "bad_image"
         return error_response(str(exc), 400, "BAD_IMAGE")
     # Spend a slot only for a real image that is about to reach the paid vision API,
     # so junk uploads can't use up everyone's daily allowance.
     if not storage.rate_limit_hit("scan_global:all", cap, 86400):
+        g.scan["outcome"] = "daily_cap"
         return _daily_cap_response()
 
+    g.scan["model_called"] = True
     try:
         receipt = extract_receipt_from_vision(image_b64, mime)
     except VisionUnavailable as exc:
+        # Not configured, or the provider account can't pay: someone has to act.
+        g.scan["outcome"] = "unavailable"
+        capture(exc, kind="scan_unavailable")
         return error_response(str(exc), 503, "SCAN_UNAVAILABLE")
     except VisionFailed as exc:
+        g.scan["outcome"] = "failed"
         return error_response(
             f"{exc} Try a clearer, well-lit photo, or enter items manually.", 502, "SCAN_FAILED"
         )
@@ -543,6 +599,13 @@ def scan_receipt():
         for i in items
     ]
     receipt.pop("parser_meta", None)
+    g.scan.update({
+        "outcome": "success",
+        "provider": (receipt.get("extraction_meta") or {}).get("provider"),
+        "currency": receipt["currency"]["code"],
+        "confirmed": receipt["currency"]["confirmed"],
+        "dishes": len(items),
+    })
     return jsonify({"status": "success", "receipt": receipt})
 
 
@@ -576,7 +639,7 @@ def create_room():
     form = request.form
     if rate_limited("create"):
         return _render_create(mode, "Too many rooms created from this network. Try again later.", 429, form)
-    if not verify_turnstile(form.get("cf-turnstile-response", ""), client_ip(request)):
+    if not g.get("load_test") and not verify_turnstile(form.get("cf-turnstile-response", ""), client_ip(request)):
         return _render_create(mode, "Bot check failed. Please try again.", 403, form)
 
     try:
@@ -620,6 +683,9 @@ def create_room():
         ocr_data=_receipt_totals(normalized),
         ocr_source=source,
     )
+    count("room.created", source=source, currency=normalized["currency"]["code"])
+    distribution("room.dishes", len(items), None, source=source)
+    distribution("room.people_expected", num_people)
     response = make_response(redirect(url_for("edit_items", room_code=code)))
     set_session_cookie(response, code, host_uid, host_name)
     set_hostkey_cookie(response, code, recovery_token)
@@ -811,6 +877,9 @@ def _picks_for_host(room: dict) -> dict:
 def room_status(room_code):
     room = load_room(room_code)
     me = caller(room)
+    # Every phone in a room asks every 3 seconds: sampled (see count_sampled).
+    stage = "split" if room["finalized"] else "viewer" if not me else "waiting" if me["submitted"] else "picking"
+    count_sampled("room.poll", stage=stage)
     users = room["users"]
     submitted = [u for u in users if u in room["submitted_users"]]
     return jsonify({
@@ -858,6 +927,7 @@ def _do_join(code: str, raw_name: str):
         raise RoomError("RATE_LIMITED", "Too many join attempts. Wait a few minutes.", status=429)
     status, row, uid = storage.join_participant(code, name)
     print(f"[join] {status} room={code}")
+    count("room.joined", result=status.lower())
     response = make_response(redirect(url_for("user_room", room_code=code, user_name=row["name"])))
     set_session_cookie(response, code, uid, row["name"])
     return response
@@ -1004,6 +1074,7 @@ def select_items(room_code, user_name):
         result = storage.submit_selection(
             code, uid, item_ids, request.form.get("submission_id", "").strip(), portions
         )
+        count("picks.sent", repeat=bool(result["idempotent"]), empty=not item_ids)
         target = url_for("waiting_room", room_code=code, user_name=me["name"])
         if wants_json():
             return jsonify({"status": "success", "idempotent": result["idempotent"], "redirect": target})
@@ -1138,6 +1209,7 @@ def host_reopen_selections(room_code):
     room = load_room(room_code)
     uid = require_host(room)
     storage.reopen_all(room["code"], uid)
+    count("picks.reopened")
     return jsonify({"status": "success"})
 
 
@@ -1147,6 +1219,7 @@ def host_fix_bill(room_code):
     room = load_room(room_code)
     uid = require_host(room)
     storage.unfinalize(room["code"], uid)
+    count("bill.fix")
     return jsonify({"status": "success", "redirect": url_for("edit_items", room_code=room["code"])})
 
 
@@ -1163,6 +1236,11 @@ def finalize(room_code):
     room = load_room(room_code)
     uid = require_host(room)
     result = storage.finalize_room(room["code"], uid)
+    if not result["already"]:
+        count("bill.split", currency=room["currency"]["code"], people=len(room["users"]))
+        if room.get("created_at"):
+            minutes = (datetime.now(room["created_at"].tzinfo) - room["created_at"]).total_seconds() / 60
+            distribution("bill.minutes_to_split", minutes, "minute")
     return jsonify({
         "status": "success",
         "already_finalized": result["already"],
@@ -1212,10 +1290,17 @@ def download_pdf(room_code):
         return error_response("PDF download isn't available on this server.", 503, "NO_PDF")
     if rate_limited("download"):
         return error_response("Too many downloads from this network. Wait a few minutes and try again.", 429, "RATE_LIMITED")
+    import time
+
+    started = time.monotonic()
     try:
-        return generate_pdf_response(room, room["code"])
+        response = generate_pdf_response(room, room["code"])
+        distribution("pdf.render", (time.monotonic() - started) * 1000, "millisecond", outcome="ok")
+        return response
     except Exception as exc:
-        print(f"PDF generation error: {exc}")
+        distribution("pdf.render", (time.monotonic() - started) * 1000, "millisecond", outcome="failed")
+        app.logger.warning("PDF generation error: %s", type(exc).__name__)
+        capture(exc, kind="pdf")
         return error_response("Couldn't generate the PDF. Please try again.", 500, "PDF_FAILED")
 
 
@@ -1234,9 +1319,30 @@ def cron_cleanup():
     provided = request.headers.get("Authorization", "")
     if not hmac.compare_digest(provided.encode(), f"Bearer {secret}".encode()):
         return jsonify({"status": "error", "message": "unauthorized"}), 401
-    result = storage.delete_expired()
+    # Reported to Sentry as a cron monitor, which emails when a day is missed or the job fails.
+    with cron_monitor():
+        result = storage.delete_expired()
     print(f"[cron] cleanup {result}")
+    distribution("cron.rooms_deleted", result["rooms_deleted"])
+    flush()
     return jsonify({"status": "success", **result})
+
+
+@app.route("/healthz")
+def healthz():
+    """For an uptime monitor: 200 when the app can reach its database, 503 when not."""
+    try:
+        with db.get_conn().cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+    except Exception as exc:
+        app.logger.warning("healthz: database check failed: %s", type(exc).__name__)
+        response = jsonify({"status": "error", "database": "unreachable"})
+        response.status_code = 503
+    else:
+        response = jsonify({"status": "ok", "database": "ok"})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -185,13 +185,26 @@ def _set_high_volume_rate(vercel: bool) -> None:
         _HIGH_VOLUME_RATE = default
 
 
-def _attrs(attrs: Dict[str, Any]) -> Dict[str, Any]:
+# Rare events worth not losing: the SDK sends metrics in batches on a timer, and
+# Vercel can freeze an instance before a batch goes out (the load test lost ~2%
+# of splits and PDFs). Requests that record one of these flush before they end.
+# Polls and DB connects happen constantly, so they never wait for a flush.
+FLUSH_AFTER = {
+    "scan.result", "room.created", "bill.split", "bill.fix", "picks.reopened",
+    "pdf.download", "pdf.render", "cron.rooms_deleted",
+}
+
+
+def _attrs(name: str, attrs: Dict[str, Any]) -> Dict[str, Any]:
     clean = {k: v for k, v in attrs.items() if v is not None}
     try:
         from flask import g, has_request_context
 
         if has_request_context():
-            clean["load_test"] = bool(g.get("load_test"))
+            # Text, not a boolean: Sentry's metric search can filter on it then.
+            clean["load_test"] = "true" if g.get("load_test") else "false"
+            if name in FLUSH_AFTER:
+                g.sentry_flush = True
     except Exception:
         pass
     return clean
@@ -202,7 +215,7 @@ def count(name: str, value: float = 1, **attrs: Any) -> None:
     if _enabled:
         import sentry_sdk
 
-        sentry_sdk.metrics.count(name, value, attributes=_attrs(attrs))
+        sentry_sdk.metrics.count(name, value, attributes=_attrs(name, attrs))
 
 
 def distribution(name: str, value: float, unit: Optional[str] = None, **attrs: Any) -> None:
@@ -210,7 +223,22 @@ def distribution(name: str, value: float, unit: Optional[str] = None, **attrs: A
     if _enabled:
         import sentry_sdk
 
-        sentry_sdk.metrics.distribution(name, value, unit=unit, attributes=_attrs(attrs))
+        sentry_sdk.metrics.distribution(name, value, unit=unit, attributes=_attrs(name, attrs))
+
+
+def flush_if_marked() -> None:
+    """End of request: send now if it recorded something in FLUSH_AFTER."""
+    if not _enabled:
+        return
+    try:
+        from flask import g
+
+        if g.get("sentry_flush"):
+            import sentry_sdk
+
+            sentry_sdk.flush(timeout=1)
+    except Exception:
+        pass
 
 
 def count_sampled(name: str, **attrs: Any) -> None:

@@ -394,7 +394,7 @@ def test_pdf_download_is_throttled(monkeypatch):
     submit(host, code, "Alice", ["Pasta"])
     post_json(host, f"/room/{code}/finalize")
     monkeypatch.setattr(app_module, "PDF_AVAILABLE", True)
-    monkeypatch.setattr(app_module, "generate_pdf_response", lambda room, c: app_module.make_response(b"%PDF", 200))
+    monkeypatch.setattr(app_module, "render_pdf", lambda room, c: b"%PDF")
     statuses = [host.get(f"/room/{code}/download").status_code for _ in range(21)]
     assert statuses[:20] == [200] * 20
     assert statuses[20] == 429

@@ -929,3 +929,25 @@ def test_decoded_path_info_leaves_plain_paths_alone():
     mw({"PATH_INFO": "/room/AB12CD/user/%E0%A4%B0/x"}, None)
     assert seen[0] == "/room/AB12CD/user/Asha/select-items"
     assert seen[1].encode("latin-1").decode("utf-8") == "/room/AB12CD/user/र/x"
+
+
+def test_pdf_is_rendered_once_per_split(monkeypatch):
+    import app as app_module
+
+    renders = []
+    real = app_module.render_pdf
+    monkeypatch.setattr(app_module, "render_pdf", lambda room, c: renders.append(room["finalized_at"]) or real(room, c))
+    app_module._PDF_CACHE.clear()
+    code, host, bob, cara = _full_room()
+    for client, name in ((host, "Alice"), (bob, "Bob"), (cara, "Cara")):
+        submit(client, code, name, ["Pasta"])
+    post_json(host, f"/room/{code}/finalize")
+    first = [c.get(f"/room/{code}/download").data for c in (host, bob, cara)]
+    assert len(renders) == 1 and first[0] == first[1] == first[2] and first[0][:4] == b"%PDF"
+
+    # Fix the bill and split again: a new PDF, not the cached one.
+    post_json(host, f"/room/{code}/host/fix-bill")
+    assert _edit(host, code, "INR", total="700").status_code == 302
+    post_json(host, f"/room/{code}/finalize")
+    host.get(f"/room/{code}/download")
+    assert len(renders) == 2 and renders[0] != renders[1]

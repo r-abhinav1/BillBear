@@ -98,3 +98,26 @@ def test_sampled_counts_are_scaled_so_totals_stay_right(monkeypatch):
     monkeypatch.setattr("random.random", lambda: 0.5)           # not chosen
     obs.count_sampled("room.poll", stage="waiting")
     assert sent == [("room.poll", 10.0, {"stage": "waiting"})]
+
+
+def test_rare_metrics_flush_at_the_end_of_their_request(monkeypatch):
+    import sentry_sdk
+
+    import utils.observability as obs
+    from tests.conftest import app
+
+    flushed = []
+    monkeypatch.setattr(obs, "_enabled", True)
+    monkeypatch.setattr(sentry_sdk.metrics, "count", lambda *a, **k: None)
+    monkeypatch.setattr(sentry_sdk, "flush", lambda timeout=None: flushed.append(timeout))
+    with app.test_request_context("/"):
+        from flask import g
+
+        g.load_test = True
+        assert obs._attrs("room.poll", {"stage": "picking"}) == {"stage": "picking", "load_test": "true"}
+        obs.count("room.poll", stage="picking")
+        obs.flush_if_marked()
+        assert flushed == []                          # polls never wait
+        obs.count("bill.split", people=3)
+        obs.flush_if_marked()
+        assert flushed == [1]

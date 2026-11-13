@@ -29,6 +29,18 @@
     <div id="reconToast" class="toast" style="display: none" role="status">Totals match the bill</div>
 
     <form method="POST" id="editForm" action="/edit/{{ room_code }}" class="stack stack--lg">
+        <section class="card currency-card">
+            <div class="field">
+                <label for="currency">Currency on the bill</label>
+                <select class="select" id="currency" name="currency" aria-describedby="currencyNote">
+                    {% for c in CURRENCY_CHOICES %}
+                    <option value="{{ c.code }}"{% if c.code == currency.code %} selected{% endif %}>{{ c.symbol }}  {{ c.name }} ({{ c.code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <p class="currency-card__note" id="currencyNote">Only changes the symbol. Amounts aren't converted. <a class="textlink" href="/help/currency">How currencies work</a></p>
+        </section>
+
         <section class="receipt">
             <div class="paper">
                 <h2>Dishes</h2>
@@ -37,7 +49,7 @@
                 <div class="edit-row item-row">
                     <input type="hidden" name="item_id" value="{{ item.id or '' }}">
                     <input class="input" type="text" name="item_name" value="{{ item.name }}" required maxlength="80" placeholder="Dish" aria-label="Item name">
-                    <input class="input input--mono" type="text" name="item_price" value="{{ item.price }}" required inputmode="decimal" placeholder="₹0.00" aria-label="Item price">
+                    <input class="input input--mono js-money" type="text" name="item_price" value="{{ item.price }}" required inputmode="decimal" placeholder="{{ currency.symbol }}0" aria-label="Item price">
                     <button type="button" class="icon-btn" onclick="removeRow(this)" aria-label="Remove item">{{ ui.icon('close') }}</button>
                     <label class="qty-field"><span aria-hidden="true">×</span><input class="input input--mono" type="text" name="item_quantity" value="{{ item.quantity or 1 }}" inputmode="numeric" maxlength="2" aria-label="How many of this dish are on the bill"></label>
                     <select name="item_category" class="select item-category" aria-label="Item type">
@@ -54,48 +66,58 @@
         </section>
 
         <section class="card">
-            <h2 style="margin-bottom: 10px">Totals printed on the bill</h2>
-            <div class="money-grid">
-                    <div class="field">
-                        <label for="subtotal">Items subtotal</label>
-                        <input class="input input--mono" type="text" id="subtotal" name="subtotal" value="{{ items.subtotal or 'N/A' }}" inputmode="decimal" placeholder="₹0.00">
-                    </div>
-                    <div class="field">
-                        <label for="serviceCharge">Service charge</label>
-                        <input class="input input--mono" type="text" id="serviceCharge" name="serviceCharge" value="{{ items.serviceCharge or 'N/A' }}" inputmode="decimal" placeholder="₹0.00">
-                    </div>
-                    <div class="field">
-                        <label for="discount">Discount</label>
-                        <input class="input input--mono" type="text" id="discount" name="discount" value="{{ items.discount or 'N/A' }}" inputmode="decimal" placeholder="₹0.00">
-                    </div>
-                    <div class="field">
-                        <label for="cgst">CGST</label>
-                        <input class="input input--mono" type="text" id="cgst" name="cgst" value="{{ items.cgst or 'N/A' }}" inputmode="decimal" placeholder="₹0.00">
-                    </div>
-                    <div class="field">
-                        <label for="sgst">SGST</label>
-                        <input class="input input--mono" type="text" id="sgst" name="sgst" value="{{ items.sgst or 'N/A' }}" inputmode="decimal" placeholder="₹0.00">
-                    </div>
-                {% if items.igst and items.igst != 'N/A' and items.igst != '₹0.00' %}
-                <div class="field">
-                    <label for="igst">IGST</label>
-                    <input class="input input--mono" type="text" id="igst" name="igst" value="{{ items.igst }}" inputmode="decimal" placeholder="₹0.00">
+            <h2>Taxes, charges and discounts</h2>
+            <p class="small soft" style="margin-top: 2px">One row for each line printed between the dishes and the total. Rows left empty aren't saved.</p>
+            <div id="chargeRows" class="charge-rows">
+                {% for c in items.charges %}
+                <div class="charge-row{% if c.kind == 'discount' %} is-discount{% endif %}"{% if c.starter %} data-starter="{{ c.label }}"{% endif %}>
+                    <input type="hidden" name="charge_kind" value="{{ c.kind }}">
+                    <input class="input" type="text" name="charge_label" value="{{ c.label }}" maxlength="40" placeholder="What it's for" aria-label="Charge name">
+                    <button type="button" class="sign" aria-pressed="{{ 'true' if c.kind == 'discount' else 'false' }}"
+                            aria-label="{{ 'Discount, comes off the bill' if c.kind == 'discount' else 'Charge, adds to the bill' }}" title="Tap to switch between charge and discount">{{ '−' if c.kind == 'discount' else '+' }}</button>
+                    <input class="input input--mono js-money js-charge" type="text" name="charge_amount" value="{{ c.amount }}" inputmode="decimal" placeholder="{{ currency.symbol }}0" aria-label="Amount">
+                    <button type="button" class="icon-btn js-remove-charge" aria-label="Remove this row">{{ ui.icon('close') }}</button>
                 </div>
-                {% else %}
-                <input type="hidden" name="igst" value="N/A">
-                {% endif %}
-                <div class="field field--full">
+                {% endfor %}
+            </div>
+            <div class="add-charge" id="addCharge">
+                <span class="add-charge__label">Add</span>
+                <button type="button" class="chip" data-label="Tax" data-kind="charge">{{ ui.icon('plus', 16) }} Tax</button>
+                <button type="button" class="chip" data-label="Service charge" data-kind="charge">{{ ui.icon('plus', 16) }} Service</button>
+                <button type="button" class="chip" data-label="Packing" data-kind="charge">{{ ui.icon('plus', 16) }} Packing</button>
+                <button type="button" class="chip" data-label="Tip" data-kind="charge">{{ ui.icon('plus', 16) }} Tip</button>
+                <button type="button" class="chip chip--minus" data-label="Discount" data-kind="discount">− Discount</button>
+                <button type="button" class="chip" data-label="" data-kind="charge">{{ ui.icon('plus', 16) }} Other</button>
+            </div>
+            <p class="fineprint" id="chargeCap" hidden>That's the most rows a bill can have ({{ MAX_CHARGES }}).</p>
+            <p class="fineprint" style="margin-top: 8px">Type <span class="mono">5%</span> as an amount and it becomes 5% of the dishes.</p>
+
+            <div class="tally" aria-live="polite">
+                <div class="tally__line"><span>Dishes</span><span id="tallyItems">0</span></div>
+                <div class="tally__line"><span>Charges</span><span id="tallyCharges">+0</span></div>
+                <div class="tally__line"><span>Discounts</span><span id="tallyDiscounts">−0</span></div>
+                <div class="tally__line tally__line--sum"><span>Works out to</span><span id="tallySum">0</span></div>
+            </div>
+
+            <div class="money-grid" style="margin-top: 14px">
+                <div class="field">
+                    <label for="subtotal">Subtotal on the bill</label>
+                    <input class="input input--mono js-money" type="text" id="subtotal" name="subtotal" value="{{ items.subtotal }}" inputmode="decimal" placeholder="Optional">
+                </div>
+                <div class="field">
                     <label for="total">Bill total</label>
-                    <input class="input input--mono" type="text" id="total" name="total" value="{{ items.total or 'N/A' }}" inputmode="decimal" placeholder="₹0.00">
+                    <input class="input input--mono js-money" type="text" id="total" name="total" value="{{ items.total }}" inputmode="decimal" placeholder="Optional">
                 </div>
             </div>
+            <p class="total-check" id="totalCheck" hidden></p>
+
             <input type="hidden" name="tax_split_set" value="1">
             <label class="switch" for="tax_proportional">
                 <input type="checkbox" id="tax_proportional" name="tax_proportional" value="1"{% if items.taxSplit != 'equal' %} checked{% endif %}>
                 <span class="switch__track" aria-hidden="true"></span>
                 <span class="switch__text">
-                    <b>Split taxes and service charge by what each person had</b>
-                    <span>Someone who ordered more pays more of the tax. Turn off to split them equally.</span>
+                    <b>Split taxes and charges by what each person had</b>
+                    <span>Someone who ordered more pays more of them. Turn off to split them equally. Discounts always follow the food.</span>
                 </span>
             </label>
         </section>
@@ -110,7 +132,7 @@
         <div class="edit-row item-row">
                     <input type="hidden" name="item_id" value="">
                     <input class="input" type="text" name="item_name" value="" required maxlength="80" placeholder="Dish" aria-label="Item name">
-                    <input class="input input--mono" type="text" name="item_price" value="" required inputmode="decimal" placeholder="₹0.00" aria-label="Item price">
+                    <input class="input input--mono js-money" type="text" name="item_price" value="" required inputmode="decimal" placeholder="0" aria-label="Item price">
                     <button type="button" class="icon-btn" onclick="removeRow(this)" aria-label="Remove item">{{ ui.icon('close') }}</button>
                     <label class="qty-field"><span aria-hidden="true">×</span><input class="input input--mono" type="text" name="item_quantity" value="1" inputmode="numeric" maxlength="2" aria-label="How many of this dish are on the bill"></label>
                     <select name="item_category" class="select item-category" aria-label="Item type">
@@ -120,43 +142,186 @@
                     </select>
                 </div>
     </template>
+    <template id="chargeTemplate">
+        <div class="charge-row">
+            <input type="hidden" name="charge_kind" value="charge">
+            <input class="input" type="text" name="charge_label" value="" maxlength="40" placeholder="What it's for" aria-label="Charge name">
+            <button type="button" class="sign" aria-pressed="false" aria-label="Charge, adds to the bill" title="Tap to switch between charge and discount">+</button>
+            <input class="input input--mono js-money js-charge" type="text" name="charge_amount" value="" inputmode="decimal" placeholder="0" aria-label="Amount">
+            <button type="button" class="icon-btn js-remove-charge" aria-label="Remove this row">{{ ui.icon('close') }}</button>
+        </div>
+    </template>
 </main>
 {% endblock %}
 {% block scripts %}
+    <script src="{{ url_for('static', filename='js/money.js') }}"></script>
     <script>
+        const CURRENCIES = Object.fromEntries({{ CURRENCY_CHOICES | tojson }}.map(c => [c.code, c]));
+        const MAX_CHARGES = {{ MAX_CHARGES | tojson }};
+        // Rows an empty bill starts with; swapped when the currency changes if still untouched.
+        const STARTERS = { INR: [['CGST', 'charge'], ['SGST', 'charge'], ['Service charge', 'charge']], '*': [['Tax', 'charge']] };
+        const M = window.BBMoney;
+        const currencySelect = document.getElementById('currency');
+        const chargeRows = document.getElementById('chargeRows');
+        let cur = CURRENCIES[currencySelect.value];
+
+        /* ------------------------------------------------------------------ */
+        /* Amount inputs: format on blur, flag what the currency can't hold     */
+        /* ------------------------------------------------------------------ */
+
+        function itemsSum() {
+            return Array.from(document.querySelectorAll('input[name="item_price"]'))
+                .map(i => M.parse(i.value)).filter(n => n != null && !Number.isNaN(n))
+                .reduce((s, n) => s + n, 0);
+        }
+
+        // What "5%" means: a share of the bill's subtotal, or of the dishes when it isn't filled.
+        function percentBase() {
+            const sub = M.parse(document.getElementById('subtotal').value);
+            return (sub != null && !Number.isNaN(sub)) ? sub : itemsSum();
+        }
+
+        function problemWith(input) {
+            const n = M.parse(input.value);
+            if (n == null) return '';
+            if (Number.isNaN(n)) return 'not a number';
+            if (!M.fits(n, cur)) return cur.decimals === 0 ? `${cur.name} has no decimals` : `${cur.name} has ${cur.decimals} decimals`;
+            return '';
+        }
+
+        function formatInput(input) {
+            const raw = input.value.trim();
+            if (input.classList.contains('js-charge') && raw.endsWith('%')) {
+                const rate = M.parse(raw.slice(0, -1));
+                if (rate != null && !Number.isNaN(rate)) input.value = M.format(M.round(percentBase() * rate / 100, cur), cur);
+            } else {
+                const n = M.parse(raw);
+                // Leave anything unreadable, or too precise for the currency, as typed so it can be fixed.
+                if (n != null && !Number.isNaN(n) && M.fits(n, cur)) input.value = M.format(n, cur);
+            }
+            const problem = problemWith(input);
+            input.classList.toggle('is-invalid', Boolean(problem));
+            input.setAttribute('aria-invalid', problem ? 'true' : 'false');
+        }
+
+        document.getElementById('editForm').addEventListener('blur', (e) => {
+            if (e.target.classList && e.target.classList.contains('js-money')) formatInput(e.target);
+        }, true);
+
+        /* ------------------------------------------------------------------ */
+        /* Charge rows                                                         */
+        /* ------------------------------------------------------------------ */
+
+        function setKind(row, kind) {
+            const discount = kind === 'discount';
+            row.querySelector('input[name="charge_kind"]').value = discount ? 'discount' : 'charge';
+            row.classList.toggle('is-discount', discount);
+            const sign = row.querySelector('.sign');
+            sign.textContent = discount ? '−' : '+';
+            sign.setAttribute('aria-pressed', discount ? 'true' : 'false');
+            sign.setAttribute('aria-label', discount ? 'Discount, comes off the bill' : 'Charge, adds to the bill');
+        }
+
+        function addCharge(label, kind, starter) {
+            if (chargeRows.children.length >= MAX_CHARGES) return null;
+            const row = document.getElementById('chargeTemplate').content.firstElementChild.cloneNode(true);
+            row.querySelector('input[name="charge_label"]').value = label;
+            row.querySelector('input[name="charge_amount"]').placeholder = cur.symbol + '0';
+            setKind(row, kind);
+            if (starter) row.dataset.starter = label;
+            chargeRows.appendChild(row);
+            capCheck();
+            return row;
+        }
+
+        function capCheck() {
+            const full = chargeRows.children.length >= MAX_CHARGES;
+            document.querySelectorAll('#addCharge .chip').forEach(b => { b.disabled = full; });
+            document.getElementById('chargeCap').hidden = !full;
+        }
+
+        chargeRows.addEventListener('click', (e) => {
+            const row = e.target.closest('.charge-row');
+            if (!row) return;
+            if (e.target.closest('.sign')) {
+                setKind(row, row.classList.contains('is-discount') ? 'charge' : 'discount');
+                delete row.dataset.starter;
+                reconSchedule();
+            } else if (e.target.closest('.js-remove-charge')) {
+                row.remove();
+                capCheck();
+                reconSchedule();
+            }
+        });
+        chargeRows.addEventListener('input', (e) => {
+            const row = e.target.closest('.charge-row');
+            if (row && e.target.name === 'charge_label') delete row.dataset.starter;
+        });
+
+        document.getElementById('addCharge').addEventListener('click', (e) => {
+            const chip = e.target.closest('.chip');
+            if (!chip) return;
+            const row = addCharge(chip.dataset.label, chip.dataset.kind, false);
+            if (row) row.querySelector(chip.dataset.label ? 'input[name="charge_amount"]' : 'input[name="charge_label"]').focus();
+            reconSchedule();
+        });
+
+        // A starter row nobody has touched (same label, no amount) is swapped
+        // for the new currency's starters. Anything typed stays.
+        function swapStarters() {
+            const untouched = Array.from(chargeRows.querySelectorAll('.charge-row[data-starter]')).filter(row =>
+                !row.querySelector('input[name="charge_amount"]').value.trim()
+                && row.querySelector('input[name="charge_label"]').value === row.dataset.starter);
+            if (!untouched.length || untouched.length !== chargeRows.children.length) return;
+            untouched.forEach(row => row.remove());
+            (STARTERS[cur.code] || STARTERS['*']).forEach(([label, kind]) => addCharge(label, kind, true));
+        }
+
+        currencySelect.addEventListener('change', () => {
+            cur = CURRENCIES[currencySelect.value];
+            document.querySelectorAll('.js-money').forEach(input => {
+                if (input.name === 'item_price' || input.classList.contains('js-charge')) input.placeholder = cur.symbol + '0';
+                formatInput(input);
+            });
+            swapStarters();
+            const note = document.getElementById('currencyNote');
+            note.classList.remove('is-flash');
+            void note.offsetWidth;  // restart the highlight
+            note.classList.add('is-flash');
+            reconSchedule();
+        });
+
         /* ------------------------------------------------------------------ */
         /* Download current scan as .billbear.json                             */
         /* ------------------------------------------------------------------ */
 
         function collectScan() {
             const items = Array.from(document.querySelectorAll('.item-row'))
-                .map(row => {
-                    const nameInput = row.querySelector('input[name="item_name"]');
-                    const priceInput = row.querySelector('input[name="item_price"]');
-                    return {
-                        name: (nameInput?.value || '').trim(),
-                        price: (priceInput?.value || '').trim(),
-                        category: row.querySelector('select[name="item_category"]')?.value || 'other',
-                        quantity: parseInt(row.querySelector('input[name="item_quantity"]')?.value, 10) || 1,
-                    };
-                })
+                .map(row => ({
+                    name: (row.querySelector('input[name="item_name"]')?.value || '').trim(),
+                    price: M.parse(row.querySelector('input[name="item_price"]')?.value),
+                    category: row.querySelector('select[name="item_category"]')?.value || 'other',
+                    quantity: parseInt(row.querySelector('input[name="item_quantity"]')?.value, 10) || 1,
+                }))
                 .filter(it => it.name.length > 0);
-
-            const val = id => (document.getElementById(id)?.value || '').trim() || 'N/A';
-
+            const charges = Array.from(chargeRows.querySelectorAll('.charge-row'))
+                .map(row => ({
+                    label: row.querySelector('input[name="charge_label"]').value.trim(),
+                    amount: M.parse(row.querySelector('input[name="charge_amount"]').value),
+                    kind: row.querySelector('input[name="charge_kind"]').value,
+                }))
+                .filter(c => c.amount);
+            const num = id => M.parse(document.getElementById(id)?.value);
             return {
-                version: 1,
+                version: 2,
                 saved_at: new Date().toISOString(),
                 source: 'billbear_edit_items',
                 restaurant_name: 'N/A',
+                currency: { code: cur.code, confirmed: true },
                 items,
-                subtotal: val('subtotal'),
-                serviceCharge: val('serviceCharge'),
-                discount: val('discount'),
-                cgst: val('cgst'),
-                sgst: val('sgst'),
-                igst: val('igst') || 'N/A',
-                total: val('total'),
+                subtotal: num('subtotal'),
+                charges,
+                total: num('total'),
             };
         }
 
@@ -166,9 +331,7 @@
                 alert('Add at least one item before saving the scan.');
                 return;
             }
-            const blob = new Blob([JSON.stringify(data, null, 2)], {
-                type: 'application/json',
-            });
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             const a = document.createElement('a');
@@ -180,111 +343,114 @@
             URL.revokeObjectURL(url);
         }
 
-        document.getElementById('downloadScanBtn')
-            .addEventListener('click', downloadScan);
+        document.getElementById('downloadScanBtn').addEventListener('click', downloadScan);
 
         /* ------------------------------------------------------------------ */
-        /* Live reconciliation: flag when items/taxes don't add up to total    */
+        /* Live tally and reconciliation                                       */
         /* ------------------------------------------------------------------ */
-
-        // Compare in whole paise so float noise (0.1 + 0.2) never flags.
-        const paise = (n) => Math.round(n * 100);
-        // Bills round the grand total (the "round off" line), usually by up to ₹1.
-        const ROUND_OFF_PAISE = 100;
-
-        function parseRupees(v) {
-            if (v == null) return null;
-            const cleaned = String(v).replace(/[₹,]/g, '').trim();
-            if (!cleaned || /^n\/?a$/i.test(cleaned)) return null;
-            const n = parseFloat(cleaned);
-            return Number.isFinite(n) ? n : null;
-        }
-
-        function reconCompute() {
-            const items = Array.from(document.querySelectorAll('.item-row')).map(r => ({
-                name: r.querySelector('input[name="item_name"]')?.value?.trim() || '',
-                price: parseRupees(r.querySelector('input[name="item_price"]')?.value),
-            }));
-            const priced = items.filter(i => i.price != null);
-            const itemsSum = priced.reduce((s, i) => s + i.price, 0);
-
-            const subtotal = parseRupees(document.getElementById('subtotal')?.value);
-            const service  = parseRupees(document.getElementById('serviceCharge')?.value) || 0;
-            const discount = parseRupees(document.getElementById('discount')?.value) || 0;
-            const cgst     = parseRupees(document.getElementById('cgst')?.value) || 0;
-            const sgst     = parseRupees(document.getElementById('sgst')?.value) || 0;
-            const igst     = parseRupees(document.getElementById('igst')?.value) || 0;
-            const total    = parseRupees(document.getElementById('total')?.value);
-
-            // If subtotal is filled, compute expected total from it; otherwise
-            // fall back to items sum as the base.
-            const subtotalBase = (subtotal != null) ? subtotal : itemsSum;
-            const expectedTotal = subtotalBase + service + cgst + sgst + igst - discount;
-
-            return { items, itemsSum, subtotal, total, expectedTotal, priced };
-        }
 
         function escapeHtml(s) {
             return String(s).replace(/[&<>"']/g, c => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
             }[c]));
         }
-        function rupee(n) {
-            if (n == null) return 'N/A';
-            return '₹' + n.toFixed(2);
+        const money = n => M.format(n, cur);
+        const usable = n => n != null && !Number.isNaN(n);
+
+        function reconCompute() {
+            const items = Array.from(document.querySelectorAll('.item-row')).map(r => ({
+                name: r.querySelector('input[name="item_name"]')?.value?.trim() || '',
+                price: M.parse(r.querySelector('input[name="item_price"]')?.value),
+            }));
+            const priced = items.filter(i => usable(i.price));
+            const itemsSumValue = priced.reduce((s, i) => s + i.price, 0);
+            let charges = 0, discounts = 0;
+            chargeRows.querySelectorAll('.charge-row').forEach(row => {
+                let n = M.parse(row.querySelector('input[name="charge_amount"]').value);
+                if (!usable(n) || !n) return;
+                let discount = row.classList.contains('is-discount');
+                if (n < 0) { n = -n; discount = true; }   // the server reads "-50" on a + row the same way
+                if (discount) discounts += n; else charges += n;
+            });
+            const subtotal = M.parse(document.getElementById('subtotal')?.value);
+            const total = M.parse(document.getElementById('total')?.value);
+            const base = usable(subtotal) ? subtotal : itemsSumValue;
+            const bad = Array.from(document.querySelectorAll('.js-money')).filter(i => problemWith(i));
+            return { items, priced, itemsSum: itemsSumValue, charges, discounts, subtotal, total, base,
+                     expected: base + charges - discounts, bad };
         }
 
         let reconWasMismatched = false;
         let reconToastShown = false;
 
         function reconRender() {
-            const { items, itemsSum, subtotal, total, expectedTotal, priced } = reconCompute();
+            const r = reconCompute();
+            document.getElementById('tallyItems').textContent = money(r.base);
+            document.getElementById('tallyCharges').textContent = '+' + money(r.charges);
+            document.getElementById('tallyDiscounts').textContent = '−' + money(r.discounts);
+            document.getElementById('tallySum').textContent = money(r.expected);
+
             const banner = document.getElementById('reconBanner');
             const headline = document.getElementById('reconHeadline');
             const details = document.getElementById('reconDetails');
+            const check = document.getElementById('totalCheck');
             const rows = [];
             let status = 'ok';
 
-            // Items without a price
-            const unpriced = items.filter(i => i.name && i.price == null);
+            if (r.bad.length) {
+                status = 'mismatch';
+                rows.push(`${r.bad.length} amount${r.bad.length > 1 ? 's' : ''} can't be used in ${escapeHtml(cur.name)} (marked in red): ${escapeHtml(problemWith(r.bad[0]))}.`);
+            }
+
+            const unpriced = r.items.filter(i => i.name && !usable(i.price));
             if (unpriced.length) {
-                status = 'warn';
-                rows.push(`${unpriced.length} item${unpriced.length>1?'s':''} missing a price (${unpriced.map(i=>escapeHtml(i.name)).slice(0,3).join(', ')}${unpriced.length>3?'…':''})`);
+                if (status === 'ok') status = 'warn';
+                rows.push(`${unpriced.length} item${unpriced.length > 1 ? 's' : ''} missing a price (${unpriced.map(i => escapeHtml(i.name)).slice(0, 3).join(', ')}${unpriced.length > 3 ? '…' : ''})`);
             }
 
-            // Items sum vs subtotal
-            if (subtotal != null && priced.length) {
-                const delta = itemsSum - subtotal;
-                if (paise(Math.abs(delta)) !== 0) {
+            if (usable(r.subtotal) && r.priced.length) {
+                const delta = r.itemsSum - r.subtotal;
+                if (M.units(Math.abs(delta), cur) !== 0) {
                     status = 'mismatch';
-                    const off = delta > 0 ? 'higher' : 'lower';
-                    rows.push(`Items add up to <strong>${rupee(itemsSum)}</strong>, but bill subtotal is <strong>${rupee(subtotal)}</strong> (${rupee(Math.abs(delta))} ${off}).`);
+                    rows.push(`Dishes add up to <strong>${money(r.itemsSum)}</strong>, but the bill's subtotal is <strong>${money(r.subtotal)}</strong> (${money(Math.abs(delta))} ${delta > 0 ? 'higher' : 'lower'}).`);
                 } else {
-                    rows.push(`Items sum (${rupee(itemsSum)}) matches subtotal.`);
+                    rows.push(`Dishes add up to the subtotal, ${money(r.subtotal)}.`);
                 }
-            } else if (priced.length) {
-                rows.push(`Items sum: ${rupee(itemsSum)}. Subtotal not filled.`);
+            } else if (r.priced.length) {
+                rows.push(`Dishes add up to ${money(r.itemsSum)}.`);
             }
 
-            // Subtotal + charges - discount vs total
-            if (total != null && subtotal != null) {
-                const delta = expectedTotal - total;
-                const diff = paise(Math.abs(delta));
-                if (diff > ROUND_OFF_PAISE) {
+            check.hidden = true;
+            if (usable(r.total) && r.total) {
+                const delta = r.expected - r.total;
+                const off = M.units(Math.abs(delta), cur);
+                const stepUnits = M.units(cur.step, cur);
+                check.hidden = false;
+                if (off > stepUnits) {
                     status = 'mismatch';
-                    const off = delta > 0 ? 'higher' : 'lower';
-                    rows.push(`Subtotal + taxes/service − discount = <strong>${rupee(expectedTotal)}</strong>, but bill total is <strong>${rupee(total)}</strong> (${rupee(Math.abs(delta))} ${off}). Please verify the numbers against your bill.`);
-                } else if (diff > 0) {
-                    rows.push(`Matches bill total ${rupee(total)} (bill rounded by ${rupee(diff / 100)}).`);
+                    const more = delta > 0;
+                    const exact = more && r.charges && Math.abs(M.units(delta, cur) - M.units(r.charges, cur)) <= stepUnits;
+                    const hint = exact
+                        ? ` That's exactly the taxes and charges (${money(r.charges)}): if you added them by hand, add them to the bill total too.`
+                        : more && r.charges
+                            ? ' If you added a tax or charge that isn\'t on the printed bill, update the bill total too.'
+                            : ' Check the rows against the bill.';
+                    rows.push(`Dishes, charges and discounts work out to <strong>${money(r.expected)}</strong>, but the bill total is <strong>${money(r.total)}</strong> (${money(Math.abs(delta))} ${more ? 'more' : 'less'}).${hint}`);
+                    check.className = 'total-check is-off';
+                    check.textContent = `${money(Math.abs(delta))} ${delta > 0 ? 'more' : 'less'} than the bill total`;
+                } else if (off > 0) {
+                    rows.push(`Matches the bill total, ${money(r.total)} (the bill rounded by ${money(off / Math.pow(10, cur.decimals))}).`);
+                    check.className = 'total-check is-ok';
+                    check.textContent = `Matches the bill total (rounded by ${money(off / Math.pow(10, cur.decimals))})`;
                 } else {
-                    rows.push(`Subtotal + charges − discount (${rupee(expectedTotal)}) matches bill total.`);
+                    rows.push(`Works out to the bill total, ${money(r.total)}.`);
+                    check.className = 'total-check is-ok';
+                    check.textContent = 'Matches the bill total';
                 }
-            } else if (total != null) {
-                rows.push(`Bill total: ${rupee(total)}. Fill subtotal to enable full reconciliation.`);
             }
 
             if (rows.length === 0) {
-                rows.push('Add items and totals to see reconciliation.');
+                rows.push('Add dishes and amounts to check them against the bill.');
                 status = 'neutral';
             }
 
@@ -296,8 +462,7 @@
             };
             banner.classList.toggle('notice--error', status === 'mismatch');
             headline.textContent = HEADLINES[status];
-
-            details.innerHTML = rows.map(r => `<li>${r}</li>`).join('');
+            details.innerHTML = rows.map(row => `<li>${row}</li>`).join('');
 
             // One-shot toast the first time the user fixes a real mismatch.
             if (status === 'mismatch') reconWasMismatched = true;
@@ -309,7 +474,6 @@
             }
         }
 
-        // Bind to every input + blur change in the form. Debounced.
         let reconTimer = null;
         function reconSchedule() {
             clearTimeout(reconTimer);
@@ -317,57 +481,36 @@
         }
         const editForm = document.getElementById('editForm');
         editForm.addEventListener('input', reconSchedule);
-        editForm.addEventListener('blur', reconSchedule, true); // capture blur from descendants
+        editForm.addEventListener('blur', reconSchedule, true);
+        new MutationObserver(reconSchedule).observe(document.getElementById('itemsTable'), { childList: true });
+        new MutationObserver(reconSchedule).observe(chargeRows, { childList: true });
 
-        // Row add/remove is a DOM mutation — observe the rows container.
-        const tbody = document.getElementById('itemsTable');
-        if (tbody) {
-            new MutationObserver(reconSchedule).observe(tbody, { childList: true });
-        }
-
-        // First render shortly after load (blur handlers format currency).
+        document.querySelectorAll('.js-money').forEach(formatInput);
+        capCheck();
         setTimeout(reconRender, 50);
 
         function addRow() {
             const list = document.getElementById('itemsTable');
             const row = document.getElementById('rowTemplate').content.firstElementChild.cloneNode(true);
+            row.querySelector('input[name="item_price"]').placeholder = cur.symbol + '0';
             list.appendChild(row);
             row.querySelector('input[name="item_name"]').focus();
         }
 
         function removeRow(button) {
-            const row = button.closest('.item-row');
-            row.remove();
+            button.closest('.item-row').remove();
         }
 
-        // Form submission with loading state
-        document.getElementById('editForm').addEventListener('submit', function(e) {
-            const form = e.target;
+        editForm.addEventListener('submit', function () {
+            // Turn any "5%" still in a box into its amount before sending.
+            document.querySelectorAll('.js-money').forEach(formatInput);
             const submitBtn = document.getElementById('submitBtn');
-            
-            form.classList.add('loading');
+            editForm.classList.add('loading');
             submitBtn.disabled = true;
-            
-            // Re-enable if form fails to submit for some reason
             setTimeout(() => {
-                form.classList.remove('loading');
+                editForm.classList.remove('loading');
                 submitBtn.disabled = false;
             }, 5000);
-        });
-
-        // Auto-format currency inputs
-        document.querySelectorAll('input[type="text"]').forEach(input => {
-            if (input.name.includes('price') || input.name.includes('total') || 
-                input.name.includes('charge') || input.name.includes('discount') || 
-                input.name.includes('gst')) {
-                
-                input.addEventListener('blur', function() {
-                    let value = this.value.replace(/[^\d.]/g, '');
-                    if (value && !isNaN(value)) {
-                        this.value = '₹' + parseFloat(value).toFixed(2);
-                    }
-                });
-            }
         });
     </script>
 {% endblock %}

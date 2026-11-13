@@ -11,6 +11,8 @@ reportlab==4.4.2
 pypdf==5.8.0
 svglib==1.5.1
 xhtml2pdf==0.2.16
+# Joins letters in Indian scripts (क्ष, कि) in the PDF; see utils/pdf_text.py
+uharfbuzz==0.57.0
 
 # --- HTML/CSS rendering (used by weasyprint & xhtml2pdf) ---
 tinycss2==1.4.0

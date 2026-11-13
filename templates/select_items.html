@@ -74,7 +74,7 @@
         <div class="paybar">
             <div>
                 <div class="paybar__count" id="selectedCount">0 dishes, before tax</div>
-                <div class="paybar__total" id="selectedTotal">₹0</div>
+                <div class="paybar__total" id="selectedTotal">{{ 0 | money(room['currency'].code) }}</div>
             </div>
             <button type="submit" class="btn" id="submitBtn">Send my picks</button>
         </div>
@@ -82,7 +82,9 @@
 </main>
 {% endblock %}
 {% block scripts %}
+    <script src="{{ url_for('static', filename='js/money.js') }}"></script>
     <script>
+        const CURRENCY = {{ room['currency'] | tojson }};
         const boxes = () => Array.from(document.querySelectorAll('input[name="selected_items"]'));
 
         function updateSelection() {
@@ -90,8 +92,7 @@
             const sum = picked.reduce((s, b) => s + estimateFor(b), 0);
             document.getElementById('selectedCount').textContent =
                 `${picked.length} dish${picked.length === 1 ? '' : 'es'}, before tax`;
-            document.getElementById('selectedTotal').textContent =
-                '₹' + sum.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+            document.getElementById('selectedTotal').textContent = BBMoney.format(sum, CURRENCY);
         }
 
         // Picks in progress are kept on this device until they are sent, so
@@ -326,7 +327,7 @@
         document.getElementById('selectionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             if (document.querySelectorAll('input[name="selected_items"]:checked').length === 0
-                && !confirm("You haven't picked anything, so you'll owe ₹0. Send anyway?")) {
+                && !confirm(`You haven't picked anything, so you'll owe ${BBMoney.format(0, CURRENCY)}. Send anyway?`)) {
                 return;
             }
             const sid = ensureSubmissionId();

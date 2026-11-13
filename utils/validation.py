@@ -8,9 +8,10 @@ with Cyrillic/Greek (look-alike spoofing such as Cyrillic "Аlex").
 """
 import re
 import unicodedata
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, List, Optional
 
+from .money import Currency, TooManyDecimals, format_money, get_currency, parse_money
 from .receipt_contracts import normalize_item_category
 
 NAME_MAX = 30
@@ -18,7 +19,6 @@ ROOM_NAME_MAX = 60
 ITEM_NAME_MAX = 80
 MAX_ITEMS = 200
 MAX_QUANTITY = 99
-PRICE_LIMIT = Decimal("10000000")
 
 _NAME_PUNCT = set(" .'-_")
 _CONFUSABLE_SCRIPTS = {"LATIN", "CYRILLIC", "GREEK"}
@@ -83,35 +83,18 @@ def normalize_item_name(raw: Any) -> str:
     return _clean_text(raw)[:ITEM_NAME_MAX]
 
 
-def parse_price(value: Any) -> Optional[Decimal]:
+def parse_price(value: Any, currency: Optional[Currency] = None, strict: bool = False) -> Optional[Decimal]:
     """
-    Parse "₹1,234.50", "450", 12.5, "-50" -> Decimal(2dp). Missing/N/A -> None.
-    Raises ValueError for garbage, NaN/Infinity or out-of-range values.
+    Parse "₹1,234.50", "450", 12.5, "-50", "¥1,200" -> Decimal rounded to the
+    currency's decimals (rupees unless given). Missing/N/A -> None. Raises
+    ValueError for garbage, NaN/Infinity or out-of-range values, and with
+    strict, for more decimals than the currency has (¥12.50).
     """
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        text = str(value)
-    else:
-        text = str(value).strip()
-        if not text or text.upper() in {"N/A", "NA", "-"}:
-            return None
-        text = text.replace("₹", "").replace("Rs.", "").replace("Rs", "").replace(",", "").strip()
-    if not re.fullmatch(r"-?\d+(\.\d+)?", text):
-        raise ValueError(f"'{value}' is not a valid amount")
-    try:
-        amount = Decimal(text)
-    except InvalidOperation as exc:
-        raise ValueError(f"'{value}' is not a valid amount") from exc
-    if not amount.is_finite() or abs(amount) >= PRICE_LIMIT:
-        raise ValueError(f"'{value}' is out of range")
-    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return parse_money(value, currency or get_currency(None), strict=strict)
 
 
-def format_price(amount: Optional[Decimal]) -> str:
-    if amount is None:
-        return "N/A"
-    return f"₹{amount:.2f}"
+def format_price(amount: Optional[Decimal], currency: Optional[Currency] = None) -> str:
+    return format_money(amount, currency or get_currency(None))
 
 
 def normalize_quantity(raw: Any) -> int:
@@ -128,12 +111,13 @@ def normalize_quantity(raw: Any) -> int:
     return min(max(value, 1), MAX_QUANTITY)
 
 
-def clean_items(raw_items: Any, strict_prices: bool = False) -> List[dict]:
+def clean_items(raw_items: Any, strict_prices: bool = False, currency: Optional[Currency] = None) -> List[dict]:
     """
     Normalize a list of {name, price[, id, category, quantity]} into
     [{id|None, name, price: Decimal|None, category, quantity}].
-    Drops nameless rows. With strict_prices, an unparsable price raises ValueError;
-    otherwise it becomes None (used for LLM output, which the host reviews).
+    Drops nameless rows. Prices are rounded to the currency's decimals. With
+    strict_prices, an unparsable price (or one with too many decimals) raises
+    ValueError; otherwise it becomes None (LLM output, which the host reviews).
     """
     if not isinstance(raw_items, list):
         return []
@@ -145,10 +129,11 @@ def clean_items(raw_items: Any, strict_prices: bool = False) -> List[dict]:
         if not name or name.upper() == "N/A":
             continue
         try:
-            price = parse_price(raw.get("price"))
-        except ValueError:
+            price = parse_price(raw.get("price"), currency, strict=strict_prices)
+        except ValueError as exc:
             if strict_prices:
-                raise ValueError(f"Item '{name}': invalid price '{raw.get('price')}'")
+                detail = str(exc) if isinstance(exc, TooManyDecimals) else f"invalid price '{raw.get('price')}'"
+                raise ValueError(f"Item '{name}': {detail}")
             price = None
         item_id = raw.get("id")
         try:

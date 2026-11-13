@@ -75,6 +75,9 @@ h3 { font-size: 1.1rem; line-height: 1.2; font-weight: 700; }
 a { color: inherit; text-underline-offset: 3px; }
 img { max-width: 100%; }
 button, input, select { font: inherit; color: inherit; }
+/* Phones paint a blue box over anything tapped before it reacts. Buttons here
+   show their own pressed state, and keyboard focus keeps its outline. */
+a, button, label, summary, select, input, [role="button"], [role="radio"] { -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
 
 :focus-visible { outline: 3px solid var(--on-ground); outline-offset: 3px; border-radius: 6px; }
@@ -103,11 +106,16 @@ button, input, select { font: inherit; color: inherit; }
 .topbar nav a:hover { text-decoration: underline; }
 
 .theme-toggle { width: 44px; height: 44px; padding: 0; border: var(--line) solid var(--on-ground); border-radius: 50%; background: transparent; color: var(--on-ground); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+/* The icon's wrapper is a flex box and the svg a block: an inline svg sits on
+   the text baseline and ends up a few pixels above the middle of the circle. */
+.theme-toggle .moon, .theme-toggle .sun { display: flex; }
+.theme-toggle svg { display: block; }
+.theme-toggle:active { transform: scale(0.92); }
 .theme-toggle .sun { display: none; }
-:root[data-theme="dark"] .theme-toggle .sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .sun { display: flex; }
 :root[data-theme="dark"] .theme-toggle .moon { display: none; }
 @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .theme-toggle .sun { display: block; }
+    :root:not([data-theme="light"]) .theme-toggle .sun { display: flex; }
     :root:not([data-theme="light"]) .theme-toggle .moon { display: none; }
 }
 
@@ -143,7 +151,9 @@ button, input, select { font: inherit; color: inherit; }
 .tear--top { margin: 0 0 -1px; background: linear-gradient(315deg, var(--paper) 50%, transparent 50%) 0 0 / 16px 12px, linear-gradient(45deg, var(--paper) 50%, transparent 50%) 0 0 / 16px 12px; }
 .dash { border: 0; border-top: 2px dashed var(--rule); margin: 0; }
 .dash--ink { border-top-color: var(--ink); }
-.fineprint { font-family: var(--mono); font-size: 0.75rem; color: var(--ink-soft); }
+/* --on-ground-soft is the soft text colour for whatever it sits on: brown on
+   paper and cards, light on the dark-mode background. */
+.fineprint { font-family: var(--mono); font-size: 0.75rem; color: var(--on-ground-soft); }
 
 .card { background: var(--paper); color: var(--ink); border: var(--line) solid var(--ink); border-radius: 18px; padding: 14px 16px; box-shadow: 5px 6px 0 var(--shadow); --primary-bg: var(--ink); --primary-fg: var(--paper); --on-ground: var(--ink); --on-ground-soft: var(--ink-soft); --disabled: #8A6A2A; }
 .card--flat { box-shadow: none; }
@@ -153,6 +163,7 @@ button, input, select { font: inherit; color: inherit; }
 
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 20px; border: var(--line) solid var(--ink); border-radius: 14px; background: var(--paper); color: var(--ink); font-family: var(--font); font-size: 1.05rem; font-weight: 700; line-height: 1.1; text-align: center; text-decoration: none; cursor: pointer; transition: transform 0.08s ease; }
 .btn:active { transform: translateY(2px); }
+.chip:active, .icon-btn:active, .sign:active, .swap__stamp:active { opacity: 0.7; }
 .btn--block { display: flex; width: 100%; }
 .btn--primary { min-height: 56px; border-color: var(--primary-bg); background: var(--primary-bg); color: var(--primary-fg); font-size: 1.15rem; }
 .btn--honey { background: var(--honey); }
@@ -287,6 +298,66 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .money-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .money-grid .field--full { grid-column: 1 / -1; }
 
+/* Currency: one picker, and the line that says nothing is converted. */
+.currency-card { display: flex; flex-direction: column; gap: 8px; }
+.currency-card__note { font-size: 0.9rem; line-height: 1.3; color: var(--ink-soft); border-radius: 8px; }
+.currency-card__note .textlink { padding: 0; font-size: inherit; color: var(--ink); }
+.currency-card__note.is-flash { animation: note-flash 1.4s ease-out; }
+@keyframes note-flash { 0%, 30% { background: var(--honey); color: var(--ink); box-shadow: 0 0 0 6px var(--honey); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
+
+/* Taxes, charges and discounts: printed like the lines on the bill. The round
+   stamp says whether a row adds to the bill (+) or comes off it (−). */
+.charge-rows { margin-top: 10px; }
+/* Phones: label and ✕ on top, then the +/− stamp and the amount, like a dish row. */
+.charge-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "label label remove" "sign amount ."; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 2px dashed var(--rule); }
+.charge-row input[name="charge_label"] { grid-area: label; }
+.charge-row .sign { grid-area: sign; }
+.charge-row input[name="charge_amount"] { grid-area: amount; }
+.charge-row .icon-btn { grid-area: remove; }
+@media (min-width: 560px) {
+    .charge-row { grid-template-columns: minmax(0, 1fr) 44px 140px 44px; grid-template-areas: "label sign amount remove"; gap: 6px; padding: 8px 0; }
+}
+.charge-row .input { min-height: 46px; padding: 0 10px; font-size: 1rem; }
+.charge-row.is-discount { margin: 0 -10px; padding: 8px 10px; background: var(--paper-tint); }
+.sign { width: 44px; height: 44px; padding: 0; border: var(--line) solid var(--ink); border-radius: 50%; background: var(--field); color: var(--ink); font-family: var(--mono); font-size: 1.35rem; font-weight: 600; line-height: 1; cursor: pointer; }
+.sign[aria-pressed="true"] { background: var(--ink); color: var(--paper); transform: rotate(-8deg); }
+.add-charge { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.add-charge__label { font-weight: 700; margin-right: 2px; }
+.add-charge .chip { min-height: 40px; padding: 0 12px 0 10px; }
+.add-charge .chip:disabled { opacity: 0.4; cursor: not-allowed; }
+.chip--minus { background: var(--paper-tint); border-style: dashed; }
+.input.is-invalid { border-color: var(--danger); box-shadow: inset 0 0 0 1.5px var(--danger); color: var(--danger); }
+
+/* "Looks like Japanese Yen. Right?" on the create page: a tear-off slip
+   with the currency stamped on it. It stays put until answered. */
+.currency-ask { display: flex; gap: 14px; align-items: flex-start; padding: 14px; border: var(--line) dashed var(--ink); border-radius: 16px; background: var(--paper-tint); }
+.currency-ask__stamp { width: 58px; height: 58px; flex-shrink: 0; border: var(--line) solid var(--ink); border-radius: 50%; background: var(--honey); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 1.45rem; font-weight: 600; line-height: 1; transform: rotate(-10deg); box-shadow: 3px 3px 0 var(--ink); overflow: hidden; white-space: nowrap; }
+.currency-ask__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.currency-ask__q { font-size: 1.15rem; font-weight: 700; line-height: 1.2; }
+.currency-ask__why { font-size: 0.9rem; line-height: 1.3; color: var(--ink-soft); }
+.currency-ask__actions { display: flex; gap: 8px; }
+.currency-ask__actions .btn { flex: 1; min-height: 46px; }
+.currency-ask__pick { display: flex; flex-direction: column; gap: 8px; }
+.currency-ask__alts { display: flex; flex-wrap: wrap; gap: 8px; }
+.currency-ask__alts:empty { display: none; }
+.currency-ask__done { font-weight: 700; line-height: 1.25; }
+.currency-ask.is-settled { border-style: solid; background: var(--field); }
+.currency-ask.is-settled .currency-ask__q, .currency-ask.is-settled .currency-ask__why { display: none; }
+.currency-ask.is-settled { align-items: center; }
+.currency-ask.is-settled .currency-ask__stamp { animation: stamp-down 0.22s ease-out; }
+@keyframes stamp-down { from { transform: rotate(-10deg) scale(1.35); box-shadow: 0 0 0 var(--ink); } to { transform: rotate(-10deg) scale(1); box-shadow: 3px 3px 0 var(--ink); } }
+
+/* The foot of the bill: what the rows work out to. */
+.tally { margin-top: 14px; padding: 12px 14px; border: var(--line) solid var(--ink); border-radius: 14px; background: var(--field); display: flex; flex-direction: column; gap: 4px; }
+.tally__line { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; line-height: 1.3; }
+.tally__line > :last-child { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.tally__line--sum { margin-top: 4px; padding-top: 8px; border-top: 2px dashed var(--ink); font-size: 1.12rem; font-weight: 800; }
+.total-check { margin-top: 8px; font-weight: 700; font-size: 0.95rem; }
+.total-check.is-ok { color: var(--ok); }
+.total-check.is-ok::before { content: "✓ "; }
+.total-check.is-off { color: var(--danger); }
+}
+
 /* ---- Code ticket --------------------------------------------------- */
 
 .ticket { display: flex; align-items: center; gap: 14px; }
@@ -407,3 +478,21 @@ details.fold > summary { cursor: pointer; font-weight: 600; padding: 10px 0; min
 :root[data-theme="dark"] .nextup__paw { background: var(--paper); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .nextup__paw { background: var(--paper); } }
 .nextup__paw svg { width: 28px; height: 28px; }
+
+/* Help: "Other currencies". Four stamps over a receipt; tapping one flips only
+   the symbols, so the point (nothing is converted) is seen, not read. */
+.swap__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px; }
+.swap__stamps { display: flex; gap: 8px; }
+.swap__stamp { width: 46px; height: 46px; padding: 0; border: var(--line) solid var(--ink); border-radius: 50%; background: var(--field); color: var(--ink); font-family: var(--mono); font-size: 1.2rem; font-weight: 600; cursor: pointer; transition: transform 0.12s ease; }
+.swap__stamp:nth-child(odd) { transform: rotate(-6deg); }
+.swap__stamp:nth-child(even) { transform: rotate(5deg); }
+.swap__stamp[aria-checked="true"] { background: var(--honey); box-shadow: 3px 3px 0 var(--ink); transform: rotate(-10deg) translate(-1px, -1px); }
+.swap__stamp:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+.swap__amt { display: inline-block; }
+.swap__amt.is-flipped { animation: swap-flip 0.32s ease-out; }
+@keyframes swap-flip { 0% { transform: rotateX(90deg); opacity: 0.2; } 100% { transform: none; opacity: 1; } }
+.swap__caption { margin-top: 4px; padding: 10px 12px; border-radius: 12px; background: var(--paper-tint); font-size: 0.93rem; font-weight: 600; line-height: 1.35; }
+.currency-ask--mock { pointer-events: none; }
+.currency-list { margin: 4px 0 0; padding: 0; list-style: none; columns: 2; column-gap: 16px; font-size: 0.92rem; line-height: 1.7; }
+.currency-list .mono { display: inline-block; min-width: 3.2em; font-weight: 600; }
+@media (max-width: 360px) { .currency-list { columns: 1; } }

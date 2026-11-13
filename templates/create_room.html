@@ -75,6 +75,29 @@
                     {% endif %}
                     <div id="ocrStatus" class="status-line" aria-live="polite"></div>
                     {% if mode != 'json' %}
+                    {# Shown when the scan isn't sure the bill is in rupees. Create room waits for an answer:
+                       otherwise a ¥1,200 bill would quietly become ₹1,200. #}
+                    <div class="currency-ask" id="currencyAsk" hidden role="group" aria-labelledby="currencyAskQ">
+                        <span class="currency-ask__stamp" id="askSymbol" aria-hidden="true">¥</span>
+                        <div class="currency-ask__body">
+                            <p class="currency-ask__q" id="currencyAskQ">Looks like <b id="askName">Japanese Yen</b>. Right?</p>
+                            <p class="currency-ask__why" id="askReason"></p>
+                            <div class="currency-ask__actions" id="askActions">
+                                <button type="button" class="btn btn--primary" id="askYes">Yes</button>
+                                <button type="button" class="btn" id="askChange">Change</button>
+                            </div>
+                            <div class="currency-ask__pick" id="askPick" hidden>
+                                <div class="currency-ask__alts" id="askAlts"></div>
+                                <label class="small" for="askSelect">Or pick from the list</label>
+                                <select class="select" id="askSelect">
+                                    <option value="">Choose a currency</option>
+                                    {% for c in CURRENCY_CHOICES %}<option value="{{ c.code }}">{{ c.symbol }}  {{ c.name }} ({{ c.code }})</option>{% endfor %}
+                                </select>
+                            </div>
+                            <p class="currency-ask__done" id="askDone" hidden></p>
+                            <p class="fineprint">Amounts stay as printed. Nothing is converted.</p>
+                        </div>
+                    </div>
                     <button type="button" class="btn btn--honey btn--block" id="retryScanBtn" hidden>Scan it again</button>
                     <button type="button" class="btn btn--block" id="changePhotoBtn" hidden>Choose a different photo</button>
                     {% endif %}
@@ -106,11 +129,13 @@
 </main>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/money.js') }}"></script>
 {% if turnstile_site_key %}
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 {% endif %}
     <script>
         const MODE = {{ mode | tojson }};
+        const CURRENCIES = Object.fromEntries({{ CURRENCY_CHOICES | tojson }}.map(c => [c.code, c]));
         const MAX_WIDTH = 1600;
         const MAX_HEIGHT = 4000;
         const TARGET_BYTES = 3.5 * 1024 * 1024;   // Vercel body limit is 4.5 MB incl. multipart overhead
@@ -216,6 +241,7 @@
             submitBtn.disabled = true;
             retryBtn.hidden = true;
             changeBtn.hidden = true;
+            hideCurrencyAsk();
 
             try {
                 setReading(true);
@@ -238,10 +264,17 @@
                     throw new Error((data && data.message) || `Scan failed (HTTP ${resp.status}).`);
                 }
                 const count = (data.receipt.items || []).length;
-                receiptInput.value = JSON.stringify(data.receipt);
-                setStatus(`Found ${count} item${count === 1 ? '' : 's'}. You can fix anything on the next screen.`, 'success');
-                submitBtn.disabled = false;
+                scannedReceipt = data.receipt;
                 changeBtn.hidden = false;
+                const currency = data.receipt.currency || {};
+                if (currency.confirmed) {
+                    receiptInput.value = JSON.stringify(data.receipt);
+                    setStatus(`Found ${count} item${count === 1 ? '' : 's'}. You can fix anything on the next screen.`, 'success');
+                    submitBtn.disabled = false;
+                } else {
+                    setStatus(`Found ${count} item${count === 1 ? '' : 's'}. Check the currency to continue.`, 'success');
+                    showCurrencyAsk(currency);
+                }
             } catch (err) {
                 const msg = err.name === 'AbortError'
                     ? 'Scanning took too long.'
@@ -254,6 +287,89 @@
                 clearTimeout(timer);
                 turnstileReset();
             }
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Currency check: one tap when the bill may not be in rupees           */
+        /* ------------------------------------------------------------------ */
+
+        let scannedReceipt = null;
+        const ask = {
+            box: document.getElementById('currencyAsk'),
+            symbol: document.getElementById('askSymbol'),
+            name: document.getElementById('askName'),
+            reason: document.getElementById('askReason'),
+            actions: document.getElementById('askActions'),
+            pick: document.getElementById('askPick'),
+            alts: document.getElementById('askAlts'),
+            select: document.getElementById('askSelect'),
+            done: document.getElementById('askDone'),
+        };
+        let askGuess = 'INR';
+
+        function hideCurrencyAsk() {
+            if (!ask.box) return;
+            ask.box.hidden = true;
+            ask.box.classList.remove('is-settled');
+        }
+
+        function showCurrencyAsk(currency) {
+            askGuess = CURRENCIES[currency.code] ? currency.code : 'INR';
+            const c = CURRENCIES[askGuess];
+            ask.symbol.textContent = c.symbol;
+            ask.name.textContent = c.name;
+            ask.reason.textContent = currency.reason ? `Bear saw: ${currency.reason}` : '';
+            ask.reason.hidden = !currency.reason;
+            ask.actions.hidden = false;
+            ask.pick.hidden = true;
+            ask.done.hidden = true;
+            ask.select.value = '';
+            // The scan's other guesses first, then rupees, as one-tap choices.
+            const alts = (currency.alternatives || []).filter(code => CURRENCIES[code] && code !== askGuess);
+            if (askGuess !== 'INR' && !alts.includes('INR')) alts.push('INR');
+            ask.alts.innerHTML = '';
+            alts.slice(0, 3).forEach(code => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'chip';
+                b.dataset.code = code;
+                b.textContent = `${CURRENCIES[code].symbol}  ${CURRENCIES[code].name}`;
+                ask.alts.appendChild(b);
+            });
+            ask.box.classList.remove('is-settled');
+            ask.box.hidden = false;
+            ask.box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+
+        function settleCurrency(code) {
+            const c = CURRENCIES[code];
+            scannedReceipt.currency = Object.assign({}, scannedReceipt.currency, { code, confirmed: true });
+            receiptInput.value = JSON.stringify(scannedReceipt);
+            ask.symbol.textContent = c.symbol;
+            ask.actions.hidden = true;
+            ask.pick.hidden = true;
+            ask.done.hidden = false;
+            ask.done.textContent = `${c.name} it is. You can still change it when you check the bill.`;
+            ask.box.classList.add('is-settled');
+            setStatus(`Found ${(scannedReceipt.items || []).length} items in ${c.name}. You can fix anything on the next screen.`, 'success');
+            submitBtn.disabled = false;
+            submitBtn.focus();
+        }
+
+        if (ask.box) {
+            document.getElementById('askYes').addEventListener('click', () => settleCurrency(askGuess));
+            document.getElementById('askChange').addEventListener('click', () => {
+                ask.actions.hidden = true;
+                ask.pick.hidden = false;
+                (ask.alts.querySelector('.chip') || ask.select).focus();
+            });
+            ask.alts.addEventListener('click', (e) => {
+                const chip = e.target.closest('.chip');
+                if (chip) settleCurrency(chip.dataset.code);
+            });
+            ask.select.addEventListener('change', () => {
+                if (ask.select.value) settleCurrency(ask.select.value);
+            });
         }
 
         if (fileInput && cameraInput) {
@@ -287,6 +403,7 @@
 
             changeBtn.addEventListener('click', () => {
                 pickedFile = null;
+                hideCurrencyAsk();
                 // Clear the inputs so picking the very same photo again still fires "change".
                 cameraInput.value = '';
                 fileInput.value = '';

@@ -3,6 +3,8 @@ import json
 import os
 import re
 import sys
+import threading
+from collections import OrderedDict
 from datetime import datetime
 from io import BytesIO
 from itertools import zip_longest
@@ -33,6 +35,7 @@ from utils.observability import (  # noqa: E402
     cron_monitor,
     distribution,
     flush,
+    flush_if_marked,
     init_sentry,
     tag,
 )
@@ -200,6 +203,11 @@ def error_response(message: str, status: int, code: str = "ERROR", **extra):
         body.update(extra)
         return jsonify(body), status
     return render_template("message.html", title="Something went wrong", message=message), status
+
+
+@app.teardown_request
+def _flush_rare_metrics(_exc):
+    flush_if_marked()
 
 
 @app.before_request
@@ -448,7 +456,51 @@ def _pdf_fonts(room: dict, bill_split: dict):
     return font_face_css(families_in(texts))
 
 
+# Rendered PDFs, newest last. Everyone at a table downloads the same file, and
+# rendering is the most CPU-hungry thing the app does (~0.8 s on Vercel), so
+# each split is rendered once per instance. The key includes when the bill was
+# split: Fix the bill or reopening and splitting again makes a new key, so a
+# stale PDF is never served. A finalized room can't otherwise change.
+_PDF_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
+_PDF_CACHE_LOCK = threading.Lock()
+_PDF_CACHE_MAX = 32          # ~300 KB each
+
+
+def _pdf_cache_key(room: dict) -> tuple:
+    finalized = room.get("finalized_at")
+    return (room["code"], finalized.isoformat() if finalized else None)
+
+
+def pdf_bytes(room: dict, room_code: str) -> tuple:
+    """The split's PDF as bytes, and whether it came from the cache."""
+    key = _pdf_cache_key(room)
+    with _PDF_CACHE_LOCK:
+        cached = _PDF_CACHE.get(key)
+        if cached is not None:
+            _PDF_CACHE.move_to_end(key)
+            return cached, True
+    data = render_pdf(room, room_code)
+    with _PDF_CACHE_LOCK:
+        _PDF_CACHE[key] = data
+        _PDF_CACHE.move_to_end(key)
+        while len(_PDF_CACHE) > _PDF_CACHE_MAX:
+            _PDF_CACHE.popitem(last=False)
+    return data, False
+
+
 def generate_pdf_response(room: dict, room_code: str):
+    data, _hit = pdf_bytes(room, room_code)
+    return _pdf_response(room, data)
+
+
+def _pdf_response(room: dict, data: bytes):
+    response = make_response(data)
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = f'attachment; filename="{_safe_filename(room["room_name"])}_bill_split.pdf"'
+    return response
+
+
+def render_pdf(room: dict, room_code: str) -> bytes:
     bill_split = calculate_bill_split(room)
     all_square = all(w.get("severity") in ("ok", "note") for w in audit_bill(room, bill_split))
     install_shaping()
@@ -458,11 +510,12 @@ def generate_pdf_response(room: dict, room_code: str):
         room_code=room_code,
         bill_split=bill_split,
         all_square=all_square,
-        current_date=datetime.now(),
+        # When the bill was split (in the server's time zone, as before), not when
+        # this copy was made: every download of one split is the same file.
+        current_date=room["finalized_at"].astimezone() if room.get("finalized_at") else datetime.now(),
         font_faces=_pdf_fonts(room, bill_split),
     )
     buf = BytesIO()
-    filename = f"{_safe_filename(room['room_name'])}_bill_split.pdf"
     if WEASYPRINT_AVAILABLE and not VERCEL_ENV:
         from pathlib import Path
 
@@ -475,10 +528,7 @@ def generate_pdf_response(room: dict, room_code: str):
             raise RuntimeError("xhtml2pdf failed")
     else:
         raise RuntimeError("No PDF library")
-    response = make_response(buf.getvalue())
-    response.headers["Content-Type"] = "application/pdf"
-    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return response
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -1317,9 +1367,11 @@ def download_pdf(room_code):
 
     started = time.monotonic()
     try:
-        response = generate_pdf_response(room, room["code"])
-        distribution("pdf.render", (time.monotonic() - started) * 1000, "millisecond", outcome="ok")
-        return response
+        data, hit = pdf_bytes(room, room["code"])
+        count("pdf.download", cache="hit" if hit else "miss")
+        if not hit:
+            distribution("pdf.render", (time.monotonic() - started) * 1000, "millisecond", outcome="ok")
+        return _pdf_response(room, data)
     except Exception as exc:
         distribution("pdf.render", (time.monotonic() - started) * 1000, "millisecond", outcome="failed")
         app.logger.warning("PDF generation error: %s", type(exc).__name__)

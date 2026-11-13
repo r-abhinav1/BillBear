@@ -19,6 +19,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 import db
+from utils.bill_totals import bill_signature, legacy_field_names
 from utils.room_assembler import assemble_room
 from utils.session import hash_secret, issue_recovery_token, issue_user_id, secrets_match
 from utils.validation import name_key
@@ -252,14 +253,16 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
 
         after = sorted((pos, it["name"], it["price"], it.get("quantity") or 1) for pos, it in enumerate(items))
         new_ocr = dict(room_row["ocr_data"] or {})
+        if "charges" in totals:
+            # The rows replace the fixed fields an older room may still have.
+            for field in legacy_field_names():
+                new_ocr.pop(field, None)
         new_ocr.update(totals)
         new_ocr.pop("items", None)
         # How taxes are divided changes amounts but nobody's picks, so it does
-        # not send people back to reconfirm.
-        def _without_tax_split(data):
-            return {k: v for k, v in data.items() if k != "taxSplit"}
-
-        changed = before != after or _without_tax_split(new_ocr) != _without_tax_split(room_row["ocr_data"] or {})
+        # not send people back to reconfirm; nor does an older room's totals
+        # being saved in the newer shape.
+        changed = before != after or bill_signature(new_ocr) != bill_signature(room_row["ocr_data"] or {})
 
         cur.execute("UPDATE rooms SET ocr_data = %s WHERE code = %s", (Jsonb(new_ocr), code))
         reset = False

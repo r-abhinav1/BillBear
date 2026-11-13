@@ -715,3 +715,133 @@ def test_help_pages_link_through_in_order(client):
     about = client.get("/about")
     assert about.status_code == 301 and about.headers["Location"].endswith("/help")
     assert 'href="/help"' in client.get("/").get_data(as_text=True)
+
+
+# --- currencies and charge rows ----------------------------------------------
+
+def _edit(host, code, currency="INR", prices=("200", "400", "100"), charges=(), **extra):
+    r = room(code)
+    data = {
+        "item_id": [str(i["id"]) for i in r["items"]],
+        "item_name": [i["raw_name"] for i in r["items"]],
+        "item_price": list(prices),
+        "currency": currency,
+        "charge_label": [c[0] for c in charges],
+        "charge_amount": [c[1] for c in charges],
+        "charge_kind": [c[2] for c in charges],
+        "tax_split_set": "1", "tax_proportional": "1",
+    }
+    data.update(extra)
+    return host.post(f"/edit/{code}", data=data)
+
+
+def test_manual_room_starts_in_rupees_with_starter_rows(client):
+    resp = client.post("/create", data={
+        "host_name": "Alice", "room_name": "Lunch", "num_people": "2", "skip_ocr": "true",
+    })
+    page = client.get(resp.headers["Location"]).get_data(as_text=True)
+    assert 'value="INR" selected' in page
+    for label in ("CGST", "SGST", "Service charge"):
+        assert f'data-starter="{label}"' in page
+    assert "Only changes the symbol. Amounts aren&#39;t converted." in page or "Amounts aren't converted" in page
+
+
+def test_created_from_a_confirmed_yen_scan(client):
+    code = make_room(client, items=[("Ramen", "1200"), ("Gyoza", "600"), ("Beer", "800")], extra={
+        "receipt_json": json.dumps({
+            "currency": {"code": "JPY", "confirmed": True},
+            "items": [{"name": "Ramen", "price": 1200}, {"name": "Gyoza", "price": 600}, {"name": "Beer", "price": 800}],
+            "charges": [{"label": "消費税", "amount": 234, "kind": "charge"}],
+            "total": 2834,
+        }),
+    })
+    r = room(code)
+    assert r["currency"]["code"] == "JPY"
+    assert [i["price"] for i in r["items"]] == ["¥1,200", "¥600", "¥800"]
+    assert r["ocr_data"]["charges"] == [{"label": "消費税", "amount": 234.0, "kind": "charge"}]
+    page = client.get(f"/edit/{code}").get_data(as_text=True)
+    assert 'value="JPY" selected' in page and 'value="消費税"' in page and "¥1,200" in page
+
+
+def test_edit_rows_and_currency_then_results_and_pdf():
+    code, host, bob, cara = _full_room()
+    resp = _edit(host, code, "JPY", prices=("1,200", "600", "800"), charges=[
+        ("消費税", "234", "charge"), ("Lunch set", "260", "discount"),
+        ("CGST", "", "charge"),                       # empty starter row: not saved
+    ], subtotal="2600", total="¥2,574")
+    assert resp.status_code == 302, resp.get_data(as_text=True)[:400]
+    ocr = room(code)["ocr_data"]
+    assert ocr["currency"] == "JPY" and ocr["total"] == 2574.0
+    assert ocr["charges"] == [
+        {"label": "消費税", "amount": 234.0, "kind": "charge"},
+        {"label": "Lunch set", "amount": 260.0, "kind": "discount"},
+    ]
+
+    submit(host, code, "Alice", ["Pasta"])
+    submit(bob, code, "Bob", ["Pizza"])
+    submit(cara, code, "Cara", ["Coke"])
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+
+    page = bob.get(f"/room/{code}/results").get_data(as_text=True)
+    assert "All square." in page and "¥2,574" in page
+    assert "¥1,188" in page                          # Alice: 1200 + 108 tax − 120 off
+    assert "消費税" in page and "Lunch set" in page and "₹" not in page
+    assert "Japanese Yen (JPY)" in page
+
+    pdf = bob.get(f"/room/{code}/download")
+    assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+
+
+def test_edit_refuses_decimals_the_currency_cannot_hold(client):
+    code = make_room(client)
+    resp = _edit(client, code, "JPY", prices=("200", "400.50", "100"))
+    assert resp.status_code == 400
+    page = resp.get_data(as_text=True)
+    assert "Japanese Yen amounts are whole numbers" in page
+    assert 'value="JPY" selected' in page and "400.50" in page          # what was typed stays
+    resp = _edit(client, code, "JPY", charges=[("Tip", "50.5", "charge")])
+    assert resp.status_code == 400 and "Tip: Japanese Yen amounts are whole numbers" in resp.get_data(as_text=True)
+    assert room(code)["currency"]["code"] == "INR"                      # nothing was saved
+
+
+def test_changing_only_the_currency_asks_people_to_reconfirm():
+    code, host, bob, cara = _full_room()
+    submit(bob, code, "Bob", ["Pasta"])
+    assert _edit(host, code, "INR", subtotal="700", total="700").status_code == 302
+    assert "Bob" in room(code)["submitted_users"]                       # same bill: picks stay
+    assert _edit(host, code, "USD", subtotal="700", total="700").status_code == 302
+    assert "Bob" not in room(code)["submitted_users"]                   # amounts mean something else now
+
+
+def test_help_page_for_currencies(client):
+    page = client.get("/help/currency").get_data(as_text=True)
+    assert "I never convert it" in page and "¥2,574" in page and 'role="radiogroup"' in page
+    assert "Other currencies" in client.get("/help").get_data(as_text=True)
+
+
+def test_pdf_prints_hindi_tamil_and_japanese_names():
+    host = new_client()
+    code = make_room(host, host="राहुल", num_people=2, extra={"receipt_json": json.dumps({
+        "currency": {"code": "INR", "confirmed": True},
+        "items": [{"name": "पनीर टिक्का", "price": 330}, {"name": "மசாலா தோசை", "price": 120},
+                  {"name": "醤油ラーメン", "price": 500}],
+        "charges": [{"label": "सेवा शुल्क", "amount": 50}],
+    })})
+    guest = new_client()
+    join(guest, code, "Meera")
+    submit(host, code, "राहुल", ["पनीर टिक्का", "醤油ラーメン"])
+    submit(guest, code, "Meera", ["மசாலா தோசை"])
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+    pdf = host.get(f"/room/{code}/download")
+    assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+    for font in (b"NotoSansDevanagari", b"NotoSansTamil", b"DroidSansFallback"):
+        assert font in pdf.data, font
+
+
+def test_english_pdf_embeds_no_extra_fonts():
+    code, host, bob, cara = _full_room()
+    for client, name in ((host, "Alice"), (bob, "Bob"), (cara, "Cara")):
+        submit(client, code, name, ["Pasta"])
+    post_json(host, f"/room/{code}/finalize")
+    pdf = host.get(f"/room/{code}/download").data
+    assert b"NotoSans" not in pdf and b"DroidSans" not in pdf

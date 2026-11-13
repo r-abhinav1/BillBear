@@ -26,11 +26,27 @@ from storage import RoomError  # noqa: E402
 from utils.bill_audit import audit_bill  # noqa: E402
 from utils.bill_split import calculate_bill_split  # noqa: E402
 from utils.image_prep import ImageRejected, prepare_receipt_image  # noqa: E402
+from utils.bill_totals import (  # noqa: E402
+    MAX_CHARGES,
+    as_number,
+    clean_charges,
+    read_bill,
+    starter_rows,
+    stored_charges,
+)
+from utils.money import (  # noqa: E402
+    DEFAULT_CURRENCY,
+    currency_choices,
+    format_amount,
+    format_money,
+    get_currency,
+    is_supported,
+)
 from utils.receipt_contracts import (  # noqa: E402
-    AMOUNT_FIELDS,
     normalize_item_category,
     normalize_receipt_payload,
 )
+from utils.pdf_text import FONT_DIR, families_in, font_face_css, font_path, install_shaping, pdf_text  # noqa: E402
 from utils.receipt_pipeline import VisionFailed, VisionUnavailable, extract_receipt_from_vision  # noqa: E402
 from utils.security import (  # noqa: E402
     RATE_LIMITS,
@@ -54,7 +70,6 @@ from utils.session import (  # noqa: E402
 from utils.validation import (  # noqa: E402
     clean_items,
     normalize_quantity,
-    format_price,
     normalize_person_name,
     normalize_room_name,
     parse_price,
@@ -102,6 +117,26 @@ app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 db.init_app(app)
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.template_filter("money")
+def _money_filter(value, code=None, pdf=False):
+    """{{ 1234.5 | money('INR') }} -> ₹1,234.50; with pdf=True, Rs. 1,234.50."""
+    return format_money(value, get_currency(code), pdf=pdf)
+
+
+@app.template_filter("amount")
+def _amount_filter(value, code=None):
+    """The number alone in a currency: {{ 1200 | amount('JPY') }} -> 1,200."""
+    return format_amount(value, get_currency(code))
+
+
+app.add_template_filter(pdf_text, "pdf_text")
+
+
+@app.context_processor
+def _currency_context():
+    return {"CURRENCY_CHOICES": currency_choices(), "MAX_CHARGES": MAX_CHARGES}
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +344,15 @@ def host_recovery_url(room_code: str):
 
 
 def _receipt_totals(normalized: dict) -> dict:
-    totals = {field: normalized.get(field, "N/A") for field in AMOUNT_FIELDS}
+    """A normalized receipt -> what rooms.ocr_data keeps (everything but the dishes)."""
+    totals = {
+        "currency": normalized["currency"]["code"],
+        "subtotal": normalized.get("subtotal"),
+        "total": normalized.get("total"),
+        "charges": normalized.get("charges") or [],
+    }
+    if normalized.get("taxSplit") in ("equal", "proportional"):
+        totals["taxSplit"] = normalized["taxSplit"]
     for field in ("restaurant", "date", "time"):
         value = normalized.get(field)
         if isinstance(value, str) and value:
@@ -339,16 +382,27 @@ _PDF_ASSETS = {
 
 
 def _pdf_link_callback(uri: str, rel: str) -> str:
-    """Resolve our own bundled images; block every other resource the HTML names."""
+    """Resolve our own bundled images and fonts; block every other resource the HTML names."""
     prefix = "bbasset/"
     if uri.startswith(prefix) and uri[len(prefix):] in _PDF_ASSETS:
         return os.path.join(_PDF_ASSET_DIR, uri[len(prefix):])
+    if uri.startswith("bbfont/"):
+        return font_path(uri[len("bbfont/"):]) or ""
     return ""
+
+
+def _pdf_fonts(room: dict, bill_split: dict):
+    """@font-face rules for the scripts this room's names and labels use, and nothing more."""
+    texts = [room["room_name"], room["host_name"], *bill_split["user_breakdown"].keys()]
+    texts += [item["name"] for item in room["items"]]
+    texts += [c["label"] for c in bill_split["totals"]["charges"]]
+    return font_face_css(families_in(texts))
 
 
 def generate_pdf_response(room: dict, room_code: str):
     bill_split = calculate_bill_split(room)
     all_square = all(w.get("severity") in ("ok", "note") for w in audit_bill(room, bill_split))
+    install_shaping()
     html = render_template(
         "results_pdf.html",
         room=room,
@@ -356,6 +410,7 @@ def generate_pdf_response(room: dict, room_code: str):
         bill_split=bill_split,
         all_square=all_square,
         current_date=datetime.now(),
+        font_faces=_pdf_fonts(room, bill_split),
     )
     buf = BytesIO()
     filename = f"{_safe_filename(room['room_name'])}_bill_split.pdf"
@@ -363,6 +418,7 @@ def generate_pdf_response(room: dict, room_code: str):
         from pathlib import Path
 
         html = html.replace("bbasset/", Path(_PDF_ASSET_DIR).as_uri() + "/")
+        html = html.replace("bbfont/", Path(FONT_DIR).as_uri() + "/")
         weasyprint.HTML(string=html).write_pdf(buf)
     elif XHTML2PDF_AVAILABLE:
         status = pisa.CreatePDF(html, dest=buf, link_callback=_pdf_link_callback)
@@ -390,6 +446,7 @@ HELP_TOPICS = [
     {"slug": "basics", "title": "The basics", "blurb": "From scan to split in five steps"},
     {"slug": "sharing", "title": "Shared or yours", "blurb": "When the bill has several of one dish"},
     {"slug": "tax", "title": "Tax and service", "blurb": "Who pays how much of the charges"},
+    {"slug": "currency", "title": "Other currencies", "blurb": "Bills from abroad, and why nothing is converted"},
     {"slug": "host", "title": "For the host", "blurb": "Everything you can do in the room"},
     {"slug": "scan", "title": "The scan", "blurb": "How Bear reads the bill, and where it slips"},
 ]
@@ -474,9 +531,14 @@ def scan_receipt():
             f"{exc} Try a clearer, well-lit photo, or enter items manually.", 502, "SCAN_FAILED"
         )
 
-    items = clean_items(receipt.get("items"))
+    # The pipeline already normalizes; again here, so a stubbed or older
+    # provider result has the same shape. A model can't mark its own currency
+    # as confirmed: only the host's tap does.
+    receipt = normalize_receipt_payload(receipt)
+    currency = get_currency(receipt["currency"]["code"])
+    items = clean_items(receipt.get("items"), currency=currency)
     receipt["items"] = [
-        {"name": i["name"], "price": format_price(i["price"]), "category": i["category"],
+        {"name": i["name"], "price": as_number(i["price"]), "category": i["category"],
          "quantity": i["quantity"]}
         for i in items
     ]
@@ -543,8 +605,10 @@ def create_room():
             meta_source = (receipt.get("extraction_meta") or {}).get("source")
             source = meta_source if meta_source in {"vision_llm", "user_saved_json"} else "client_json"
 
-        normalized = normalize_receipt_payload(receipt)
-        items = clean_items(normalized.get("items"))
+        # The host's browser only posts a receipt once its currency is confirmed
+        # (or a saved scan, whose currency the host already chose).
+        normalized = normalize_receipt_payload(receipt, trust_confirmation=True)
+        items = clean_items(normalized.get("items"), currency=get_currency(normalized["currency"]["code"]))
     except ValueError as exc:
         return _render_create(mode, str(exc), 400, form)
 
@@ -560,6 +624,69 @@ def create_room():
     set_session_cookie(response, code, host_uid, host_name)
     set_hostkey_cookie(response, code, recovery_token)
     return response
+
+
+def _edited_totals(form, rows: list, charge_rows: list) -> dict:
+    """
+    The edit form -> ocr_data totals (plus the cleaned dishes under "_items").
+    Raises ValueError with a message for the host on anything it can't use.
+    """
+    code = (form.get("currency") or DEFAULT_CURRENCY).strip().upper()
+    if not is_supported(code):
+        raise ValueError("Pick a currency from the list.")
+    currency = get_currency(code)
+    items = clean_items(rows, strict_prices=True, currency=currency)
+    amounts = {}
+    for field, label in (("subtotal", "Items subtotal"), ("total", "Bill total")):
+        try:
+            amounts[field] = parse_price(form.get(field), currency, strict=True)
+        except ValueError as exc:
+            raise ValueError(f"{label}: {exc}")
+    base = amounts["subtotal"]
+    if base is None:
+        base = sum((i["price"] for i in items if i["price"] is not None), start=parse_price(0))
+    charges = clean_charges(charge_rows, currency, strict=True, percent_base=base)
+    totals = {
+        "_items": items,
+        "currency": code,
+        "subtotal": as_number(amounts["subtotal"]),
+        "total": as_number(amounts["total"]),
+        "charges": stored_charges(charges),
+    }
+    # The switch is a checkbox, so "off" arrives as a missing field; the
+    # marker says the form had the switch at all.
+    if "tax_split_set" in form:
+        totals["taxSplit"] = "proportional" if form.get("tax_proportional") else "equal"
+    return totals
+
+
+def _edit_view(room: dict) -> dict:
+    """What the edit screen shows for a room: amounts as the host would type them."""
+    bill = read_bill(room["ocr_data"])
+    currency = bill["currency"]
+
+    def shown(amount):
+        return "" if amount is None else format_money(amount, currency)
+
+    charges = [
+        {"label": c["label"], "amount": shown(c["amount"]), "kind": c["kind"]} for c in bill["charges"]
+    ]
+    if not charges:
+        # Empty starter rows (CGST, SGST, Service charge for rupees). Rows left
+        # empty are not saved.
+        charges = [dict(row, amount="", starter=True) for row in starter_rows(currency.code)]
+    return {
+        "currency": currency.code,
+        "subtotal": shown(bill["subtotal"]),
+        "total": shown(bill["total"]),
+        "charges": charges,
+        "taxSplit": bill["tax_split"],
+        "items": [
+            {"id": i["id"], "name": i["raw_name"], "price": shown(i["amount"]), "category": i["category"],
+             "quantity": i["quantity"]}
+            for i in room["items"]
+        ],
+    }
 
 
 @app.route("/edit/<room_code>", methods=["GET", "POST"])
@@ -578,57 +705,63 @@ def edit_items(room_code):
         ), 409
 
     error = ""
+    form = request.form
     if request.method == "POST":
-        ids = request.form.getlist("item_id")
-        names = request.form.getlist("item_name")
-        prices = request.form.getlist("item_price")
-        categories = request.form.getlist("item_category")
-        quantities = request.form.getlist("item_quantity")
+        ids = form.getlist("item_id")
+        names = form.getlist("item_name")
+        prices = form.getlist("item_price")
+        categories = form.getlist("item_category")
+        quantities = form.getlist("item_quantity")
         rows = [
             {"id": item_id, "name": name, "price": price, "category": category, "quantity": quantity}
             for item_id, name, price, category, quantity in zip_longest(ids, names, prices, categories, quantities)
             if name is not None
         ]
+        charge_rows = [
+            {"label": label, "amount": amount, "kind": kind}
+            for label, amount, kind in zip_longest(
+                form.getlist("charge_label"), form.getlist("charge_amount"), form.getlist("charge_kind")
+            )
+        ]
         try:
-            items = clean_items(rows, strict_prices=True)
-            totals = {}
-            for field in AMOUNT_FIELDS:
-                totals[field] = format_price(parse_price(request.form.get(field)))
-            # The switch is a checkbox, so "off" arrives as a missing field; the
-            # marker says the form had the switch at all.
-            if "tax_split_set" in request.form:
-                totals["taxSplit"] = "proportional" if request.form.get("tax_proportional") else "equal"
+            totals = _edited_totals(form, rows, charge_rows)
+            items = totals.pop("_items")
         except ValueError as exc:
             error = str(exc)
         else:
             storage.replace_items(code, items, totals)
             return redirect(url_for("room_summary", room_code=code))
 
-    view = dict(room["ocr_data"])
-    view["items"] = [
-        {"id": i["id"], "name": i["raw_name"], "price": i["price"], "category": i["category"],
-         "quantity": i["quantity"]}
-        for i in room["items"]
-    ]
     if error:
-        # Re-show what the host typed so one bad price doesn't wipe their edits.
-        view["items"] = [
-            {
-                "id": r["id"],
-                "name": r["name"],
-                "price": r["price"] or "",
-                "category": normalize_item_category(r["category"]),
-                "quantity": normalize_quantity(r["quantity"]),
-            }
-            for r in rows
-        ]
-        view.update({field: request.form.get(field, "N/A") for field in AMOUNT_FIELDS})
-        if "tax_split_set" in request.form:
-            view["taxSplit"] = "proportional" if request.form.get("tax_proportional") else "equal"
+        # Re-show what the host typed so one bad amount doesn't wipe their edits.
+        view = {
+            "currency": form.get("currency") if is_supported(form.get("currency")) else room["currency"]["code"],
+            "subtotal": form.get("subtotal", ""),
+            "total": form.get("total", ""),
+            "charges": [
+                {"label": r["label"] or "", "amount": r["amount"] or "",
+                 "kind": "discount" if r["kind"] == "discount" else "charge"}
+                for r in charge_rows
+            ],
+            "taxSplit": "proportional" if form.get("tax_proportional") else "equal",
+            "items": [
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "price": r["price"] or "",
+                    "category": normalize_item_category(r["category"]),
+                    "quantity": normalize_quantity(r["quantity"]),
+                }
+                for r in rows
+            ],
+        }
+    else:
+        view = _edit_view(room)
     return render_template(
         "edit_items.html",
         room_code=code,
         items=view,
+        currency=get_currency(view["currency"]).public(),
         error=error,
         submitted_count=len(room["submitted_users"]),
     ), (400 if error else 200)

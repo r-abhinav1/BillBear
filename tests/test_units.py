@@ -429,8 +429,13 @@ def test_taxes_follow_what_each_person_had_by_default():
     split = calculate_bill_split(_taxed_room())
     people = split["user_breakdown"]
     assert split["totals"]["tax_split"] == "proportional"
-    assert (people["Asha"]["service_charge"], people["Asha"]["cgst"], people["Asha"]["sgst"]) == (30.0, 15.0, 15.0)
-    assert (people["Bala"]["service_charge"], people["Bala"]["cgst"], people["Bala"]["sgst"]) == (10.0, 5.0, 5.0)
+    def rows(name):
+        return [(c["label"], c["amount"]) for c in people[name]["charges"]]
+
+    # The room's old fixed fields (serviceCharge, cgst, sgst) are read as rows.
+    assert rows("Asha") == [("Service charge", 30.0), ("CGST", 15.0), ("SGST", 15.0)]
+    assert rows("Bala") == [("Service charge", 10.0), ("CGST", 5.0), ("SGST", 5.0)]
+    assert people["Chitra"]["charges"] == []
     assert people["Asha"]["final_amount"] == 360.0 and people["Bala"]["final_amount"] == 120.0
     assert people["Chitra"]["final_amount"] == 0.0          # picked nothing, owes nothing
     assert split["totals"]["grand_total"] == 480.0

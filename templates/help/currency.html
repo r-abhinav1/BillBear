@@ -1,0 +1,132 @@
+{% extends 'help/_layout.html' %}
+{% from 'help/_layout.html' import say, tag with context %}
+{% set DEMO = [('Ramen', 1200), ('Gyoza', 600), ('Beer', 800)] %}
+{% set DEMO_CHARGES = [('消費税 10%', 234, 'charge'), ('Lunch set discount', 260, 'discount')] %}
+{% set DEMO_STAMPS = ['JPY', 'INR', 'EUR', 'USD'] %}
+{% set BY_CODE = {} %}{% for c in CURRENCY_CHOICES %}{% set _ = BY_CODE.update({c.code: c}) %}{% endfor %}
+{% block topic %}
+    {{ say("I show a bill in the money it was printed in. I never convert it.") }}
+
+    {# The one moving part of the page: tap a stamp and only the symbols change. #}
+    <section class="receipt swap" id="swapDemo">
+        <div class="paper stack">
+            <div class="swap__head">
+                <h2>Dinner in Tokyo</h2>
+                <div class="swap__stamps" role="radiogroup" aria-label="Show this bill in">
+                    {% for code in DEMO_STAMPS %}
+                    <button type="button" class="swap__stamp" role="radio" data-code="{{ code }}"
+                            aria-checked="{{ 'true' if loop.first else 'false' }}" aria-label="{{ BY_CODE[code].name }}">{{ BY_CODE[code].symbol }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="lines">
+                {% for name, price in DEMO %}
+                <div class="line"><span>{{ name }}</span><span class="swap__amt" data-amount="{{ price }}">{{ price | money('JPY') }}</span></div>
+                {% endfor %}
+                <hr class="dash">
+                {% for label, price, kind in DEMO_CHARGES %}
+                <div class="line line--muted"><span>{{ label }}</span><span class="swap__amt" data-amount="{{ -price if kind == 'discount' else price }}">{{ (-price if kind == 'discount' else price) | money('JPY') }}</span></div>
+                {% endfor %}
+                <hr class="dash dash--ink">
+                <div class="line line--total"><span>Bill total</span><span class="swap__amt" data-amount="2574">{{ 2574 | money('JPY') }}</span></div>
+            </div>
+            <p class="swap__caption" id="swapCaption" aria-live="polite">Tap another symbol. The numbers stay put: picking a currency only changes the symbol and how many decimals show.</p>
+        </div>
+        <div class="tear"></div>
+    </section>
+
+    <section class="card stack">
+        <h2>When Bear asks about the currency</h2>
+        <div class="currency-ask currency-ask--mock" aria-hidden="true">
+            <span class="currency-ask__stamp">¥</span>
+            <div class="currency-ask__body">
+                <p class="currency-ask__q">Looks like <b>Japanese Yen</b>. Right?</p>
+                <p class="currency-ask__why">Bear saw: ¥ symbol, Japanese text, 消費税 line</p>
+                <div class="currency-ask__actions"><span class="btn btn--primary">Yes</span><span class="btn">Change</span></div>
+            </div>
+        </div>
+        <ul class="points">
+            <li>A bill with GST lines, a ₹ sign or an Indian address is in rupees, and nobody is asked.</li>
+            <li>Anything else needs one tap before the room opens. Without it, a ¥1,200 bill would quietly show as ₹1,200.</li>
+            <li>Change shows Bear's other guesses (a ¥ sign alone could be yen or yuan) and the full list.</li>
+            <li>Entering the bill yourself starts in rupees. Pick another currency at the top of Check the bill.</li>
+        </ul>
+    </section>
+
+    <section class="card stack">
+        <h2>Shares that add up exactly</h2>
+        <p class="help__small">Yen has no coins smaller than ¥1, so ¥1,000 split three ways can't be ¥333.33 each.</p>
+        <div class="compare">
+            <div class="compare__box">
+                <b>Each rounded alone</b><span>one yen goes missing</span>
+                <p>¥333<br>¥333<br>¥333<br>= ¥999</p>
+            </div>
+            <div class="compare__box compare__box--on">
+                <b>What BillBear does</b><span>adds up to the bill</span>
+                <p>¥334<br>¥333<br>¥333<br>= ¥1,000</p>
+            </div>
+        </div>
+        <p class="help__small">The leftover goes to whoever lost the most in rounding. When that's a tie, it goes to whoever joined the room first. Rupee bills work the same way, to the paisa.</p>
+    </section>
+
+    <section class="card stack">
+        <h2>Typing amounts</h2>
+        <ul class="points">
+            <li>Yen, won and rupiah amounts are whole numbers. An amount like ¥12.50 is marked in red until it's fixed.</li>
+            <li>12,50 is read as 12.50, the way it's written in Europe. 1,234 is still one thousand two hundred and thirty-four.</li>
+            <li>The bill total may differ by the bill's own rounding (up to ₹1, or 5 Rappen in Switzerland) without a warning.</li>
+            <li>The PDF writes the currency's code instead of its sign (JPY 2,574), because its fonts have no ¥ or ₹.</li>
+        </ul>
+        <details class="fold">
+            <summary>Currencies BillBear knows ({{ CURRENCY_CHOICES | length }})</summary>
+            <ul class="currency-list">
+                {% for c in CURRENCY_CHOICES %}
+                <li><span class="mono">{{ c.symbol }}</span> {{ c.name }}</li>
+                {% endfor %}
+            </ul>
+        </details>
+    </section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/money.js') }}"></script>
+<script>
+    (function () {
+        const CURRENCIES = Object.fromEntries({{ CURRENCY_CHOICES | tojson }}.map(c => [c.code, c]));
+        const demo = document.getElementById('swapDemo');
+        const caption = document.getElementById('swapCaption');
+        const stamps = Array.from(demo.querySelectorAll('.swap__stamp'));
+        const amounts = Array.from(demo.querySelectorAll('.swap__amt'));
+
+        function show(code, announce) {
+            const cur = CURRENCIES[code];
+            stamps.forEach(s => s.setAttribute('aria-checked', s.dataset.code === code ? 'true' : 'false'));
+            amounts.forEach(el => {
+                el.textContent = BBMoney.format(parseFloat(el.dataset.amount), cur);
+                el.classList.remove('is-flipped');
+                void el.offsetWidth;  // restart the flip
+                el.classList.add('is-flipped');
+            });
+            if (announce) {
+                caption.textContent = code === 'JPY'
+                    ? 'Back in yen, as printed. Whole numbers, no decimals.'
+                    : `Now in ${cur.name}: the same 2,574, with ${cur.decimals ? cur.decimals + ' decimals' : 'no decimals'}. Nothing was converted, so pick the currency printed on the bill.`;
+            }
+        }
+
+        stamps.forEach((stamp, i) => {
+            stamp.addEventListener('click', () => show(stamp.dataset.code, true));
+            // Arrow keys move between the stamps, like any radio group.
+            stamp.addEventListener('keydown', (e) => {
+                const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+                if (!step) return;
+                e.preventDefault();
+                const next = stamps[(i + step + stamps.length) % stamps.length];
+                next.focus();
+                show(next.dataset.code, true);
+            });
+            stamp.tabIndex = i === 0 ? 0 : -1;
+        });
+        demo.addEventListener('focusin', () => stamps.forEach(s => { s.tabIndex = s.getAttribute('aria-checked') === 'true' ? 0 : -1; }));
+    })();
+</script>
+{% endblock %}

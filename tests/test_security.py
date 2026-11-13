@@ -192,9 +192,26 @@ def test_scan_success_with_ticket(monkeypatch):
     c.get("/create")  # issues the scan ticket
     resp = _scan(c, _jpeg_bytes())
     assert resp.status_code == 200, resp.get_json()
-    assert resp.get_json()["receipt"]["items"] == [
-        {"name": "Tea <script>", "price": "₹30.00", "category": "other", "quantity": 1}
+    receipt = resp.get_json()["receipt"]
+    assert receipt["items"] == [
+        {"name": "Tea <script>", "price": 30.0, "category": "other", "quantity": 1}
     ]
+    # No currency clue at all: rupees is only a guess, so the host is asked.
+    assert receipt["currency"]["code"] == "INR" and receipt["currency"]["confirmed"] is False
+
+
+def test_scan_cannot_confirm_its_own_currency(monkeypatch):
+    """Text on the photo could make the model claim the currency is settled; only the host's tap counts."""
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {
+        "items": [{"name": "Ramen", "price": 1200}],
+        "currency": {"code": "JPY", "confirmed": True, "evidence": ["symbol"]},
+    })
+    c = new_client()
+    c.get("/create")
+    currency = _scan(c, _jpeg_bytes()).get_json()["receipt"]["currency"]
+    assert currency["code"] == "JPY" and currency["confirmed"] is False
 
 
 def test_scan_rejects_non_image():

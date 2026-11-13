@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% import '_ui.html' as ui %}
 {% set t = bill_split.totals %}
+{% set cur = t.currency %}
 {% set people = bill_split.user_breakdown %}
 {% set cats = {} %}
 {% set qtys = {} %}
@@ -31,7 +32,7 @@
             <h1>All square.</h1>
             <p class="lede" style="margin-top: 8px">
                 {{ people | length }} {{ 'share adds' if people | length == 1 else 'shares add' }} up to
-                <span class="mono" style="font-weight: 600">₹{{ "%.2f" | format(t.grand_total) }}</span>.
+                <span class="mono" style="font-weight: 600">{{ t.grand_total | money(cur) }}</span>.
             </p>
             {% endif %}
         </div>
@@ -45,26 +46,24 @@
             <div class="paper stack" style="gap: 10px">
                 <div class="row row--between" style="align-items: baseline">
                     <h2 style="font-size: 1.45rem; font-weight: 800; overflow-wrap: anywhere">{{ user }} pays</h2>
-                    <span class="stub__total">₹{{ "%.2f" | format(d.final_amount) }}</span>
+                    <span class="stub__total">{{ d.final_amount | money(cur) }}</span>
                 </div>
                 <hr class="dash dash--ink">
                 <div class="lines">
                     {% for item in d.item_details %}
                     <div class="line">
                         <span class="with-diet">{{ ui.diet(cats.get(item.name, 'other')) }}<span>{{ item.name }}
-                            {%- if item.mode == 'units' %}<span class="line__calc">{{ item.portions }} of {{ item.quantity }}, ₹{{ "%.2f" | format(item.unit_price) }} each</span>
+                            {%- if item.mode == 'units' %}<span class="line__calc">{{ item.portions }} of {{ item.quantity }}, {{ item.unit_price | money(cur) }} each</span>
                             {%- elif item.mode == 'shared' %}<span class="line__calc">{{ 'all' if item.unclaimed == item.quantity else item.unclaimed ~ ' of' }} {{ item.quantity }} shared {{ item.sharers }} {{ 'way' if item.sharers == 1 else 'ways' }}</span>
-                            {%- elif item.shared_by > 1 %}<span class="line__calc">₹{{ "%.2f" | format(item.full_price) }} split {{ item.shared_by }} ways</span>{% endif %}</span></span>
-                        <span>{{ "%.2f" | format(item.your_share) }}</span>
+                            {%- elif item.shared_by > 1 %}<span class="line__calc">{{ item.full_price | money(cur) }} split {{ item.shared_by }} ways</span>{% endif %}</span></span>
+                        <span>{{ item.your_share | amount(cur) }}</span>
                     </div>
                     {% else %}
                     <p class="fineprint">Nothing picked.</p>
                     {% endfor %}
-                    {% if d.service_charge > 0 %}<div class="line line--muted"><span>Service charge</span><span>{{ "%.2f" | format(d.service_charge) }}</span></div>{% endif %}
-                    {% if d.cgst > 0 %}<div class="line line--muted"><span>CGST</span><span>{{ "%.2f" | format(d.cgst) }}</span></div>{% endif %}
-                    {% if d.sgst > 0 %}<div class="line line--muted"><span>SGST</span><span>{{ "%.2f" | format(d.sgst) }}</span></div>{% endif %}
-                    {% if d.igst > 0 %}<div class="line line--muted"><span>IGST</span><span>{{ "%.2f" | format(d.igst) }}</span></div>{% endif %}
-                    {% if d.discount > 0 %}<div class="line line--muted"><span>Discount</span><span>-{{ "%.2f" | format(d.discount) }}</span></div>{% endif %}
+                    {% for c in d.charges %}
+                    <div class="line line--muted"><span>{{ c.label }}</span><span>{{ '-' if c.kind == 'discount' }}{{ c.amount | amount(cur) }}</span></div>
+                    {% endfor %}
                 </div>
                 <p class="fineprint">{% if user == caller_name %}Your share. {% endif %}{{ d.percentage }}% of the dishes</p>
             </div>
@@ -74,14 +73,17 @@
     </div>
 
     <section class="outline-box lines">
-        <div class="line line--muted"><span>Dishes</span><span>{{ "%.2f" | format(t.subtotal) }}</span></div>
-        {% if t.service_charge > 0 %}<div class="line line--muted"><span>Service charge</span><span>{{ "%.2f" | format(t.service_charge) }}</span></div>{% endif %}
-        {% if t.discount > 0 %}<div class="line line--muted"><span>Discount</span><span>-{{ "%.2f" | format(t.discount) }}</span></div>{% endif %}
-        {% if (t.cgst + t.sgst + t.igst) > 0 %}<div class="line line--muted"><span>{% if t.igst > 0 %}GST (CGST, SGST, IGST){% else %}CGST and SGST{% endif %}</span><span>{{ "%.2f" | format(t.cgst + t.sgst + t.igst) }}</span></div>{% endif %}
+        <div class="line line--muted"><span>Dishes</span><span>{{ t.subtotal | amount(cur) }}</span></div>
+        {% for c in t.charges %}
+        <div class="line line--muted"><span>{{ c.label }}</span><span>{{ '-' if c.kind == 'discount' }}{{ c.amount | amount(cur) }}</span></div>
+        {% endfor %}
         <hr class="dash" style="border-top-color: currentColor">
-        <div class="line line--total"><span>Bill total</span><span>₹{{ "%.2f" | format(t.grand_total) }}</span></div>
-        {% if (t.service_charge + t.cgst + t.sgst + t.igst) > 0 %}
-        <p class="fineprint" style="margin-top: 8px">Taxes and service charge are split {{ 'equally between everyone who ordered' if t.tax_split == 'equal' else 'by what each person had' }}.</p>
+        <div class="line line--total"><span>Bill total</span><span>{{ t.grand_total | money(cur) }}</span></div>
+        {% if t.has_charges %}
+        <p class="fineprint" style="margin-top: 8px">Taxes and charges are split {{ 'equally between everyone who ordered' if t.tax_split == 'equal' else 'by what each person had' }}.</p>
+        {% endif %}
+        {% if cur != 'INR' %}
+        <p class="fineprint" style="margin-top: 4px">Amounts in {{ room.currency.name }} ({{ cur }}), as printed on the bill.</p>
         {% endif %}
     </section>
 

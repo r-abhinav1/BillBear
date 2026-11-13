@@ -1,6 +1,8 @@
 {#- PDF of the split. Rendered by xhtml2pdf in production, so the layout is
-    tables only, with the built-in Helvetica and Courier (no rupee glyph: "Rs."). -#}
+    tables only, with the built-in Helvetica and Courier. Those fonts have no
+    ₹, ¥ or ฿, so totals carry the currency's plain prefix ("Rs.", "JPY"). -#}
 {%- set t = bill_split.totals -%}
+{%- set cur = t.currency -%}
 {%- set people = bill_split.user_breakdown -%}
 {%- set MARKS = {'veg': 'Veg', 'nonveg': 'Non-veg', 'egg': 'Egg', 'alcohol': 'Alcohol'} -%}
 {%- set cats = {} -%}
@@ -12,7 +14,8 @@
 {%- set two_up = ns.longest <= 16 and people | length > 1 -%}
 {%- set bill_side_by_side = room['items'] | length <= 18 -%}
 
-{%- macro money(value) -%}{{ "{:,.2f}".format(value) }}{%- endmacro -%}
+{%- macro money(value) -%}{{ value | amount(cur) }}{%- endmacro -%}
+{%- macro total_money(value) -%}{{ value | money(cur, pdf=True) }}{%- endmacro -%}
 
 {%- macro mark(category) -%}
 {%- if category in MARKS -%}<img src="bbasset/pdf-{{ category }}.png" width="{{ 10 if category == 'alcohol' else 8 }}" height="{{ 10 if category == 'alcohol' else 8 }}" style="vertical-align: middle" alt="{{ MARKS[category] }}">&nbsp;{%- elif ns.marked -%}<img src="bbasset/pdf-blank.png" width="8" height="8" style="vertical-align: middle" alt="">&nbsp;{% endif -%}
@@ -29,23 +32,20 @@
 {%- macro person_block(user, d) -%}
 <table cellspacing="0">
     <tr>
-        <td class="person-name box-l box-t" width="46%">{{ user }}</td>
-        <td class="person-total box-r box-t" width="54%">Rs. {{ money(d.final_amount) }}</td>
+        <td class="person-name box-l box-t" width="46%">{{ user | pdf_text }}</td>
+        <td class="person-total box-r box-t" width="54%">{{ total_money(d.final_amount) }}</td>
     </tr>
 </table>
 <table cellspacing="0">
     {% for item in d.item_details %}
     <tr>
-        <td class="line box-l" width="72%">{{ mark(cats.get(item.name)) }}{{ item.name }}{% if item.mode == 'units' %} <span class="soft">({{ item.portions }} of {{ item.quantity }})</span>{% elif item.mode == 'shared' %} <span class="soft">(shared {{ item.sharers }} {{ 'way' if item.sharers == 1 else 'ways' }})</span>{% elif item.shared_by > 1 %} <span class="soft">(1 of {{ item.shared_by }})</span>{% endif %}</td>
+        <td class="line box-l" width="72%">{{ mark(cats.get(item.name)) }}{{ item.name | pdf_text }}{% if item.mode == 'units' %} <span class="soft">({{ item.portions }} of {{ item.quantity }})</span>{% elif item.mode == 'shared' %} <span class="soft">(shared {{ item.sharers }} {{ 'way' if item.sharers == 1 else 'ways' }})</span>{% elif item.shared_by > 1 %} <span class="soft">(1 of {{ item.shared_by }})</span>{% endif %}</td>
         <td class="amount box-r" width="28%">{{ money(item.your_share) }}</td>
     </tr>
     {% else %}
     {{ charge('Nothing picked', '&nbsp;' | safe) }}
     {% endfor %}
-    {% if d.service_charge > 0 %}{{ charge('Service charge', money(d.service_charge)) }}{% endif %}
-    {% if (d.cgst + d.sgst) > 0 %}{{ charge('CGST and SGST', money(d.cgst + d.sgst)) }}{% endif %}
-    {% if d.igst > 0 %}{{ charge('IGST', money(d.igst)) }}{% endif %}
-    {% if d.discount > 0 %}{{ charge('Discount', '-' + money(d.discount)) }}{% endif %}
+    {% for c in d.charges %}{{ charge(c.label | pdf_text, ('-' if c.kind == 'discount' else '') ~ money(c.amount)) }}{% endfor %}
     <tr><td class="box-l box-b last" width="72%">&nbsp;</td><td class="box-r box-b last" width="28%">&nbsp;</td></tr>
 </table>
 {{ space(12) }}
@@ -55,8 +55,8 @@
 <table cellspacing="0">
     {% for item in room['items'] %}
     <tr>
-        <td class="plain-line" width="72%">{{ mark(item.category) }}{{ item.name }}{% if item.quantity > 1 %} <span class="soft">x{{ item.quantity }}</span>{% endif %}</td>
-        <td class="plain-amount" width="28%">{{ item.price | replace('₹', '') }}</td>
+        <td class="plain-line" width="72%">{{ mark(item.category) }}{{ item.name | pdf_text }}{% if item.quantity > 1 %} <span class="soft">x{{ item.quantity }}</span>{% endif %}</td>
+        <td class="plain-amount" width="28%">{{ money(item.amount) if item.amount is not none else 'N/A' }}</td>
     </tr>
     {% endfor %}
 </table>
@@ -69,12 +69,8 @@
 {%- macro totals_table() -%}
 <table cellspacing="0">
     {{ total_row('Dishes', money(t.subtotal)) }}
-    {% if t.service_charge > 0 %}{{ total_row('Service charge', money(t.service_charge)) }}{% endif %}
-    {% if t.cgst > 0 %}{{ total_row('CGST', money(t.cgst)) }}{% endif %}
-    {% if t.sgst > 0 %}{{ total_row('SGST', money(t.sgst)) }}{% endif %}
-    {% if t.igst > 0 %}{{ total_row('IGST', money(t.igst)) }}{% endif %}
-    {% if t.discount > 0 %}{{ total_row('Discount', '-' + money(t.discount)) }}{% endif %}
-    <tr><td class="grand" width="50%">Bill total</td><td class="grand grand-amount" width="50%">Rs. {{ money(t.grand_total) }}</td></tr>
+    {% for c in t.charges %}{{ total_row(c.label | pdf_text, ('-' if c.kind == 'discount' else '') ~ money(c.amount)) }}{% endfor %}
+    <tr><td class="grand" width="50%">Bill total</td><td class="grand grand-amount" width="50%">{{ total_money(t.grand_total) }}</td></tr>
 </table>
 {%- endmacro -%}
 <!DOCTYPE html>
@@ -83,6 +79,7 @@
 <meta charset="UTF-8">
 <title>{{ room['room_name'] }}, split with BillBear</title>
 <style>
+    {{ font_faces }}
     @page {
         size: a4 portrait;
         margin: 1.5cm 1.6cm 1.8cm 1.6cm;
@@ -126,12 +123,12 @@
     <tr>
         <td style="width: 54pt"><img src="bbasset/pdf-bear.png" width="46" height="60" alt=""></td>
         <td style="vertical-align: middle">
-            <div class="title">{{ room['room_name'] }}</div>
+            <div class="title">{{ room['room_name'] | pdf_text }}</div>
             <div class="subtitle">Split with BillBear</div>
         </td>
         <td class="meta" style="width: 32%; vertical-align: middle">
             Room {{ room_code }}<br>
-            Hosted by {{ room['host_name'] }}<br>
+            Hosted by {{ room['host_name'] | pdf_text }}<br>
             {{ current_date.strftime('%d %b %Y, %I:%M %p') }}
         </td>
     </tr>
@@ -143,7 +140,7 @@
 <table cellspacing="0">
     <tr>
         <td class="heading">Who pays what</td>
-        <td class="heading-note">Bill total <span class="mono strong">Rs. {{ money(t.grand_total) }}</span>, split between {{ people | length }} {{ 'person' if people | length == 1 else 'people' }}</td>
+        <td class="heading-note">Bill total <span class="mono strong">{{ total_money(t.grand_total) }}</span>, split between {{ people | length }} {{ 'person' if people | length == 1 else 'people' }}</td>
     </tr>
 </table>
 {{ space(12) }}
@@ -183,7 +180,7 @@
 <div id="footer">
     <table cellspacing="0">
         <tr>
-            <td class="footer">{% if all_square %}Shares add up to the bill total. {% endif %}{% if (t.service_charge + t.cgst + t.sgst + t.igst) > 0 %}Taxes and service charge split {{ 'equally' if t.tax_split == 'equal' else 'by what each person had' }}. {% endif %}Amounts in rupees.</td>
+            <td class="footer">{% if all_square %}Shares add up to the bill total. {% endif %}{% if t.has_charges %}Taxes and charges split {{ 'equally' if t.tax_split == 'equal' else 'by what each person had' }}. {% endif %}Amounts in {{ 'rupees' if cur == 'INR' else room.currency.name ~ ' (' ~ cur ~ ')' }}, as on the bill.</td>
             <td class="footer" style="text-align: right">billbear.vercel.app</td>
         </tr>
     </table>

@@ -1,23 +1,11 @@
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
-CURRENCY_SYMBOL = "₹"
+from .bill_totals import clean_charges, has_gst_marker, legacy_charges, stored_charges
+from .money import DEFAULT_CURRENCY, get_currency, is_supported, parse_money
+
 MISSING_VALUE = "N/A"
-AMOUNT_FIELDS = ("subtotal", "serviceCharge", "discount", "cgst", "sgst", "igst", "total")
-
-BASE_RECEIPT_TEMPLATE: Dict[str, Any] = {
-    "restaurant": MISSING_VALUE,
-    "date": MISSING_VALUE,
-    "time": MISSING_VALUE,
-    "items": [],
-    "subtotal": MISSING_VALUE,
-    "serviceCharge": MISSING_VALUE,
-    "discount": MISSING_VALUE,
-    "cgst": MISSING_VALUE,
-    "sgst": MISSING_VALUE,
-    "igst": MISSING_VALUE,
-    "total": MISSING_VALUE,
-}
 
 # Dietary class of a line item. "other" covers non-food lines (cover charge,
 # board games) and anything the scanner could not tell.
@@ -51,9 +39,6 @@ def normalize_item_category(value: Any) -> str:
     return key if key in ITEM_CATEGORIES else DEFAULT_ITEM_CATEGORY
 
 
-AMOUNT_PATTERN = re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
-
-
 def is_missing_value(value: Any) -> bool:
     if value is None:
         return True
@@ -63,46 +48,101 @@ def is_missing_value(value: Any) -> bool:
     return False
 
 
-def parse_numeric_amount(value: Any) -> Optional[float]:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        cleaned = value.replace(CURRENCY_SYMBOL, "").replace(",", "").strip()
-        if not cleaned:
-            return None
-        matches = AMOUNT_PATTERN.findall(cleaned)
-        if not matches:
-            return None
-        try:
-            return float(matches[-1].replace(",", ""))
-        except ValueError:
-            return None
-    return None
-
-
-def format_currency(amount: float) -> str:
-    return f"{CURRENCY_SYMBOL}{amount:.2f}"
-
-
 def _normalize_text_field(value: Any) -> str:
     if is_missing_value(value):
         return MISSING_VALUE
     return str(value).strip() or MISSING_VALUE
 
 
-def normalize_receipt_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+# Kinds of clue a model may say it used for the currency. Only the ones that
+# are printed facts (a symbol or code, tax labels, an address or phone number)
+# can settle "rupees" without asking; language alone can't (Hindi is also
+# written in Nepal, English everywhere).
+CURRENCY_EVIDENCE = ("symbol", "tax_labels", "language", "address")
+_SETTLES_INR = {"symbol", "tax_labels", "address"}
+REASON_MAX = 120
+
+
+def _clean_reason(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\x7f]", "", value)).strip()[:REASON_MAX]
+
+
+def normalize_currency(raw: Any, charges: List[Dict[str, Any]], trust_confirmation: bool) -> Dict[str, Any]:
+    """
+    {code, confirmed, reason, alternatives} for a receipt.
+
+    `confirmed` says whether the host still has to say yes to the currency
+    before the room is created. Rupees are settled without asking when the
+    bill shows GST lines, or the model saw a printed rupee sign, tax labels
+    or an Indian address. Any other currency, or rupees on a guess, needs one
+    tap. What the model says about its own confidence is not used.
+
+    With trust_confirmation (the host's own browser posting a receipt it
+    already confirmed, or a saved scan file), a "confirmed" flag is kept, and
+    a receipt with no currency at all is an older rupee one.
+    """
+    if raw is None and trust_confirmation:
+        return {"code": DEFAULT_CURRENCY, "confirmed": True, "reason": "", "alternatives": []}
+    if isinstance(raw, str):
+        raw = {"code": raw}
+    if not isinstance(raw, dict):
+        raw = {}
+    code = raw.get("code")
+    code = code.strip().upper() if is_supported(code) else DEFAULT_CURRENCY
+    evidence = raw.get("evidence") if isinstance(raw.get("evidence"), list) else []
+    evidence = {e.strip().lower() for e in evidence if isinstance(e, str)}
+    alternatives: List[str] = []
+    for alt in raw.get("alternatives") if isinstance(raw.get("alternatives"), list) else []:
+        if is_supported(alt) and alt.strip().upper() not in alternatives + [code]:
+            alternatives.append(alt.strip().upper())
+    if trust_confirmation and raw.get("confirmed") is True:
+        confirmed = True
+    else:
+        confirmed = code == DEFAULT_CURRENCY and (
+            bool(evidence & _SETTLES_INR) or has_gst_marker(c["label"] for c in charges)
+        )
+    return {
+        "code": code,
+        "confirmed": confirmed,
+        "reason": _clean_reason(raw.get("reason")),
+        "alternatives": alternatives[:2],
+    }
+
+
+def _plain_number(amount: Optional[Decimal]) -> Optional[float]:
+    return None if amount is None else float(amount)
+
+
+def normalize_receipt_payload(payload: Optional[Dict[str, Any]], trust_confirmation: bool = False) -> Dict[str, Any]:
+    """
+    Whatever a model returned, or a saved scan file holds (new or old shape),
+    -> one receipt shape:
+
+        {restaurant, date, time, currency: {code, confirmed, reason, alternatives},
+         items: [{name, price: number|None, category, quantity}],
+         subtotal, total: number|None, charges: [{label, amount, kind}]}
+
+    Amounts are rounded to the receipt's currency. Older payloads with the
+    fixed serviceCharge/cgst/sgst/igst/discount fields become charge rows.
+    """
     source = payload or {}
-    normalized = dict(BASE_RECEIPT_TEMPLATE)
+    normalized: Dict[str, Any] = {
+        "restaurant": _normalize_text_field(source.get("restaurant")),
+        "date": _normalize_text_field(source.get("date")),
+        "time": _normalize_text_field(source.get("time")),
+    }
 
-    normalized["restaurant"] = _normalize_text_field(source.get("restaurant"))
-    normalized["date"] = _normalize_text_field(source.get("date"))
-    normalized["time"] = _normalize_text_field(source.get("time"))
+    raw_charges = source.get("charges") if isinstance(source.get("charges"), list) else legacy_charges(source)
+    # Code first (to know the decimals), then whether it is settled (which may
+    # depend on the charge labels).
+    raw_currency = source.get("currency")
+    cur = get_currency(raw_currency.get("code") if isinstance(raw_currency, dict) else raw_currency)
+    charges = clean_charges(raw_charges, cur)
+    normalized["currency"] = normalize_currency(raw_currency, charges, trust_confirmation)
 
-    items: List[Dict[str, str]] = []
+    items: List[Dict[str, Any]] = []
     raw_items = source.get("items", [])
     if isinstance(raw_items, list):
         for raw_item in raw_items:
@@ -116,27 +156,24 @@ def normalize_receipt_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, An
                 raw_price = None
                 category = DEFAULT_ITEM_CATEGORY
                 quantity = 1
-
             if name == MISSING_VALUE:
                 continue
-
-            numeric_price = parse_numeric_amount(raw_price)
-            if numeric_price is None:
-                if is_missing_value(raw_price):
-                    price = MISSING_VALUE
-                else:
-                    maybe_number = parse_numeric_amount(str(raw_price))
-                    price = format_currency(maybe_number) if maybe_number is not None else MISSING_VALUE
-            else:
-                price = format_currency(numeric_price)
-
+            try:
+                price = _plain_number(parse_money(raw_price, cur))
+            except ValueError:
+                price = None
             items.append({"name": name, "price": price, "category": category, "quantity": quantity})
-
     normalized["items"] = items
 
-    for field in AMOUNT_FIELDS:
-        numeric_value = parse_numeric_amount(source.get(field))
-        normalized[field] = format_currency(numeric_value) if numeric_value is not None else MISSING_VALUE
+    for field in ("subtotal", "total"):
+        try:
+            normalized[field] = _plain_number(parse_money(source.get(field), cur))
+        except ValueError:
+            normalized[field] = None
+    normalized["charges"] = stored_charges(charges)
+
+    if source.get("taxSplit") in ("equal", "proportional"):
+        normalized["taxSplit"] = source["taxSplit"]
 
     parser_meta = source.get("parser_meta")
     if isinstance(parser_meta, dict):
@@ -147,24 +184,3 @@ def normalize_receipt_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, An
         normalized["extraction_meta"] = extraction_meta
 
     return normalized
-
-
-def validate_receipt_payload(payload: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    receipt = normalize_receipt_payload(payload)
-    errors: List[str] = []
-
-    if not receipt["items"]:
-        errors.append("No bill items were extracted")
-    else:
-        for index, item in enumerate(receipt["items"], start=1):
-            if is_missing_value(item.get("name")):
-                errors.append(f"Item #{index} is missing a name")
-            if is_missing_value(item.get("price")) or parse_numeric_amount(item.get("price")) is None:
-                errors.append(f"Item '{item.get('name', f'#{index}')}' is missing a valid price")
-
-    if is_missing_value(receipt["subtotal"]):
-        errors.append("Subtotal is missing")
-    if is_missing_value(receipt["total"]):
-        errors.append("Total is missing")
-
-    return len(errors) == 0, errors

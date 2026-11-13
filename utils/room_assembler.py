@@ -12,7 +12,7 @@ Selections are keyed by item *display name*, so duplicate item names
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List
 
-from .validation import format_price
+from .money import format_money, get_currency
 
 
 def unique_display_names(names: List[str]) -> List[str]:
@@ -40,6 +40,7 @@ def assemble_room(
     item_rows: Iterable[Dict[str, Any]],
     claim_rows: Iterable[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    currency = get_currency((room_row.get("ocr_data") or {}).get("currency"))
     participants = sorted(participant_rows, key=lambda p: (not p["is_host"], p["joined_at"], p["id"]))
     items_sorted = sorted(item_rows, key=lambda i: (i["position"], i["id"]))
 
@@ -49,7 +50,7 @@ def assemble_room(
             "id": row["id"],
             "name": display[idx],
             "raw_name": row["name"],
-            "price": format_price(row["price"]),
+            "price": format_money(row["price"], currency),
             "amount": row["price"],
             "category": row.get("category") or "other",
             # How many of this dish the bill lists; `price` is for all of them.
@@ -151,6 +152,8 @@ def assemble_room(
         "num_people": num_people,
         "items": items,
         "ocr_data": ocr_data,
+        # {code, name, symbol, decimals, step}; amounts are shown in it, never converted.
+        "currency": currency.public(),
         "ocr_source": room_row.get("ocr_source") or "manual",
         "users": users,
         "submitted_users": submitted,

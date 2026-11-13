@@ -8,12 +8,15 @@ Policy:
   3. OpenRouter vision (best effort) with whatever budget is left.
   4. Otherwise raise VisionFailed; the UI offers Retry / enter items manually.
 """
+import logging
 import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from . import receipt_llm
 from .receipt_contracts import normalize_receipt_payload
+
+log = logging.getLogger("billbear.scan")
 
 MIN_ATTEMPT_SECONDS = 3.0
 SAFETY_MARGIN = 0.5
@@ -118,9 +121,9 @@ def extract_receipt_from_vision(
         else:
             errors.append("OpenRouter skipped: out of time")
 
-    print(f"[receipt_pipeline] vision failed: {errors}")
+    log.warning("vision failed: %s", errors)
     if billing_failure and not got_model_answer:
         # Every provider refused for account reasons: say so instead of blaming the photo.
-        print("[receipt_pipeline] ACTION NEEDED: vision provider billing problem (top up / fix billing in AI Studio)")
+        log.error("ACTION NEEDED: vision provider billing problem (top up / fix billing in AI Studio)")
         raise VisionUnavailable("Bill scanning is temporarily unavailable.", errors)
     raise VisionFailed("We couldn't read items from that photo.", errors)

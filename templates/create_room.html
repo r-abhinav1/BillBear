@@ -56,13 +56,16 @@
                     <h2>Photo of the bill</h2>
                     {# Two pickers on purpose: a plain accept="image/*" input opens only the gallery on current
                        Android (Photo Picker). `capture` is what asks for the camera. Neither has a name, so
-                       neither is posted with the form; the scan goes through fetch(). #}
-                    <div class="file-drop-row">
+                       neither is posted with the form; the scan goes through fetch().
+                       Once a photo is picked the pickers are replaced by #photoChip, so a second pick can't
+                       cancel a scan or overwrite a good result; "Choose a different photo" brings them back. #}
+                    <div class="file-drop-row" id="pickerRow">
                         <input type="file" id="bill_camera" class="visually-hidden" accept="image/*" capture="environment">
-                        <label for="bill_camera" class="file-drop" id="cameraLabel">{{ ui.icon('camera') }} <span id="cameraLabelText">Take a photo</span></label>
+                        <label for="bill_camera" class="file-drop">{{ ui.icon('camera') }} <span>Take a photo</span></label>
                         <input type="file" id="bill_image" class="visually-hidden" accept="image/*">
-                        <label for="bill_image" class="file-drop" id="fileLabel">{{ ui.icon('image') }} <span id="fileLabelText">From gallery</span></label>
+                        <label for="bill_image" class="file-drop">{{ ui.icon('image') }} <span>From gallery</span></label>
                     </div>
+                    <div class="file-drop file-drop--static has-file" id="photoChip" hidden>{{ ui.icon('image') }} <span id="photoChipText"></span></div>
                     <div class="scan-lines" id="scanLines" hidden aria-hidden="true">
                         <div><span style="width: 62%"></span><span style="width: 16%"></span></div>
                         <div><span style="width: 44%"></span><span style="width: 14%"></span></div>
@@ -73,6 +76,7 @@
                     <div id="ocrStatus" class="status-line" aria-live="polite"></div>
                     {% if mode != 'json' %}
                     <button type="button" class="btn btn--honey btn--block" id="retryScanBtn" hidden>Scan it again</button>
+                    <button type="button" class="btn btn--block" id="changePhotoBtn" hidden>Choose a different photo</button>
                     {% endif %}
                 </div>
                 <div class="tear"></div>
@@ -118,12 +122,9 @@
         const receiptInput = document.getElementById('receipt_json');
         const skipInput = document.getElementById('skip_ocr');
         const fileInput = document.getElementById('bill_image');
-        const fileLabel = document.getElementById('fileLabel');
-        const fileLabelText = document.getElementById('fileLabelText');
         const cameraInput = document.getElementById('bill_camera');
-        const cameraLabel = document.getElementById('cameraLabel');
-        const cameraLabelText = document.getElementById('cameraLabelText');
         const retryBtn = document.getElementById('retryScanBtn');
+        const changeBtn = document.getElementById('changePhotoBtn');
         const skipBtn = document.getElementById('skipOcrBtn');
         const jsonInput = document.getElementById('scan_json');
         const jsonLabel = document.getElementById('jsonLabel');
@@ -214,6 +215,7 @@
             receiptInput.value = '';
             submitBtn.disabled = true;
             retryBtn.hidden = true;
+            changeBtn.hidden = true;
 
             try {
                 setReading(true);
@@ -239,12 +241,14 @@
                 receiptInput.value = JSON.stringify(data.receipt);
                 setStatus(`Found ${count} item${count === 1 ? '' : 's'}. You can fix anything on the next screen.`, 'success');
                 submitBtn.disabled = false;
+                changeBtn.hidden = false;
             } catch (err) {
                 const msg = err.name === 'AbortError'
                     ? 'Scanning took too long.'
                     : (err.message || 'Scan failed.');
                 setStatus(`${msg} Retry, or enter items manually.`, 'error');
                 retryBtn.hidden = false;
+                changeBtn.hidden = false;
             } finally {
                 setReading(false);
                 clearTimeout(timer);
@@ -253,29 +257,45 @@
         }
 
         if (fileInput && cameraInput) {
-            // Camera and gallery share one flow; only the last photo picked counts.
-            const pickers = [
-                { input: cameraInput, label: cameraLabel, text: cameraLabelText, idle: 'Take a photo', done: () => 'Photo taken' },
-                { input: fileInput, label: fileLabel, text: fileLabelText, idle: 'From gallery', done: (f) => f.name || 'Photo selected' },
-            ];
+            // Camera and gallery share one flow. Picking a photo swaps the two pickers for a chip
+            // showing that photo, so there is nothing left to tap that could cancel the scan or
+            // replace a good result; "Choose a different photo" brings the pickers back.
+            const pickerRow = document.getElementById('pickerRow');
+            const photoChip = document.getElementById('photoChip');
+            const photoChipText = document.getElementById('photoChipText');
             let pickedFile = null;
-            pickers.forEach((picker) => {
-                picker.input.addEventListener('change', () => {
-                    const file = picker.input.files[0] || null;
-                    pickers.forEach((p) => {
-                        if (p !== picker) p.input.value = '';
-                        p.text.textContent = p.idle;
-                        p.label.classList.remove('has-file');
-                    });
-                    pickedFile = file;
+
+            function showPickers(on) {
+                pickerRow.hidden = !on;
+                photoChip.hidden = on;
+            }
+
+            [cameraInput, fileInput].forEach((input) => {
+                input.addEventListener('change', () => {
+                    const file = input.files[0];
                     if (!file) return;
-                    picker.text.textContent = picker.done(file);
-                    picker.label.classList.add('has-file');
+                    pickedFile = file;
+                    photoChipText.textContent = input === cameraInput ? 'Photo taken' : (file.name || 'Photo selected');
+                    showPickers(false);
                     scanFile(file);
                 });
             });
+
             retryBtn.addEventListener('click', () => {
                 if (pickedFile) scanFile(pickedFile);
+            });
+
+            changeBtn.addEventListener('click', () => {
+                pickedFile = null;
+                // Clear the inputs so picking the very same photo again still fires "change".
+                cameraInput.value = '';
+                fileInput.value = '';
+                receiptInput.value = '';
+                submitBtn.disabled = true;
+                retryBtn.hidden = true;
+                changeBtn.hidden = true;
+                setStatus('');
+                showPickers(true);
             });
         }
 

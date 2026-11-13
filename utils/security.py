@@ -23,6 +23,7 @@ RATE_LIMITS = {
     "create": (20, 3600),
     "join": (40, 600),
     "miss": (30, 600),        # 404s on room codes / bad host links (code guessing)
+    "download": (20, 600),    # PDF rendering is CPU-heavy; generous so a whole table can download
 }
 
 

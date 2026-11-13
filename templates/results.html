@@ -163,6 +163,7 @@
                 timer = null;
                 try {
                     const r = await fetch(`/room/${ROOM_CODE}/status`, { credentials: 'same-origin' });
+                    if (r.status === 404) return; // the room is gone; nothing left to watch
                     if (r.ok) {
                         const d = await r.json();
                         if (d.status === 'success' && !d.finalized) {

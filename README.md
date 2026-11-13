@@ -2,7 +2,7 @@
 
 BillBear is a mobile-friendly web application that helps groups split restaurant bills fairly. The app reads the bill's items with a vision AI model and allows each person to select what they consumed. Tax, service charges, and discounts are distributed accurately to ensure a fair split for everyone.
 
-Live Website: https://billbear.me  
+Live Website: https://billbear.vercel.app  
 Repository: https://github.com/r-abhinav1/BillBear
 
 ---

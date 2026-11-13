@@ -189,13 +189,22 @@ def _miss_blocked() -> bool:
 
 
 def load_room(code: str) -> dict:
-    """Load an alive room or raise. Repeated misses from one IP get a 429 (code guessing)."""
+    """
+    Load an alive room or raise. Strangers who keep missing get a 429 (code guessing).
+
+    Someone holding a valid session cookie for this exact code is neither counted
+    nor blocked: they already know the code, and a cookie for one room is useless
+    for guessing another. Without this, one noisy person on shared Wi-Fi would lock
+    everyone else on that network out of their own rooms.
+    """
     code = storage.normalize_code(code)
-    if _miss_blocked():
+    knows_code = bool(caller_uid(code))
+    if not knows_code and _miss_blocked():
         raise RoomError("RATE_LIMITED", "Too many attempts. Wait a few minutes and try again.", status=429)
     room = storage.get_room(code) if re.fullmatch(r"[A-Z0-9]{6}", code) else None
     if room is None:
-        rate_limited("miss")
+        if not knows_code:
+            rate_limited("miss")
         raise RoomError("NOT_FOUND", "This room doesn't exist or has expired.", status=404)
     return room
 
@@ -420,6 +429,14 @@ def terms():
 # Receipt scan (vision only). No room is touched here.
 # ---------------------------------------------------------------------------
 
+def _daily_cap_response():
+    return error_response(
+        "Bill scanning has hit today's limit. Please enter items manually — it resets tomorrow.",
+        429,
+        "DAILY_CAP",
+    )
+
+
 @app.route("/api/receipt/scan", methods=["POST"])
 def scan_receipt():
     if not has_valid_scan_ticket(request):
@@ -430,14 +447,11 @@ def scan_receipt():
         return error_response(
             "Too many scans from this network. Wait a bit, or enter items manually.", 429, "RATE_LIMITED"
         )
-    # Global budget ceiling (checked after per-IP limits so one abuser can't
-    # burn everyone's daily allowance with rejected requests).
-    if not storage.rate_limit_hit("scan_global:all", scan_daily_cap(), 86400):
-        return error_response(
-            "Bill scanning has hit today's limit. Please enter items manually — it resets tomorrow.",
-            429,
-            "DAILY_CAP",
-        )
+    # Global budget ceiling for the whole site. Peek first: once today's allowance
+    # is gone, turn callers away before spending any effort decoding their image.
+    cap = scan_daily_cap()
+    if not storage.rate_limit_peek("scan_global:all", cap, 86400):
+        return _daily_cap_response()
 
     upload = request.files.get("image")
     if not upload:
@@ -446,6 +460,10 @@ def scan_receipt():
         image_b64, mime = prepare_receipt_image(upload.read())
     except ImageRejected as exc:
         return error_response(str(exc), 400, "BAD_IMAGE")
+    # Spend a slot only for a real image that is about to reach the paid vision API,
+    # so junk uploads can't use up everyone's daily allowance.
+    if not storage.rate_limit_hit("scan_global:all", cap, 86400):
+        return _daily_cap_response()
 
     try:
         receipt = extract_receipt_from_vision(image_b64, mime)
@@ -776,6 +794,9 @@ def host_recover(room_code):
     token = request.values.get("k", "")
     if request.method == "GET":
         return render_template("host_recover.html", room=room, room_code=code, token=token)
+    # load_room lets room members past the guess limiter, but token guessing must stay throttled for everyone.
+    if _miss_blocked():
+        raise RoomError("RATE_LIMITED", "Too many attempts. Wait a few minutes and try again.", status=429)
     try:
         uid = storage.recover_host(code, token)
     except RoomError as exc:
@@ -1046,6 +1067,8 @@ def download_pdf(room_code):
         return blocked
     if not PDF_AVAILABLE:
         return error_response("PDF download isn't available on this server.", 503, "NO_PDF")
+    if rate_limited("download"):
+        return error_response("Too many downloads from this network. Wait a few minutes and try again.", 429, "RATE_LIMITED")
     try:
         return generate_pdf_response(room, room["code"])
     except Exception as exc:

@@ -195,6 +195,7 @@
         });
 
         /* What other people have already sent for dishes the bill lists several of. */
+        let takenTimer = null;
         async function refreshTaken() {
             const marks = document.querySelectorAll('.pick__taken');
             if (!marks.length || document.hidden) return;
@@ -203,6 +204,7 @@
                 const resp = await fetch(`/room/${ROOM_CODE}/status`, {
                     credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' },
                 });
+                if (resp.status === 404) { clearInterval(takenTimer); return; } // room expired: stop asking
                 if (resp.ok) data = await resp.json();
             } catch (_e) { /* offline: keep what is shown */ }
             if (!data || !data.taken) return;
@@ -398,7 +400,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             ensureSubmissionId();
             refreshTaken();
-            setInterval(refreshTaken, 5000);
+            takenTimer = setInterval(refreshTaken, 5000);
             document.addEventListener('visibilitychange', refreshTaken);
             restoreDraft();
             updateSelection();

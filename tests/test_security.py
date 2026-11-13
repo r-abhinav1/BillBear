@@ -296,3 +296,88 @@ def test_proxy_https_origin_accepted_when_trusting_proxy(monkeypatch):
         assert ok.status_code == 200
     finally:
         app_module.app.wsgi_app = original
+
+
+# ---------------------------------------------------------------------------
+# Abuse limits: who gets blocked, and who must not be
+# ---------------------------------------------------------------------------
+
+def test_junk_uploads_do_not_use_up_the_global_scan_cap(monkeypatch):
+    """Only a real image headed for the paid vision API may spend a slot of the daily allowance."""
+    import app as app_module
+
+    monkeypatch.setenv("SCAN_DAILY_CAP", "2")
+    calls = []
+    monkeypatch.setattr(
+        app_module, "extract_receipt_from_vision",
+        lambda b64, mime: calls.append(1) or {"items": [{"name": "A", "price": "1"}]},
+    )
+    c = new_client()
+    c.get("/create")
+    for _ in range(5):
+        assert _scan(c, b"%PDF-1.4 not an image").status_code == 400
+    assert _scan(c, _jpeg_bytes()).status_code == 200
+    assert _scan(c, _jpeg_bytes()).status_code == 200
+    assert _scan(c, _jpeg_bytes()).get_json()["code"] == "DAILY_CAP"
+    assert len(calls) == 2
+
+
+def test_exhausted_day_turns_callers_away_before_decoding(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setenv("SCAN_DAILY_CAP", "1")
+    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
+    c = new_client()
+    c.get("/create")
+    assert _scan(c, _jpeg_bytes()).status_code == 200
+
+    def must_not_run(raw):
+        raise AssertionError("image was decoded after the daily cap was reached")
+
+    monkeypatch.setattr(app_module, "prepare_receipt_image", must_not_run)
+    resp = _scan(c, _jpeg_bytes())
+    assert resp.status_code == 429 and resp.get_json()["code"] == "DAILY_CAP"
+
+
+def test_room_members_are_not_locked_out_by_someone_elses_bad_guesses():
+    """Shared Wi-Fi: a noisy stranger must not stop people from using the room they joined."""
+    code, host, bob = _guest_room()
+    noisy = new_client()
+    for i in range(31):
+        noisy.get(f"/room/QQQQ{i:02d}/status")
+    assert noisy.get(f"/room/{code}/status").status_code == 429          # strangers stay blocked
+    assert new_client().get(f"/room/{code}/status").status_code == 429   # including a fresh, cookie-less browser
+    assert bob.get(f"/room/{code}/status").status_code == 200            # members keep working
+    assert submit(bob, code, "Bob", ["Pizza"]).status_code == 200
+    assert post_json(host, f"/room/{code}/host/num-people", {"num_people": 4}).status_code == 200
+
+
+def test_stale_tab_on_an_expired_room_does_not_lock_the_network():
+    from utils.session import make_session_token
+
+    stale = new_client()
+    stale.set_cookie("bb_session_ABCDEF", make_session_token("ABCDEF", "uid-1", "Bob"))
+    assert [stale.get("/room/ABCDEF/status").status_code for _ in range(40)] == [404] * 40
+    code = make_room(new_client())
+    assert new_client().get(f"/room/{code}/status").status_code == 200
+
+
+def test_host_token_guessing_stays_throttled_even_for_a_member():
+    code, _host, bob = _guest_room()
+    statuses = [bob.post(f"/room/{code}/host", data={"k": f"wrong-{i}"}).status_code for i in range(32)]
+    assert statuses[:30] == [403] * 30
+    assert statuses[-1] == 429
+
+
+def test_pdf_download_is_throttled(monkeypatch):
+    import app as app_module
+
+    host = new_client()
+    code = make_room(host, num_people=1)
+    submit(host, code, "Alice", ["Pasta"])
+    post_json(host, f"/room/{code}/finalize")
+    monkeypatch.setattr(app_module, "PDF_AVAILABLE", True)
+    monkeypatch.setattr(app_module, "generate_pdf_response", lambda room, c: app_module.make_response(b"%PDF", 200))
+    statuses = [host.get(f"/room/{code}/download").status_code for _ in range(21)]
+    assert statuses[:20] == [200] * 20
+    assert statuses[20] == 429

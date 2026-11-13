@@ -180,6 +180,8 @@ button, input, select { font: inherit; color: inherit; }
 .field-row { display: flex; gap: 12px; }
 .file-drop { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 60px; padding: 10px 16px; border: var(--line) dashed var(--ink); border-radius: 14px; background: var(--field); color: var(--ink); font-size: 1.05rem; font-weight: 700; text-align: center; cursor: pointer; word-break: break-word; }
 .file-drop.has-file { border-style: solid; background: var(--paper-tint); }
+.file-drop-row { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.file-drop-row .file-drop { flex-direction: column; gap: 6px; padding: 12px 10px; }
 input[type="file"].visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; }
 input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px solid var(--ink); outline-offset: 3px; }
 .stepper { display: inline-flex; align-items: center; gap: 4px; }

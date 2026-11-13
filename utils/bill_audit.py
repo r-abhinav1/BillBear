@@ -107,7 +107,7 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
                 )
             else:
                 why = "This usually means a price was changed without updating the bill total."
-            fix = "If the shares are right, the host can reopen the picks and fix the bill total on Check the bill."
+            fix = "If the shares are right, the host can tap Fix the bill below to correct the total. Nobody has to pick again."
             detail = (
                 f"The shares add up to {money(reported_grand)}, but the bill total is {money(bill_total)}: "
                 f"{money(over)} more than the bill. {why} {fix}"
@@ -116,8 +116,8 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
             detail = (
                 f"The shares add up to {money(reported_grand)}, but the bill total is {money(bill_total)}: "
                 f"{money(-over)} less than the bill. Usually some dishes weren't picked, or the bill has a "
-                "tax or charge that isn't in the rows yet. The host can reopen the picks, assign the "
-                "missing dishes, or add the charge on Check the bill."
+                "tax or charge that isn't in the rows yet. The host can reopen the picks to assign the "
+                "missing dishes, or tap Fix the bill below to add the charge."
             )
         warnings.append({
             "severity": "info",

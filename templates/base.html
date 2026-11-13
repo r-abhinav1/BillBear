@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/billbear.css') }}">
     {% block head %}{% endblock %}
 </head>
-<body>
+<body{% block body_attrs %}{% endblock %}>
     <div class="page {% block page_class %}{% endblock %}">
         <header class="topbar">
             {% block topbar_left %}<a class="brand" href="/">BillBear</a>{% endblock %}
@@ -50,6 +50,15 @@
                 try { localStorage.setItem('bb_theme', next); } catch (_e) {}
             });
         })();
+    </script>
+    <script>
+        // Room pages show live state. When Back brings one out of the browser's
+        // page cache it is stale (a waiting page after the split, say), and its
+        // timers would then jump forward again, so Back could never get out.
+        // Reloading lets the server send this history entry where it belongs.
+        if (document.body.hasAttribute('data-live')) {
+            window.addEventListener('pageshow', function (e) { if (e.persisted) window.location.reload(); });
+        }
     </script>
     {% block scripts %}{% endblock %}
 </body>

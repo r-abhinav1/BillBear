@@ -845,3 +845,53 @@ def test_english_pdf_embeds_no_extra_fonts():
     post_json(host, f"/room/{code}/finalize")
     pdf = host.get(f"/room/{code}/download").data
     assert b"NotoSans" not in pdf and b"DroidSans" not in pdf
+
+
+# --- ways back ------------------------------------------------------------------
+
+def test_fixing_only_the_bill_total_keeps_everyones_picks():
+    code, host, bob, cara = _full_room()
+    submit(bob, code, "Bob", ["Pasta"])
+    assert _edit(host, code, "INR", subtotal="700", total="700").status_code == 302
+    assert _edit(host, code, "INR", subtotal="650", total="742").status_code == 302   # printed figures only
+    assert "Bob" in room(code)["submitted_users"]
+    assert _edit(host, code, "INR", charges=[("Tip", "50", "charge")], total="742").status_code == 302
+    assert "Bob" not in room(code)["submitted_users"]                                 # a charge changes shares
+
+
+def test_fix_the_bill_reopens_the_split_without_resetting_picks():
+    code, host, bob, cara = _full_room()
+    for client, name in ((host, "Alice"), (bob, "Bob"), (cara, "Cara")):
+        submit(client, code, name, ["Pasta"])
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+    page = host.get(f"/room/{code}/results").get_data(as_text=True)
+    assert "Fix the bill" in page and "Ask Alice to reopen" not in page
+    assert "Picked wrong? Ask Alice to reopen the picks." in bob.get(f"/room/{code}/results").get_data(as_text=True)
+
+    assert post_json(bob, f"/room/{code}/host/fix-bill").status_code == 403           # host only
+    resp = post_json(host, f"/room/{code}/host/fix-bill")
+    assert resp.status_code == 200 and resp.get_json()["redirect"] == f"/edit/{code}"
+    r = room(code)
+    assert not r["finalized"] and r["submitted_users"] == {"Alice", "Bob", "Cara"}
+    assert host.get(f"/edit/{code}").status_code == 200                               # editable again
+    # Fix the total only, then split again straight away.
+    assert _edit(host, code, "INR", total="700").status_code == 302
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+
+
+def test_refused_create_keeps_the_scan(client):
+    receipt = json.dumps({"currency": {"code": "INR", "confirmed": True}, "items": [{"name": "Dal", "price": 200}]})
+    resp = client.post("/create", data={"host_name": "Asha 🙂", "room_name": "Dinner", "num_people": "2",
+                                        "receipt_json": receipt})
+    assert resp.status_code == 400
+    page = resp.get_data(as_text=True)
+    assert "Names can only contain" in page and "&#34;Dal&#34;" in page                # the scan comes back
+    resp = client.post("/create", data={"host_name": "Asha 🙂", "room_name": "Dinner", "num_people": "2",
+                                        "skip_ocr": "true", "receipt_json": receipt})
+    assert 'name="receipt_json" value=""' in resp.get_data(as_text=True)              # manual: nothing to keep
+
+
+def test_check_the_bill_has_a_way_back_to_the_room(client):
+    code = make_room(client)
+    page = client.get(f"/edit/{code}").get_data(as_text=True)
+    assert f'class="backlink" href="/room/{code}"' in page and "data-live" in page

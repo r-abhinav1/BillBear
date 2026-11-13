@@ -2,6 +2,7 @@
 {% import '_ui.html' as ui %}
 {% block title %}Waiting room, {{ room['room_name'] }}{% endblock %}
 {% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
+{% block body_attrs %} data-live{% endblock %}
 {% block content %}
 <div id="hostNoticeBanner" class="banner" style="display: none" role="alert">
     <p id="hostNoticeText"></p>
@@ -366,7 +367,7 @@
             status.textContent = 'Splitting the bill…';
             const r = await postJson(`/room/${roomCode}/finalize`, {});
             if (r.ok && r.data && r.data.redirect) {
-                window.location.href = r.data.redirect;
+                window.location.replace(r.data.redirect);
                 return;
             }
             status.classList.add('error');
@@ -456,7 +457,8 @@
                 if (data.finalized) {
                     stopPolling();
                     $('completionMessage').style.display = 'block';
-                    window.location.href = `/room/${roomCode}/results`;
+                    // Replace, not push: Back from the results then leaves the room.
+                    window.location.replace(`/room/${roomCode}/results`);
                     return;
                 }
 

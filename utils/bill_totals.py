@@ -180,14 +180,14 @@ def as_number(amount: Any) -> Optional[float]:
 def bill_signature(ocr_data: Optional[Dict[str, Any]]) -> tuple:
     """
     What people's shares depend on, apart from the dishes and the tax-split
-    switch: the same bill in the old or new stored shape gives the same value,
-    so converting a room's shape alone never sends anyone back to reconfirm.
+    switch: the currency and the charge rows. The printed subtotal and total
+    are only checked against, never charged, so fixing them changes nobody's
+    share and nobody is sent back to pick again. The same bill in the old or
+    new stored shape gives the same value.
     """
     bill = read_bill(ocr_data)
     return (
         bill["currency"].code,
-        bill["subtotal"],
-        bill["total"],
         tuple((c["label"], round(c["amount"], 6), c["kind"]) for c in bill["charges"]),
     )
 

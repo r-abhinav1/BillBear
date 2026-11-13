@@ -347,6 +347,14 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .currency-ask.is-settled .currency-ask__stamp { animation: stamp-down 0.22s ease-out; }
 @keyframes stamp-down { from { transform: rotate(-10deg) scale(1.35); box-shadow: 0 0 0 var(--ink); } to { transform: rotate(-10deg) scale(1); box-shadow: 3px 3px 0 var(--ink); } }
 
+/* Create page: "You've already started Dinner" and "Start with an empty bill?" */
+.resume { display: flex; flex-direction: column; gap: 10px; }
+.resume__text { font-size: 1.05rem; font-weight: 600; line-height: 1.3; }
+.resume__actions, .skip-confirm__actions { display: flex; gap: 8px; }
+.resume__actions .btn, .skip-confirm__actions .btn { flex: 1; min-height: 46px; }
+.skip-confirm { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.skip-confirm[hidden] { display: none; }
+
 /* The foot of the bill: what the rows work out to. */
 .tally { margin-top: 14px; padding: 12px 14px; border: var(--line) solid var(--ink); border-radius: 14px; background: var(--field); display: flex; flex-direction: column; gap: 4px; }
 .tally__line { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; line-height: 1.3; }

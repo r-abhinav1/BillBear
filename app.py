@@ -760,6 +760,7 @@ def edit_items(room_code):
     return render_template(
         "edit_items.html",
         room_code=code,
+        room_name=room["room_name"],
         items=view,
         currency=get_currency(view["currency"]).public(),
         error=error,
@@ -1138,6 +1139,15 @@ def host_reopen_selections(room_code):
     uid = require_host(room)
     storage.reopen_all(room["code"], uid)
     return jsonify({"status": "success"})
+
+
+@app.route("/room/<room_code>/host/fix-bill", methods=["POST"])
+def host_fix_bill(room_code):
+    """Results -> Check the bill, keeping everyone's picks (see storage.unfinalize)."""
+    room = load_room(room_code)
+    uid = require_host(room)
+    storage.unfinalize(room["code"], uid)
+    return jsonify({"status": "success", "redirect": url_for("edit_items", room_code=room["code"])})
 
 
 @app.route("/room/<room_code>/host/revoke/<target_user>", methods=["POST"])

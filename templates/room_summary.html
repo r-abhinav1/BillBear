@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% import '_ui.html' as ui %}
 {% block title %}{{ room.room_name }}, BillBear{% endblock %}
+{% block body_attrs %} data-live{% endblock %}
 {% block content %}
 <main class="stack stack--lg">
     <div>

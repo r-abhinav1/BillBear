@@ -21,6 +21,16 @@
 
     {% if error %}<div class="notice notice--error" role="alert">{{ error }}</div>{% endif %}
 
+    {# This tab already made a room (remembered in sessionStorage by the edit page). Without this,
+       Back from Check the bill looked like a fresh start and made a second room. #}
+    <section class="card resume" id="resumeCard" hidden>
+        <p class="resume__text">You've already started <b id="resumeName"></b>.</p>
+        <div class="resume__actions">
+            <a class="btn btn--primary" id="resumeLink" href="/">Continue it</a>
+            <button type="button" class="btn" id="resumeNew">Start a new bill</button>
+        </div>
+    </section>
+
     <form method="POST" action="/create" class="stack stack--lg" id="createForm" novalidate>
         <div class="stack">
             <div class="field">
@@ -31,12 +41,12 @@
             <div class="field-row">
                 <div class="field grow">
                     <label for="room_name">What's the occasion?</label>
-                    <input type="text" id="room_name" name="room_name" class="input" maxlength="60"
+                    <input type="text" id="room_name" name="room_name" class="input" maxlength="60" autocomplete="off"
                            placeholder="Friday dinner" value="{{ form.get('room_name', '') }}" required>
                 </div>
                 <div class="field" style="width: 96px">
                     <label for="num_people">People</label>
-                    <input type="number" id="num_people" name="num_people" class="input input--mono" min="1" max="50"
+                    <input type="number" id="num_people" name="num_people" class="input input--mono" min="1" max="50" autocomplete="off"
                            inputmode="numeric" placeholder="4" value="{{ form.get('num_people', '') }}" required
                            aria-describedby="peopleHint">
                 </div>
@@ -110,7 +120,8 @@
         <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-size="flexible" data-appearance="interaction-only"></div>
         {% endif %}
 
-        <input type="hidden" id="receipt_json" name="receipt_json" value="">
+        {# Kept when the server sends the form back with an error, so the scan isn't lost. #}
+        <input type="hidden" id="receipt_json" name="receipt_json" value="{{ form.get('receipt_json', '') if not form.get('skip_ocr') else '' }}">
         <input type="hidden" id="skip_ocr" name="skip_ocr" value="">
         <input type="hidden" name="mode" value="{{ mode }}">
 
@@ -120,6 +131,13 @@
             </button>
             {% if mode != 'json' %}
             <button type="button" class="link-btn" id="skipOcrBtn">Enter items manually instead</button>
+            <div class="notice notice--quiet skip-confirm" id="skipConfirm" hidden role="group" aria-labelledby="skipConfirmText">
+                <p id="skipConfirmText">Start with an empty bill? The <span id="skipCount"></span> Bear found will be dropped. You can also fix or add dishes on the next screen.</p>
+                <div class="skip-confirm__actions">
+                    <button type="button" class="btn btn--primary" id="skipKeep">Keep the dishes</button>
+                    <button type="button" class="btn" id="skipYes">Start empty</button>
+                </div>
+            </div>
             <a class="textlink" href="/create?mode=json">Open a saved scan</a>
             {% else %}
             <a class="textlink" href="/create?mode=image">Scan a new bill instead</a>
@@ -135,6 +153,7 @@
 {% endif %}
     <script>
         const MODE = {{ mode | tojson }};
+        const HAS_ERROR = {{ (error | length > 0) | tojson }};
         const CURRENCIES = Object.fromEntries({{ CURRENCY_CHOICES | tojson }}.map(c => [c.code, c]));
         const MAX_WIDTH = 1600;
         const MAX_HEIGHT = 4000;
@@ -158,6 +177,30 @@
         let submitted = false;
 
         const scanPanel = document.getElementById('scanPanel');
+
+        /* ------------------------------------------------------------------ */
+        /* What this tab remembers, so Back or a refused Create loses nothing  */
+        /* ------------------------------------------------------------------ */
+        // bb_create_fields: what was typed. bb_create_draft: the last scan.
+        // bb_started: the room this tab last made (set by Check the bill).
+        const store = {
+            get(key) { try { return JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (_e) { return null; } },
+            set(key, value) { try { sessionStorage.setItem(key, JSON.stringify(value)); } catch (_e) {} },
+            drop(key) { try { sessionStorage.removeItem(key); } catch (_e) {} },
+        };
+        const FIELD_IDS = ['host_name', 'room_name', 'num_people'];
+        (function restoreFields() {
+            const saved = store.get('bb_create_fields') || {};
+            FIELD_IDS.forEach(id => {
+                const input = document.getElementById(id);
+                if (!input.value && saved[id]) input.value = saved[id];
+                input.addEventListener('input', () => {
+                    const now = store.get('bb_create_fields') || {};
+                    now[id] = input.value;
+                    store.set('bb_create_fields', now);
+                });
+            });
+        })();
         const scanLines = document.getElementById('scanLines');
 
         function setStatus(message, type) {
@@ -184,6 +227,19 @@
 
         function detailsFilled() {
             return ['host_name', 'room_name', 'num_people'].every(id => document.getElementById(id).value.trim());
+        }
+
+        // The same rules as the server (utils/validation.py), checked first so a
+        // refused name costs nothing. Returns a message, or '' when all is well.
+        function detailsProblem() {
+            if (!detailsFilled()) return 'Fill in your name, the occasion and how many people.';
+            const name = document.getElementById('host_name').value.trim().replace(/\s+/g, ' ');
+            if (name.length > 30) return 'Your name can be at most 30 characters.';
+            if (!/^[\p{L}\p{M}\p{N} .'_-]+$/u.test(name)) return "Names can only contain letters, numbers, spaces and . ' - _";
+            if (!/[\p{L}\p{N}]/u.test(name)) return 'Your name needs at least one letter or number.';
+            const people = Number(document.getElementById('num_people').value);
+            if (!Number.isInteger(people) || people < 1 || people > 50) return 'People must be a whole number from 1 to 50.';
+            return '';
         }
 
         /* ------------------------------------------------------------------ */
@@ -263,18 +319,9 @@
                 if (!resp.ok || !data || data.status !== 'success') {
                     throw new Error((data && data.message) || `Scan failed (HTTP ${resp.status}).`);
                 }
-                const count = (data.receipt.items || []).length;
-                scannedReceipt = data.receipt;
-                changeBtn.hidden = false;
-                const currency = data.receipt.currency || {};
-                if (currency.confirmed) {
-                    receiptInput.value = JSON.stringify(data.receipt);
-                    setStatus(`Found ${count} item${count === 1 ? '' : 's'}. You can fix anything on the next screen.`, 'success');
-                    submitBtn.disabled = false;
-                } else {
-                    setStatus(`Found ${count} item${count === 1 ? '' : 's'}. Check the currency to continue.`, 'success');
-                    showCurrencyAsk(currency);
-                }
+                const label = file === lastCameraFile ? 'Photo taken' : (file.name || 'Photo selected');
+                store.set('bb_create_draft', { receipt: data.receipt, label });
+                applyScan(data.receipt, label);
             } catch (err) {
                 const msg = err.name === 'AbortError'
                     ? 'Scanning took too long.'
@@ -294,6 +341,36 @@
         /* ------------------------------------------------------------------ */
 
         let scannedReceipt = null;
+        let lastCameraFile = null;
+
+        // Show a scan result: fresh from the scanner, or brought back after Back / a refused Create.
+        function applyScan(receipt, label) {
+            const count = (receipt.items || []).length;
+            scannedReceipt = receipt;
+            const chip = document.getElementById('photoChipText');
+            if (chip) {
+                chip.textContent = label;
+                document.getElementById('pickerRow').hidden = true;
+                document.getElementById('photoChip').hidden = false;
+            }
+            changeBtn.hidden = false;
+            skipBtn.textContent = 'Start with an empty bill instead';
+            const currency = receipt.currency || {};
+            if (currency.confirmed) {
+                receiptInput.value = JSON.stringify(receipt);
+                setStatus(`Found ${count} dish${count === 1 ? '' : 'es'}. You can fix or add dishes on the next screen.`, 'success');
+                submitBtn.disabled = false;
+                if (ask.box && CURRENCIES[currency.code] && currency.code !== 'INR') {
+                    ask.box.hidden = false;
+                    settleCurrency(currency.code, true);
+                }
+            } else {
+                receiptInput.value = '';
+                submitBtn.disabled = true;
+                setStatus(`Found ${count} dish${count === 1 ? '' : 'es'}. Check the currency to continue.`, 'success');
+                showCurrencyAsk(currency);
+            }
+        }
         const ask = {
             box: document.getElementById('currencyAsk'),
             symbol: document.getElementById('askSymbol'),
@@ -341,19 +418,22 @@
             ask.box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
 
-        function settleCurrency(code) {
+        function settleCurrency(code, quiet) {
             const c = CURRENCIES[code];
             scannedReceipt.currency = Object.assign({}, scannedReceipt.currency, { code, confirmed: true });
             receiptInput.value = JSON.stringify(scannedReceipt);
+            const draft = store.get('bb_create_draft');
+            if (draft) store.set('bb_create_draft', Object.assign(draft, { receipt: scannedReceipt }));
             ask.symbol.textContent = c.symbol;
             ask.actions.hidden = true;
             ask.pick.hidden = true;
             ask.done.hidden = false;
             ask.done.textContent = `${c.name} it is. You can still change it when you check the bill.`;
             ask.box.classList.add('is-settled');
-            setStatus(`Found ${(scannedReceipt.items || []).length} items in ${c.name}. You can fix anything on the next screen.`, 'success');
+            const n = (scannedReceipt.items || []).length;
+            setStatus(`Found ${n} dish${n === 1 ? '' : 'es'} in ${c.name}. You can fix or add dishes on the next screen.`, 'success');
             submitBtn.disabled = false;
-            submitBtn.focus();
+            if (!quiet) submitBtn.focus();
         }
 
         if (ask.box) {
@@ -391,6 +471,7 @@
                     const file = input.files[0];
                     if (!file) return;
                     pickedFile = file;
+                    lastCameraFile = input === cameraInput ? file : null;
                     photoChipText.textContent = input === cameraInput ? 'Photo taken' : (file.name || 'Photo selected');
                     showPickers(false);
                     scanFile(file);
@@ -403,6 +484,10 @@
 
             changeBtn.addEventListener('click', () => {
                 pickedFile = null;
+                scannedReceipt = null;
+                store.drop('bb_create_draft');
+                skipBtn.textContent = 'Enter items manually instead';
+                document.getElementById('skipConfirm').hidden = true;
                 hideCurrencyAsk();
                 // Clear the inputs so picking the very same photo again still fires "change".
                 cameraInput.value = '';
@@ -451,26 +536,41 @@
         /* Submit                                                              */
         /* ------------------------------------------------------------------ */
 
+        function startEmpty() {
+            const problem = detailsProblem();
+            if (problem) { setStatus(problem, 'error'); return; }
+            if (scanController) scanController.abort();
+            store.drop('bb_create_draft');
+            skipInput.value = 'true';
+            receiptInput.value = '';
+            submitted = true;
+            form.classList.add('loading');
+            form.submit();
+        }
+
         if (skipBtn) {
+            const skipConfirm = document.getElementById('skipConfirm');
             skipBtn.addEventListener('click', () => {
-                if (!detailsFilled()) {
-                    setStatus('Fill in your name, the occasion and how many people first.', 'error');
+                // A scan already found dishes: don't throw them away on one tap.
+                if (scannedReceipt && (scannedReceipt.items || []).length) {
+                    const n = scannedReceipt.items.length;
+                    document.getElementById('skipCount').textContent = `${n} dish${n === 1 ? '' : 'es'}`;
+                    skipConfirm.hidden = false;
+                    document.getElementById('skipKeep').focus();
                     return;
                 }
-                if (scanController) scanController.abort();
-                skipInput.value = 'true';
-                receiptInput.value = '';
-                submitted = true;
-                form.classList.add('loading');
-                form.submit();
+                startEmpty();
             });
+            document.getElementById('skipKeep').addEventListener('click', () => { skipConfirm.hidden = true; skipBtn.focus(); });
+            document.getElementById('skipYes').addEventListener('click', startEmpty);
         }
 
         form.addEventListener('submit', (e) => {
             if (submitted) { e.preventDefault(); return; }
-            if (!detailsFilled()) {
+            const problem = detailsProblem();
+            if (problem) {
                 e.preventDefault();
-                setStatus('Fill in your name, the occasion and how many people.', 'error');
+                setStatus(problem, 'error');
                 return;
             }
             if (!receiptInput.value && skipInput.value !== 'true') {
@@ -482,6 +582,36 @@
             form.classList.add('loading');
         });
 
-        document.getElementById('host_name').focus();
+        /* ------------------------------------------------------------------ */
+        /* On load: bring back a scan, and say if this tab already made a room */
+        /* ------------------------------------------------------------------ */
+        (function restore() {
+            const draft = store.get('bb_create_draft');
+            if (MODE !== 'json' && receiptInput.value) {
+                // The server refused the form (a name, the bot check...) but sent the scan back.
+                try { applyScan(JSON.parse(receiptInput.value), (draft && draft.label) || 'Your photo'); } catch (_e) { receiptInput.value = ''; }
+            } else if (MODE !== 'json' && draft && draft.receipt) {
+                applyScan(draft.receipt, draft.label || 'Your photo');
+            }
+            const started = store.get('bb_started');
+            const card = document.getElementById('resumeCard');
+            if (started && started.code && Date.now() - (started.at || 0) < 12 * 3600 * 1000) {
+                document.getElementById('resumeName').textContent = started.name || `room ${started.code}`;
+                document.getElementById('resumeLink').href = `/room/${started.code}`;
+                card.hidden = false;
+                // The browser refills the form on Back with the room just made; this form is for a
+                // new bill now. (Not after an error: then the fields are what was just typed.)
+                if (!HAS_ERROR) ['room_name', 'num_people'].forEach(id => { document.getElementById(id).value = ''; });
+            }
+            document.getElementById('resumeNew').addEventListener('click', () => {
+                store.drop('bb_started');
+                card.hidden = true;
+                ['room_name', 'num_people'].forEach(id => { document.getElementById(id).value = ''; });
+                const fields = store.get('bb_create_fields') || {};
+                store.set('bb_create_fields', { host_name: fields.host_name || '' });
+                document.getElementById('room_name').focus();
+            });
+            if (card.hidden) document.getElementById(FIELD_IDS.find(id => !document.getElementById(id).value) || 'host_name').focus();
+        })();
     </script>
 {% endblock %}

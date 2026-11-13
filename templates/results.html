@@ -20,6 +20,7 @@
     .check + .check { margin-top: 10px; padding-top: 10px; border-top: 2px dashed currentColor; }
 </style>
 {% endblock %}
+{% block body_attrs %} data-live{% endblock %}
 {% block content %}
 <main class="stack stack--lg">
     <div class="row" style="align-items: flex-end">
@@ -101,7 +102,11 @@
         {% endif %}
         <a href="/" class="btn btn--block">Split another bill</a>
         {% if caller_is_host %}
+        <button id="fixBillBtn" type="button" class="btn btn--block">Fix the bill</button>
+        <p class="fineprint" style="text-align: center; margin-top: -4px">Change a price, a charge or the bill total. Picks stay sent unless a dish or charge changes.</p>
         <button id="revertCalcBtn" type="button" class="link-btn">Someone picked wrong? Reopen the picks</button>
+        {% else %}
+        <p class="small soft" style="text-align: center">Picked wrong? Ask {{ room['host_name'] }} to reopen the picks.</p>
         {% endif %}
     </div>
 </main>
@@ -112,6 +117,35 @@
         const ROOM_CODE = {{ room_code | tojson }};
         const CALLER_NAME = {{ caller_name | tojson }};
         const CALLER_IS_HOST = {{ caller_is_host | tojson }};
+
+        // This room is split, so the Create page needn't offer to continue it.
+        try {
+            const started = JSON.parse(sessionStorage.getItem('bb_started') || 'null');
+            if (started && started.code === ROOM_CODE) sessionStorage.removeItem('bb_started');
+        } catch (_e) {}
+
+        const fixBtn = document.getElementById('fixBillBtn');
+        if (fixBtn) {
+            fixBtn.addEventListener('click', async () => {
+                fixBtn.disabled = true;
+                fixBtn.textContent = 'Opening the bill…';
+                try {
+                    const resp = await fetch(`/room/${ROOM_CODE}/host/fix-bill`, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+                        body: '{}',
+                    });
+                    const data = await resp.json().catch(() => null);
+                    if (resp.ok && data && data.redirect) { window.location.href = data.redirect; return; }
+                    alert((data && data.message) || 'Could not open the bill.');
+                } catch (_e) {
+                    alert('Could not reach the server. Try again.');
+                }
+                fixBtn.disabled = false;
+                fixBtn.textContent = 'Fix the bill';
+            });
+        }
 
         const revertBtn = document.getElementById('revertCalcBtn');
         if (revertBtn) {
@@ -169,9 +203,9 @@
                     if (r.ok) {
                         const d = await r.json();
                         if (d.status === 'success' && !d.finalized) {
-                            window.location.href = CALLER_NAME
+                            window.location.replace(CALLER_NAME
                                 ? `/room/${ROOM_CODE}/user/${encodeURIComponent(CALLER_NAME)}`
-                                : '/';
+                                : '/');
                             return;
                         }
                     }

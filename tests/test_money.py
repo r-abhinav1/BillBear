@@ -237,3 +237,11 @@ def test_total_warning_when_the_split_is_short_of_the_bill():
     room = _room([("Ramen", 1000), ("Beer", 500)], {"A": ["Ramen"]}, {"currency": "JPY", "total": 1500})
     detail = _total_warning(room)
     assert "¥500 less than the bill" in detail and "weren't picked" in detail
+
+
+def test_printed_subtotal_and_total_dont_count_as_a_change():
+    a = {"currency": "INR", "subtotal": 700, "total": 700, "charges": [{"label": "Tip", "amount": 50}]}
+    b = dict(a, subtotal=650, total=742)
+    assert bill_signature(a) == bill_signature(b)
+    assert bill_signature(a) != bill_signature(dict(a, charges=[{"label": "Tip", "amount": 60}]))
+    assert bill_signature(a) != bill_signature(dict(a, currency="USD"))

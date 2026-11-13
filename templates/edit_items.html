@@ -3,7 +3,9 @@
 {% set CATEGORIES = [('veg', 'Veg'), ('nonveg', 'Non-veg'), ('egg', 'Egg'), ('alcohol', 'Alcohol'), ('other', 'Other')] %}
 {% block title %}Check the bill, BillBear{% endblock %}
 {% block page_class %}page--wide{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
 {% block head %}<style>form.loading { opacity: 0.6; pointer-events: none; }</style>{% endblock %}
+{% block body_attrs %} data-live{% endblock %}
 {% block content %}
 <main class="stack stack--lg">
     <div class="row" style="align-items: flex-end">
@@ -18,7 +20,7 @@
     {% if submitted_count %}
     <div class="notice">
         {{ submitted_count }} {{ 'person has' if submitted_count == 1 else 'people have' }} already sent picks.
-        If you change a dish or price, everyone is asked to confirm again. Their picks are kept.
+        If you change a dish, a price or a charge, everyone is asked to confirm again; their picks are kept. Fixing only the subtotal or bill total doesn't ask anyone.
     </div>
     {% endif %}
 
@@ -161,6 +163,17 @@
         // Rows an empty bill starts with; swapped when the currency changes if still untouched.
         const STARTERS = { INR: [['CGST', 'charge'], ['SGST', 'charge'], ['Service charge', 'charge']], '*': [['Tax', 'charge']] };
         const M = window.BBMoney;
+        const ROOM = { code: {{ room_code | tojson }}, name: {{ room_name | tojson }} };
+
+        // Tell the Create page this tab has a room now: Back from here offers
+        // "Continue it" instead of a fresh form (which made a second room). The
+        // scan lives in the room now, so the Create page's copy is dropped.
+        try {
+            sessionStorage.setItem('bb_started', JSON.stringify({ code: ROOM.code, name: ROOM.name, at: Date.now() }));
+            sessionStorage.removeItem('bb_create_draft');
+            const fields = JSON.parse(sessionStorage.getItem('bb_create_fields') || '{}');
+            sessionStorage.setItem('bb_create_fields', JSON.stringify({ host_name: fields.host_name || '' }));
+        } catch (_e) {}
         const currencySelect = document.getElementById('currency');
         const chargeRows = document.getElementById('chargeRows');
         let cur = CURRENCIES[currencySelect.value];
@@ -489,6 +502,17 @@
         capCheck();
         setTimeout(reconRender, 50);
 
+        // Leaving with unsaved edits (Room, the logo, Back) asks first; an
+        // untouched screen never does.
+        const snapshot = () => new URLSearchParams(new FormData(editForm)).toString();
+        const savedState = snapshot();
+        let saving = false;
+        window.addEventListener('beforeunload', (e) => {
+            if (saving || snapshot() === savedState) return;
+            e.preventDefault();
+            e.returnValue = '';
+        });
+
         function addRow() {
             const list = document.getElementById('itemsTable');
             const row = document.getElementById('rowTemplate').content.firstElementChild.cloneNode(true);
@@ -504,6 +528,7 @@
         editForm.addEventListener('submit', function () {
             // Turn any "5%" still in a box into its amount before sending.
             document.querySelectorAll('.js-money').forEach(formatInput);
+            saving = true;
             const submitBtn = document.getElementById('submitBtn');
             editForm.classList.add('loading');
             submitBtn.disabled = true;

@@ -4,6 +4,7 @@
 {% block title %}Tap what you had, {{ room['room_name'] }}{% endblock %}
 {% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
 {% block head %}<style>form.loading .receipt { opacity: 0.6; pointer-events: none; }</style>{% endblock %}
+{% block body_attrs %} data-live{% endblock %}
 {% block content %}
 <main class="stack has-paybar">
     <div class="row">
@@ -352,7 +353,8 @@
                     clearSubmissionId();
                     clearDraft();
                     setStatus('Picks sent.', 'success');
-                    window.location.href = json.redirect;
+                    // The pick screen is done with: Back from the waiting page goes to the room.
+                    window.location.replace(json.redirect);
                     return;
                 }
 
@@ -373,7 +375,7 @@
                     clearSubmissionId();
                     clearDraft();
                     setStatus('Your picks were saved.', 'success');
-                    window.location.href = my.redirect;
+                    window.location.replace(my.redirect);
                     return;
                 }
 
@@ -390,7 +392,7 @@
                     clearSubmissionId();
                     clearDraft();
                     setStatus('Your picks were saved.', 'success');
-                    window.location.href = my.redirect;
+                    window.location.replace(my.redirect);
                     return;
                 }
                 setLoading(false);

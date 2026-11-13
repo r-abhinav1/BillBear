@@ -550,6 +550,21 @@ def reopen_all(code: str, uid: str) -> None:
         _touch(cur, code)
 
 
+def unfinalize(code: str, uid: str) -> None:
+    """
+    Host only: take the split back to fix the bill. Everyone's sent picks stay
+    sent; if the host then changes a dish or a charge, replace_items asks them
+    to confirm again, and if they only fix the printed total, nobody has to.
+    """
+    code = normalize_code(code)
+    conn = db.get_conn()
+    with conn.transaction(), conn.cursor() as cur:
+        _lock_room(cur, code)
+        _require_host(cur, code, uid)
+        cur.execute("UPDATE rooms SET finalized_at = NULL WHERE code = %s", (code,))
+        _touch(cur, code)
+
+
 def finalize_room(code: str, uid: str) -> Dict[str, Any]:
     code = normalize_code(code)
     conn = db.get_conn()

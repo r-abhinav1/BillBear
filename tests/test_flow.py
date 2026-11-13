@@ -895,3 +895,37 @@ def test_check_the_bill_has_a_way_back_to_the_room(client):
     code = make_room(client)
     page = client.get(f"/edit/{code}").get_data(as_text=True)
     assert f'class="backlink" href="/room/{code}"' in page and "data-live" in page
+
+
+def test_names_with_spaces_and_hindi_reach_the_pick_screen_on_vercel(monkeypatch):
+    """Vercel passes the path still percent-encoded; DecodedPathInfo turns it back into what WSGI expects."""
+    from urllib.parse import quote
+
+    import app as app_module
+
+    host = new_client()
+    code = make_room(host, num_people=4)
+    for name in ("Guest 3", "राहुल"):
+        guest = new_client()
+        assert join(guest, code, name).status_code == 302
+        encoded = f"/room/{code}/user/{quote(name)}/select-items"
+        as_vercel = {"PATH_INFO": encoded}                    # not decoded, as Vercel hands it over
+
+        monkeypatch.setattr(app_module.app, "wsgi_app", app_module.app.wsgi_app)
+        resp = guest.get(encoded, environ_overrides=as_vercel)
+        assert resp.status_code == 302 and resp.headers["Location"].endswith(encoded)   # redirects to itself
+
+        monkeypatch.setattr(app_module.app, "wsgi_app", app_module.DecodedPathInfo(app_module.app.wsgi_app))
+        assert guest.get(encoded, environ_overrides=as_vercel).status_code == 200
+        monkeypatch.undo()
+
+
+def test_decoded_path_info_leaves_plain_paths_alone():
+    import app as app_module
+
+    seen = []
+    mw = app_module.DecodedPathInfo(lambda environ, start: seen.append(environ["PATH_INFO"]) or [])
+    mw({"PATH_INFO": "/room/AB12CD/user/Asha/select-items"}, None)
+    mw({"PATH_INFO": "/room/AB12CD/user/%E0%A4%B0/x"}, None)
+    assert seen[0] == "/room/AB12CD/user/Asha/select-items"
+    assert seen[1].encode("latin-1").decode("utf-8") == "/room/AB12CD/user/र/x"

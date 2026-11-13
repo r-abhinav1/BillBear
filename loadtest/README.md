@@ -42,4 +42,4 @@ k6 run -e BASE_URL=https://billbear.vercel.app -e CONFIRM_REMOTE=yes \
 Rooms are named `k6 load test …` and expire with the daily cleanup. Requests
 from the test are tagged `load_test=true` in Sentry.
 
-Knobs: `TABLES`, `PHONES`, `PICK_SECONDS`, `RAMP`, `HOLD`, `PDF` (0 skips PDFs).
+Knobs: `TABLES`, `PHONES`, `PICK_SECONDS`, `RAMP`, `HOLD`, `PDF` (0 skips PDFs), `PDF_PHONES` (phones per table that download it, 2).

@@ -116,6 +116,22 @@ if not PDF_AVAILABLE:
 # Flask app
 # ---------------------------------------------------------------------------
 
+class DecodedPathInfo:
+    """WSGI middleware: percent-decode PATH_INFO once (see where it is applied)."""
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        from urllib.parse import unquote_to_bytes
+
+        path = environ.get("PATH_INFO", "")
+        if "%" in path:
+            # WSGI strings carry raw bytes as latin-1; Werkzeug decodes them as UTF-8.
+            environ["PATH_INFO"] = unquote_to_bytes(path).decode("latin-1")
+        return self.wsgi_app(environ, start_response)
+
+
 # Error tracking: on only when SENTRY_DSN is set (utils/observability.py).
 init_sentry(VERCEL_ENV)
 
@@ -126,6 +142,13 @@ if VERCEL_ENV or os.getenv("TRUST_PROXY", "").lower() in {"1", "true", "yes"}:
     from werkzeug.middleware.proxy_fix import ProxyFix
 
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+if VERCEL_ENV:
+    # Vercel's Python runtime hands over the path still percent-encoded
+    # ("/room/AB12CD/user/Guest%203"), where WSGI expects it decoded. Every route
+    # with a person's name in it then saw "Guest%203", never matched the session's
+    # "Guest 3", and redirected to itself forever: anyone with a space or a
+    # non-English letter in their name was locked out.
+    app.wsgi_app = DecodedPathInfo(app.wsgi_app)
 app.config["SECRET_KEY"] = get_secret_key()  # raises on Vercel if missing/weak
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 db.init_app(app)

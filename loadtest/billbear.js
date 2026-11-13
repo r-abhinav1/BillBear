@@ -13,7 +13,7 @@
 //
 // Knobs (-e NAME=value): TABLES (peak tables at once, 10), PHONES (per table, 6),
 // PICK_SECONDS (polling time while picking, 60), RAMP (1m), HOLD (3m),
-// PDF (1 = everyone downloads it, 0 = nobody). Against anything but localhost
+// PDF (0 = nobody downloads it), PDF_PHONES (how many per table do, 2). Against anything but localhost
 // also pass -e CONFIRM_REMOTE=yes: the run uses real CPU on that server.
 import http from 'k6/http';
 import { check, sleep, fail } from 'k6';
@@ -26,6 +26,9 @@ const PHONES = Math.max(2, parseInt(__ENV.PHONES || '6', 10));
 const PICK_SECONDS = parseInt(__ENV.PICK_SECONDS || '60', 10);
 const POLL_SECONDS = 3;
 const PDF = (__ENV.PDF || '1') !== '0';
+// Phones per table that download the PDF (a real table: one or two). PDFs are the
+// most CPU-hungry request, so this matters for a budgeted run.
+const PDF_PHONES = parseInt(__ENV.PDF_PHONES || '2', 10);
 
 if (TOKEN.length < 32) fail('Set -e LOAD_TEST_TOKEN=<the same 32+ character secret the server has>.');
 if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(BASE) && __ENV.CONFIRM_REMOTE !== 'yes') {
@@ -148,11 +151,11 @@ export default function () {
         params(host, 'finalize', { headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' } }));
     check(res, { 'split done': () => res.status === 200 });
 
-    // Everyone opens the split, and downloads the PDF.
-    for (const phone of phones) {
+    // Everyone opens the split; a couple of phones download the PDF.
+    for (const [n, phone] of phones.entries()) {
         const r = http.get(`${BASE}/room/${code}/results`, params(phone, 'results'));
         check(r, { 'results page': () => r.status === 200 && String(r.body).includes('pays') });
-        if (PDF) {
+        if (PDF && n < PDF_PHONES) {
             const p = http.get(`${BASE}/room/${code}/download`, params(phone, 'pdf'));
             check(p, { 'pdf': () => p.status === 200 && String(p.headers['Content-Type']).includes('pdf') });
         }

@@ -46,12 +46,12 @@
                 </div>
                 <div class="field" style="width: 96px">
                     <label for="num_people">People</label>
-                    <input type="number" id="num_people" name="num_people" class="input input--mono" min="1" max="50" autocomplete="off"
+                    <input type="number" id="num_people" name="num_people" class="input input--mono" min="{{ MIN_PEOPLE }}" max="{{ MAX_PEOPLE }}" autocomplete="off"
                            inputmode="numeric" placeholder="4" value="{{ form.get('num_people', '') }}" required
                            aria-describedby="peopleHint">
                 </div>
             </div>
-            <p class="small soft" id="peopleHint" style="margin-top: -8px">Count yourself too.</p>
+            <p class="small soft" id="peopleHint" style="margin-top: -8px">Count yourself too. A split needs at least {{ MIN_PEOPLE }} people.</p>
         </div>
 
         <div id="scanPanel">
@@ -75,6 +75,7 @@
                         <input type="file" id="bill_image" class="visually-hidden" accept="image/*">
                         <label for="bill_image" class="file-drop">{{ ui.icon('image') }} <span>From gallery</span></label>
                     </div>
+                    <p class="small soft" id="photoTip">Lay the bill flat and fit all of it in, down to the total.</p>
                     <div class="file-drop file-drop--static has-file" id="photoChip" hidden>{{ ui.icon('image') }} <span id="photoChipText"></span></div>
                     <div class="scan-lines" id="scanLines" hidden aria-hidden="true">
                         <div><span style="width: 62%"></span><span style="width: 16%"></span></div>
@@ -129,6 +130,7 @@
             <button type="submit" class="btn btn--primary btn--block" id="submitBtn" disabled>
                 {% if mode == 'json' %}Check the items{% else %}Create room{% endif %}
             </button>
+            <p class="small soft center" id="submitHint" aria-live="polite">{% if mode == 'json' %}Choose your saved scan file to continue.{% else %}Add a photo of the bill to continue.{% endif %}</p>
             {% if mode != 'json' %}
             <button type="button" class="link-btn" id="skipOcrBtn">Enter items manually instead</button>
             <div class="notice notice--quiet skip-confirm" id="skipConfirm" hidden role="group" aria-labelledby="skipConfirmText">
@@ -201,7 +203,23 @@
                 });
             });
         })();
+        BB.nameField(document.getElementById('host_name'));
         const scanLines = document.getElementById('scanLines');
+
+        // The reason Create room is grey: nothing to create from yet. Hidden while a scan runs,
+        // after a photo or file is chosen, and whenever the status line has something to say.
+        const hintEl = document.getElementById('submitHint');
+        function syncHint() {
+            const photoChosen = MODE === 'json'
+                ? !!(jsonLabel && jsonLabel.classList.contains('has-file'))
+                : !document.getElementById('photoChip').hidden;
+            hintEl.hidden = !submitBtn.disabled || photoChosen || !!statusEl.textContent.trim();
+        }
+        new MutationObserver(syncHint).observe(submitBtn, { attributes: true, attributeFilter: ['disabled'] });
+        new MutationObserver(syncHint).observe(statusEl, { childList: true, characterData: true, subtree: true });
+        if (MODE === 'json') new MutationObserver(syncHint).observe(jsonLabel, { attributes: true, attributeFilter: ['class'] });
+        else new MutationObserver(syncHint).observe(document.getElementById('photoChip'), { attributes: true, attributeFilter: ['hidden'] });
+        syncHint();
 
         function setStatus(message, type) {
             statusEl.textContent = message || '';
@@ -305,7 +323,7 @@
             if (!/^[\p{L}\p{M}\p{N} .'_-]+$/u.test(name)) return "Names can only contain letters, numbers, spaces and . ' - _";
             if (!/[\p{L}\p{N}]/u.test(name)) return 'Your name needs at least one letter or number.';
             const people = Number(document.getElementById('num_people').value);
-            if (!Number.isInteger(people) || people < 1 || people > 50) return 'People must be a whole number from 1 to 50.';
+            if (!Number.isInteger(people) || people < {{ MIN_PEOPLE }} || people > {{ MAX_PEOPLE }}) return 'People must be a whole number from {{ MIN_PEOPLE }} to {{ MAX_PEOPLE }}.';
             return '';
         }
 

@@ -60,6 +60,7 @@
             window.addEventListener('pageshow', function (e) { if (e.persisted) window.location.reload(); });
         }
     </script>
+    <script src="{{ url_for('static', filename='js/bb.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

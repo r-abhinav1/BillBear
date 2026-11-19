@@ -10,7 +10,7 @@
         <div class="paper paper--bitten stack">
             <h1>Bear ate this room</h1>
             <p>Room "{{ room_code }}" doesn't exist or has expired. {% if error %}{{ error }}{% else %}Check the code with your host.{% endif %}</p>
-            <a class="btn btn--primary btn--block" href="{{ url_for('join_room') }}">Try another code</a>
+            <a class="btn btn--primary btn--block" href="{{ url_for('join') }}">Try another code</a>
         </div>
         <div class="tear"></div>
     </section>
@@ -41,3 +41,4 @@
 {% endif %}
 </main>
 {% endblock %}
+{% block scripts %}<script>BB.nameField(document.getElementById('user_name'));</script>{% endblock %}

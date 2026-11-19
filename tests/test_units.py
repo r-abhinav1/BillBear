@@ -10,7 +10,8 @@ from utils.bill_audit import audit_bill
 from utils.bill_split import calculate_bill_split
 from utils.image_prep import ImageRejected, prepare_receipt_image
 from utils.receipt_pipeline import VisionFailed, VisionUnavailable, extract_receipt_from_vision
-from utils.room_assembler import assemble_room, unique_display_names
+from utils.money import get_currency
+from utils.room_assembler import assemble_room, each_label, unique_display_names
 from utils.validation import clean_items, normalize_person_name, parse_price
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -352,7 +353,9 @@ def _dosa_room(claims):
         {"id": 10, "position": 0, "name": "Masala Dosa", "price": Decimal("500"), "quantity": 5},
         {"id": 11, "position": 1, "name": "Coffee", "price": Decimal("60"), "quantity": 1},
     ]
-    rows = [{"participant_id": p, "item_id": i, "portions": n} for p, i, n in claims]
+    # (participant id, item id, portions[, what the claim was before the host's edit trimmed it])
+    rows = [{"participant_id": p, "item_id": i, "portions": n, "lowered_from": (rest or [None])[0]}
+            for p, i, n, *rest in claims]
     return assemble_room(room, people, items, rows)
 
 
@@ -402,6 +405,15 @@ def test_units_nobody_owns_are_not_charged_and_are_flagged():
     audit = audit_bill(r, split)
     assert audit[0]["title"] == "Masala Dosa: 4 of 5 claimed" and audit[0]["severity"] == "warn"
     assert "ok" not in [w["severity"] for w in audit]
+
+
+def test_trimmed_claims_are_reported_per_person_and_dish():
+    r = _dosa_room([(1, 10, 2, 3), (2, 10, 1), (3, 10, 2, 2), (1, 11, 1, 4)])
+    by_name = {p["name"]: p["claim_lowered"] for p in r["participants"]}
+    assert by_name["Asha"] == {10: 3}       # had 3, holds 2; the coffee is one dish, nothing to count
+    assert by_name["Bala"] == {}            # never trimmed
+    assert by_name["Chitra"] == {}          # a stale "was" that is not higher than the claim is ignored
+    assert by_name["Dev"] == {}
 
 
 def test_rows_without_portions_count_as_one_each():
@@ -456,3 +468,55 @@ def test_proportional_taxes_fall_back_to_equal_when_dishes_cost_nothing():
         item["price"] = "₹0.00"
     people = calculate_bill_split(room)["user_breakdown"]
     assert people["Asha"]["final_amount"] == people["Bala"]["final_amount"] == 40.0
+
+
+def test_each_label_for_lines_the_bill_lists_several_of():
+    inr, jpy = get_currency("INR"), get_currency("JPY")
+    assert each_label(Decimal("240.00"), 4, inr) == "₹60.00 each"
+    assert each_label(Decimal("100.00"), 3, inr) == "about ₹33.33 each"      # doesn't divide evenly
+    assert each_label(Decimal("1200"), 3, jpy) == "¥400 each"                 # yen have no decimals
+    assert each_label(Decimal("320.00"), 1, inr) == ""                        # a single dish needs no caption
+    assert each_label(None, 4, inr) == ""
+
+
+def test_pick_rows_show_the_bill_order_and_shared_status():
+    from app import _pick_rows
+
+    room = {
+        "items": [
+            {"id": 1, "name": "Tikka", "category": "veg", "quantity": 1},
+            {"id": 2, "name": "Naan", "category": "veg", "quantity": 4},
+            {"id": 3, "name": "Beer", "category": "alcohol", "quantity": 3},
+            {"id": 4, "name": "Chicken", "category": "nonveg", "quantity": 1},
+        ],
+        "selections": {"Rohan": ["Chicken", "Beer", "Naan"]},          # picked in a different order
+        "portions": {"Rohan": {"Beer": 2, "Naan": 0}},
+    }
+    rows = _pick_rows(room, "Rohan")
+    assert [r["name"] for r in rows] == ["Naan", "Beer", "Chicken"]    # the bill's order
+    assert [r["portions"] for r in rows] == [0, 2, None]               # shared, 2 yours, a single dish
+    assert [r["quantity"] for r in rows] == [4, 3, 1]
+    assert [r["id"] for r in rows] == [2, 3, 4]
+    assert rows[2]["category"] == "nonveg"
+    assert _pick_rows(room, "Nobody") == []
+
+
+# --- fitting held claims to a smaller quantity ---------------------------------
+
+@pytest.mark.parametrize("quantity, held, fitted", [
+    (5, [3, 2], [3, 2]),            # fits: untouched
+    (5, [2, 0], [2, 0]),
+    (5, [1, 1, 1, 1, 1], [1, 1, 1, 1, 1]),
+    (4, [3, 2], [3, 1]),            # the last in line gives up what is gone
+    (3, [2, 0], [2, 0]),
+    (3, [3, 0], [2, 0]),            # a sharer needs one unit left for them
+    (2, [3, 2], [1, 0]),            # nothing left to claim: they share instead
+    (3, [2, 2, 2], [2, 0, 0]),
+    (4, [0, 0], [0, 0]),
+    (1, [1, 1], [1, 1]),            # a single dish is shared, never counted in units
+])
+def test_fit_claims(quantity, held, fitted):
+    from utils.portions import fit_claims
+
+    assert fit_claims(quantity, held) == fitted
+    assert fit_claims(quantity, fitted) == fitted       # already valid: a second pass changes nothing

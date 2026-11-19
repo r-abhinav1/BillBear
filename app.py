@@ -85,6 +85,8 @@ from utils.session import (  # noqa: E402
     set_session_cookie,
 )
 from utils.validation import (  # noqa: E402
+    MAX_PEOPLE,
+    MIN_PEOPLE,
     clean_items,
     normalize_quantity,
     normalize_person_name,
@@ -179,7 +181,12 @@ app.add_template_filter(pdf_text, "pdf_text")
 
 @app.context_processor
 def _currency_context():
-    return {"CURRENCY_CHOICES": currency_choices(), "MAX_CHARGES": MAX_CHARGES}
+    return {
+        "CURRENCY_CHOICES": currency_choices(),
+        "MAX_CHARGES": MAX_CHARGES,
+        "MIN_PEOPLE": MIN_PEOPLE,
+        "MAX_PEOPLE": MAX_PEOPLE,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +212,25 @@ def error_response(message: str, status: int, code: str = "ERROR", **extra):
         body = {"status": "error", "code": code, "message": message}
         body.update(extra)
         return jsonify(body), status
-    return render_template("message.html", title="Something went wrong", message=message), status
+    title = ERROR_TITLES.get(code, "Something went wrong")
+    # Errors about a room say what to do next, when the URL names the room.
+    in_room = (request.view_args or {}).get("room_code")
+    link = link_text = None
+    if in_room and code == "NOT_HOST":
+        link, link_text = url_for("room_summary", room_code=in_room), "Back to the room"
+    elif in_room and code == "NOT_MEMBER":
+        link, link_text = url_for("join_room", room_code=in_room), "Join the room"
+    return render_template("message.html", title=title, message=message, link=link, link_text=link_text), status
+
+
+# Page titles for the errors people actually meet. Anything else is "Something went wrong".
+ERROR_TITLES = {
+    "NOT_HOST": "Only the host can do that",
+    "NOT_MEMBER": "Rejoin this room",
+    "FULL": "This room is full",
+    "FINALIZED": "The bill is already split",
+    "RATE_LIMITED": "Too many tries",
+}
 
 
 @app.teardown_request
@@ -740,8 +765,8 @@ def create_room():
             num_people = int(form.get("num_people", "").strip())
         except ValueError:
             raise ValueError("Number of people must be a whole number.")
-        if not 1 <= num_people <= 50:
-            raise ValueError("Number of people must be between 1 and 50.")
+        if not MIN_PEOPLE <= num_people <= MAX_PEOPLE:
+            raise ValueError(f"Number of people must be between {MIN_PEOPLE} and {MAX_PEOPLE}.")
 
         if form.get("skip_ocr", "").lower() == "true":
             receipt, source = {}, "manual"
@@ -923,6 +948,7 @@ def edit_items(room_code):
         currency=get_currency(view["currency"]).public(),
         error=error,
         submitted_count=len(room["submitted_users"]),
+        manual=room["ocr_source"] == "manual",
     ), (400 if error else 200)
 
 
@@ -947,22 +973,47 @@ def room_summary(room_code):
     )
 
 
+def _pick_labels(room: dict, name: str, several: set = None) -> list:
+    """One person's sent picks as display strings, e.g. "Masala Dosa ×2" or "Naan (sharing)"."""
+    if several is None:
+        several = {item["name"] for item in room["items"] if item["quantity"] > 1}
+    counts = room["portions"].get(name, {})
+    shown = []
+    for dish in room["selections"].get(name, []):
+        if dish not in several:
+            shown.append(dish)
+        elif counts.get(dish, 0) == 0:
+            shown.append(f"{dish} (sharing)")
+        else:
+            shown.append(f"{dish} ×{counts[dish]}")
+    return shown
+
+
+def _pick_rows(room: dict, name: str) -> list:
+    """One person's sent picks as rows for the waiting page, in the order the bill lists them.
+
+    `portions` is None for a single dish, 0 for a several-of dish they share, or how many
+    of them they had to themselves.
+    """
+    chosen = set(room["selections"].get(name, []))
+    counts = room["portions"].get(name, {})
+    return [
+        {
+            "id": item["id"],
+            "name": item["name"],
+            "category": item["category"],
+            "quantity": item["quantity"],
+            "portions": counts.get(item["name"], 0) if item["quantity"] > 1 else None,
+        }
+        for item in room["items"]
+        if item["name"] in chosen
+    ]
+
+
 def _picks_for_host(room: dict) -> dict:
-    """Each person's sent picks as display strings, e.g. "Masala Dosa ×2" or "Naan (sharing)"."""
+    """Each person's sent picks, for the host's Manage sheet."""
     several = {item["name"] for item in room["items"] if item["quantity"] > 1}
-    picks = {}
-    for name, dishes in room["selections"].items():
-        counts = room["portions"].get(name, {})
-        shown = []
-        for dish in dishes:
-            if dish not in several:
-                shown.append(dish)
-            elif counts.get(dish, 0) == 0:
-                shown.append(f"{dish} (sharing)")
-            else:
-                shown.append(f"{dish} ×{counts[dish]}")
-        picks[name] = shown
-    return picks
+    return {name: _pick_labels(room, name, several) for name in room["selections"]}
 
 
 @app.route("/room/<room_code>/status")
@@ -997,6 +1048,9 @@ def room_status(room_code):
         # What each person has sent, for the host's Manage sheet. Guests only
         # see everyone's picks once the bill is final.
         "picks": _picks_for_host(room) if me and me["is_host"] else None,
+        # The caller's own sent picks (None until they have sent), so the waiting
+        # page can show what they sent without anyone else's picks leaking.
+        "my_picks": _pick_rows(room, me["name"]) if me and me["name"] in room["submitted_users"] else None,
         # Dishes where the portions sent don't add up to the bill's quantity.
         "quantity_mismatches": room["quantity_mismatches"] if me and me["is_host"] else [],
         # For dishes the bill lists several of: what each *other* person has sent
@@ -1184,6 +1238,7 @@ def select_items(room_code, user_name):
         user_name=me["name"],
         pre_selected=me["claim_ids"],
         pre_portions=me["claim_portions"],
+        pre_lowered=me["claim_lowered"],
     )
 
 
@@ -1290,8 +1345,8 @@ def host_update_num_people(room_code):
         value = int(str(_json_body().get("num_people", "")).strip())
     except (TypeError, ValueError):
         raise RoomError("BAD_REQUEST", "num_people must be an integer", status=400)
-    if not 1 <= value <= 50:
-        raise RoomError("BAD_REQUEST", "num_people must be between 1 and 50", status=400)
+    if not MIN_PEOPLE <= value <= MAX_PEOPLE:
+        raise RoomError("BAD_REQUEST", f"Number of people must be between {MIN_PEOPLE} and {MAX_PEOPLE}.", status=400)
     storage.set_num_people(room["code"], uid, value)
     return jsonify({"status": "success", "num_people": value})
 
@@ -1369,6 +1424,7 @@ def results_page(room_code):
         caller_name=me["name"],
         caller_is_host=me["is_host"],
         audit_warnings=audit_bill(room, bill_split),
+        ttl_hours=max(1, storage.ttl_seconds() // 3600),
     )
 
 

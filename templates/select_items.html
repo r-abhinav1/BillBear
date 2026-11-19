@@ -39,13 +39,15 @@
                            data-quantity="{{ item.quantity }}"
                            {% if item.id in (pre_selected or []) %}checked{% endif %}>
                     {{ ui.paw(false) }}
-                    <span class="with-diet grow">{{ ui.diet(item.category) }}<span class="pick__name">{{ item.name }}{% if item.quantity > 1 %} <span class="pick__qty">×{{ item.quantity }}</span><span class="pick__taken" data-item="{{ item.id }}" data-quantity="{{ item.quantity }}" aria-live="polite"></span>{% endif %}</span></span>
+                    <span class="with-diet grow">{{ ui.diet(item.category) }}<span class="pick__name">{{ item.name }}{% if item.quantity > 1 %} <span class="pick__qty">×{{ item.quantity }}</span>{% if item.each %}<span class="pick__each">{{ item.each }}</span>{% endif %}<span class="pick__taken" data-item="{{ item.id }}" data-quantity="{{ item.quantity }}" aria-live="polite"></span>{% endif %}</span></span>
                     <span class="pick__side"><span class="pick__price">{{ item.price }}</span>{% if item.quantity > 1 %}<span class="pick__mode" data-item="{{ item.id }}"></span>{% endif %}</span>
                 </label>
                 {% if item.quantity > 1 %}
                 {% set mine = [[(pre_portions or {}).get(item.id, 0), 0] | max, item.quantity] | min %}
                 <div class="portions" data-item="{{ item.id }}" data-quantity="{{ item.quantity }}" data-max="{{ item.quantity }}" data-amount="{{ item.amount if item.amount is not none else 0 }}">
                     <span class="portions__label" id="portions_label_{{ item.id }}" aria-live="polite"></span>
+                    {% set was = (pre_lowered or {}).get(item.id) %}
+                    {% if was %}<span class="portions__changed" role="note">{% if mine %}The host changed the bill: your {{ was }} became {{ mine }}.{% else %}The host changed the bill and none were left to claim, so you are sharing now (you had {{ was }}).{% endif %}</span>{% endif %}
                     <span class="portions__hint">Had one to yourself? Press +</span>
                     <span class="stepper stepper--mode" role="group" aria-label="Shared, or how many were yours alone">
                         <button type="button" data-step="-1" aria-label="One fewer to myself">−</button>
@@ -189,6 +191,8 @@
             setPortions(row.dataset.item, row.querySelector('input').value);
             row.querySelectorAll('button[data-step]').forEach(btn => {
                 btn.addEventListener('click', () => {
+                    const changed = row.querySelector('.portions__changed');
+                    if (changed) changed.hidden = true;   // they have seen it and are choosing again
                     setPortions(row.dataset.item, portionsOf(row.dataset.item) + parseInt(btn.dataset.step, 10));
                     updateSelection();
                     saveDraft();

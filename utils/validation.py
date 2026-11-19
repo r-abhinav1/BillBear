@@ -19,6 +19,9 @@ ROOM_NAME_MAX = 60
 ITEM_NAME_MAX = 80
 MAX_ITEMS = 200
 MAX_QUANTITY = 99
+# Splitting a bill needs someone to split it with.
+MIN_PEOPLE = 2
+MAX_PEOPLE = 50
 
 _NAME_PUNCT = set(" .'-_")
 _CONFUSABLE_SCRIPTS = {"LATIN", "CYRILLIC", "GREEK"}

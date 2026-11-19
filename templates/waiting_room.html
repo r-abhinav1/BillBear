@@ -18,6 +18,20 @@
         </p>
     </div>
 
+    {% if is_host %}
+    {# Once everyone has sent, the split button moves up here so the host never has to hunt for it. #}
+    <section class="ready" id="readyCard" role="status" hidden>
+        <div class="ready__top">
+            {{ ui.paw(true) }}
+            <p class="ready__text" id="readyText">Everyone has sent their picks. You can split the bill now.</p>
+        </div>
+        <p class="notice" id="unclaimedWarning" style="display: none"></p>
+        <p class="notice" id="quantityWarning" style="display: none"></p>
+        <button type="button" class="btn btn--primary btn--block" id="finalizeBtn">Split the bill</button>
+        <p id="finalizeStatus" class="status-line" aria-live="polite"></p>
+    </section>
+    {% endif %}
+
     {% set my_submitted = user_name in room.submitted_users %}
     <div class="notice stack" id="pickCard" {% if my_submitted %}style="display: none"{% endif %}>
         <strong>You haven't sent your picks yet.</strong>
@@ -25,18 +39,17 @@
         <a class="btn btn--honey" href="{{ url_for('select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
     </div>
 
-    <div>
-        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
-        <section class="card ticket">
-            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
-            <div class="grow stack" style="gap: 6px">
-                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
-                <span class="ticket__code">{{ room_code }}</span>
-                <span id="joinUrl" hidden>{{ join_url }}</span>
-                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
-            </div>
-        </section>
-    </div>
+    {# What this person sent, laid out like the bill: diet mark, dish, quantity, shared or not. #}
+    <section class="receipt" id="sentCard" hidden>
+        <div class="paper stack" style="gap: 10px">
+            <h2>What you sent</h2>
+            <hr class="dash dash--ink">
+            <div class="lines" id="sentLines"></div>
+            <p class="fineprint" id="sentCaveat" style="text-wrap: balance" hidden>Shared dishes can still change while others are picking.</p>
+            <p class="fineprint" style="text-wrap: balance">Your total shows once the host splits the bill.</p>
+        </div>
+        <div class="tear"></div>
+    </section>
 
     <section class="stack">
         <div class="row row--between">
@@ -49,6 +62,7 @@
             {% if is_host %}<button type="button" class="link-btn" id="seatDropBtn">Not coming</button>{% endif %}
         </div>
         {% if is_host %}
+        <button type="button" class="btn btn--block" id="nudgeBtn" hidden></button>
         <div class="row row--between">
             <span style="font-weight: 600">People at the table</span>
             <div class="stepper">
@@ -61,13 +75,25 @@
         {% endif %}
     </section>
 
+    <div>
+        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
+        <section class="card ticket">
+            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
+            <div class="grow stack" style="gap: 6px">
+                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
+                <span class="ticket__code">{{ room_code }}</span>
+                <span id="joinUrl" hidden>{{ join_url }}</span>
+                <button type="button" class="btn btn--small btn--honey" id="shareBtn" hidden>Share invite</button>
+                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
+            </div>
+        </section>
+    </div>
+
     {% if is_host %}
     <section class="stack" id="hostControls">
-        <p class="notice" id="unclaimedWarning" style="display: none"></p>
-        <p class="notice" id="quantityWarning" style="display: none"></p>
+        <p class="notice" id="unclaimedEarly" style="display: none"></p>
         <p id="finalizeDetail" style="font-weight: 600">Checking…</p>
-        <button type="button" class="btn btn--primary btn--block" id="finalizeBtn" disabled>Split the bill</button>
-        <p id="finalizeStatus" class="status-line" aria-live="polite"></p>
+        <button type="button" class="btn btn--primary btn--block" id="finalizeWaitBtn" disabled>Split the bill</button>
         <div class="links">
             <a class="textlink" href="{{ url_for('edit_items', room_code=room_code) }}">Edit dishes</a>
         </div>
@@ -124,13 +150,16 @@
 {% endif %}
 
 <template id="pawTpl">{{ ui.paw(true) }}</template>
+{% for c in ['veg', 'nonveg', 'egg', 'alcohol'] %}<template data-diet="{{ c }}">{{ ui.diet(c) }}</template>{% endfor %}
 {% endblock %}
 {% block scripts %}
     <script>
         const roomCode = {{ room_code | tojson }};
         const hostName = {{ room.host_name | tojson }};
+        const roomName = {{ room.room_name | tojson }};
         const currentUser = {{ user_name | tojson }};
         const isHost = {{ is_host | tojson }};
+        const MIN_PEOPLE = {{ MIN_PEOPLE }};
 
         const POLL_FAST_MS = 3000;
         const POLL_SLOW_MS = 15000;
@@ -232,6 +261,75 @@
             return row;
         }
 
+        /* What you sent: the bill's own look. Dish names only ever go in through textContent. */
+        let sentKey = null;
+
+        function dietMark(category) {
+            const tpl = document.querySelector(`template[data-diet="${category}"]`);
+            return tpl ? tpl.content.firstElementChild.cloneNode(true) : null;
+        }
+
+        // For a dish the bill lists several of: the tag for my own pick, and a line saying who else
+        // holds what. `others` is what other people have sent for it (the pick screen's data):
+        // units claimed, or 0 for someone sharing whatever nobody claims.
+        const people = (names) => (names.length <= 3 ? joinNames(names) : `${names.length} people`);
+
+        function severalOf(r, others) {
+            const claimed = others.reduce((sum, h) => sum + h.portions, 0);
+            const sharers = others.filter(h => h.portions === 0).map(h => h.name);
+            const holders = others.filter(h => h.portions > 0);
+            const holds = holders.length ? `${joinNames(holders.map(h => `${h.name} has ${h.portions}`))}.` : '';
+            if (r.portions === 0) {
+                // Sharing: I split every unit nobody has claimed with the other sharers.
+                const left = r.quantity - claimed;
+                const tag = left <= 0 ? 'Nothing left' : left === r.quantity ? `Sharing all ${r.quantity}` : `Sharing ${left} of ${r.quantity}`;
+                const together = left <= 0 ? `All ${r.quantity} are claimed.` : sharers.length ? `With ${people(sharers)}.` : '';
+                const note = [together, holds].filter(Boolean).join(' ');
+                return { tag, note: note || 'Nobody else has sent this yet.' };
+            }
+            const unclaimed = Math.max(r.quantity - claimed - r.portions, 0);
+            let note;
+            if (sharers.length && unclaimed > 0) {
+                note = `${people(sharers)} ${sharers.length === 1 ? 'shares' : 'share'} the ${unclaimed === 1 ? 'last 1' : `other ${unclaimed}`}.`;
+            } else {
+                note = unclaimed > 0 ? `${unclaimed} still unclaimed.` : `All ${r.quantity} are claimed.`;
+            }
+            return { tag: `${r.portions} yours`, note: [note, holds].filter(Boolean).join(' ') };
+        }
+
+        function renderSent(rows, taken, settled) {
+            // Polled every few seconds; only redraw when something shown could have changed.
+            const key = JSON.stringify([rows, rows.map(r => taken[r.id] || []), settled]);
+            $('sentCaveat').hidden = settled || !rows.some(r => r.quantity > 1);
+            if (key === sentKey) return;
+            sentKey = key;
+            if (!rows.length) {
+                $('sentLines').replaceChildren(el('p', 'fineprint', "You didn't pick any dishes."));
+                return;
+            }
+            $('sentLines').replaceChildren(...rows.map(r => {
+                const row = el('div', 'sent-row');
+                const line = el('div', 'line');
+                const what = el('span', 'with-diet');
+                const mark = dietMark(r.category);
+                if (mark) what.appendChild(mark);
+                const name = el('span', null, r.name);
+                let said = null;
+                if (r.quantity > 1) {
+                    name.append(' ', el('span', 'pick__qty', `×${r.quantity}`));
+                    said = severalOf(r, taken[r.id] || []);
+                }
+                what.appendChild(name);
+                line.appendChild(what);
+                // A single dish is split between whoever picked it at the end, so it has no tag.
+                line.appendChild(said ? el('span', 'tag', said.tag) : el('span'));
+                row.appendChild(line);
+                // Who else holds what, on its own line so it has the full width.
+                if (said) row.appendChild(el('div', 'line__calc', said.note));
+                return row;
+            }));
+        }
+
         $('userList').addEventListener('click', async (e) => {
             const manage = e.target.closest('button[data-manage]');
             if (manage) { openSheet(manage.dataset.manage); return; }
@@ -320,11 +418,37 @@
         /* Host: split the bill, change the head count                         */
         /* ------------------------------------------------------------------ */
 
+        function setNotice(node, text) {
+            node.textContent = text;
+            node.style.display = text ? 'block' : 'none';
+        }
+
         function renderFinalizePanel(data) {
             const btn = $('finalizeBtn');
             if (!btn) return;
             const detail = $('finalizeDetail');
-            const unclaimed = $('unclaimedWarning');
+            const ready = !!data.can_finalize;
+
+            // Anyone still picking can be nudged through the phone's share sheet.
+            const nudge = $('nudgeBtn');
+            const slow = data.still_editing.filter(n => n !== currentUser);
+            nudge.hidden = ready || slow.length === 0;
+            if (slow.length) {
+                const who = slow.length <= 2 ? joinNames(slow) : `${slow.length} people`;
+                const label = BB.canShare() ? `Nudge ${who}` : `Copy a nudge for ${who}`;
+                if (nudge.dataset.shown !== label) {   // not every poll: a "Copied" flash must survive
+                    nudge.dataset.shown = label;
+                    nudge.dataset.label = label;
+                    nudge.textContent = label;
+                }
+            }
+
+            // Ready: the split button and its warnings sit at the top. Not yet: the
+            // status line and the greyed-out button stay down with the host controls.
+            $('readyCard').hidden = !ready;
+            detail.hidden = ready;
+            $('finalizeWaitBtn').hidden = ready;
+            $('waitingDetail').hidden = ready;
 
             if (data.waiting_for > 0) {
                 detail.textContent = `Waiting for ${data.waiting_for} more ${data.waiting_for === 1 ? 'person' : 'people'} to join.`;
@@ -334,26 +458,35 @@
                 detail.textContent = 'Everyone has sent their picks.';
             }
 
+            // Unpicked dishes are worth knowing about early, so the same line shows in
+            // whichever place the host is looking: below while waiting, beside the button once ready.
+            let unclaimedText = '';
             if (data.unclaimed_items.length) {
                 const list = data.unclaimed_items.slice(0, 6).join(', ') + (data.unclaimed_items.length > 6 ? ' and more' : '');
-                unclaimed.textContent = `Nobody has picked: ${list}. Unpicked dishes aren't charged to anyone, so ask around first.`;
-                unclaimed.style.display = 'block';
-            } else {
-                unclaimed.style.display = 'none';
+                unclaimedText = `Nobody has picked: ${list}. Unpicked dishes aren't charged to anyone, so ask around first.`;
             }
+            setNotice($('unclaimedWarning'), ready ? unclaimedText : '');
+            setNotice($('unclaimedEarly'), ready ? '' : unclaimedText);
+
             // Only worth raising once everyone has sent: until then the count is still moving.
-            const quantity = $('quantityWarning');
-            const off = data.can_finalize ? (data.quantity_mismatches || []) : [];
+            // Units nobody holds would be charged to no one, so the bill can't be split until
+            // someone claims them or shares (the server refuses too).
+            const off = ready ? (data.quantity_mismatches || []) : [];
+            let quantityText = '';
             if (off.length) {
-                const list = off.slice(0, 4)
-                    .map(m => `${m.name} (${m.claimed} of ${m.quantity} claimed: ${(m.by || []).map(h => `${h.name} ${h.portions}`).join(', ')})`).join('; ')
-                    + (off.length > 4 ? '; and more' : '');
-                quantity.textContent = `Not fully claimed: ${list}. Nobody is sharing the rest, so it isn't charged to anyone. Ask around first.`;
-                quantity.style.display = 'block';
-            } else {
-                quantity.style.display = 'none';
+                const list = off.slice(0, 4).map(m => {
+                    const left = m.quantity - m.claimed;
+                    const by = (m.by || []).map(h => `${h.name} ${h.portions}`).join(', ');
+                    return `${m.name}: ${m.claimed} of ${m.quantity} claimed (${by}), ${left} left`;
+                }).join('; ') + (off.length > 4 ? '; and more' : '');
+                quantityText = `${list}. Nobody is sharing the rest, so it would be charged to no one. `
+                    + 'Ask someone to claim it or share, or tap Change on your own row to take it yourself.';
             }
-            btn.disabled = !data.can_finalize;
+            setNotice($('quantityWarning'), quantityText);
+            $('readyText').textContent = off.length
+                ? 'Everyone has sent, but some dishes still have units nobody has.'
+                : 'Everyone has sent their picks. You can split the bill now.';
+            btn.disabled = !ready || off.length > 0;
         }
 
         async function finalizeBill() {
@@ -361,9 +494,8 @@
             const status = $('finalizeStatus');
             const unclaimedVisible = $('unclaimedWarning').style.display !== 'none';
             if (unclaimedVisible && !confirm('Some dishes are not picked by anyone and will not be charged. Split the bill anyway?')) return;
-            const quantityOff = $('quantityWarning').style.display !== 'none';
-            if (quantityOff && !confirm("Some dishes are only partly claimed and the rest will not be charged to anyone. Split the bill anyway?")) return;
             btn.disabled = true;
+            status.classList.remove('error');
             status.textContent = 'Splitting the bill…';
             const r = await postJson(`/room/${roomCode}/finalize`, {});
             if (r.ok && r.data && r.data.redirect) {
@@ -377,7 +509,7 @@
 
         async function saveNumPeople(val) {
             const status = $('numPeopleStatus');
-            if (!Number.isFinite(val) || val < 1 || val > 50) return;
+            if (!Number.isFinite(val) || val < MIN_PEOPLE || val > {{ MAX_PEOPLE }}) return;
             status.classList.remove('error');
             status.textContent = '';
             const r = await postJson(`/room/${roomCode}/host/num-people`, { num_people: val });
@@ -496,6 +628,9 @@
                 }
                 prevMeSubmitted = meSubmitted;
                 $('pickCard').style.display = meSubmitted ? 'none' : 'flex';
+                const sent = Array.isArray(data.my_picks);
+                $('sentCard').hidden = !(meSubmitted && sent);
+                if (sent) renderSent(data.my_picks, data.taken || {}, data.still_editing.length === 0 && data.waiting_for === 0);
 
                 renderHeadline(data);
                 $('statusCount').textContent = `${data.submitted_count}/${data.expected_people} sent`;
@@ -504,7 +639,13 @@
                 $('seatRow').hidden = data.waiting_for === 0;
                 $('seatText').textContent = data.waiting_for === 1 ? '1 seat still empty' : `${data.waiting_for} seats still empty`;
                 const count = $('peopleCount');
-                if (count) count.textContent = data.expected_people;
+                if (count) {
+                    count.textContent = data.expected_people;
+                    $('peopleLess').disabled = data.expected_people <= MIN_PEOPLE;
+                }
+                // "Not coming" would drop the head count to who is here; not below the minimum.
+                const drop = $('seatDropBtn');
+                if (drop) drop.hidden = data.total_users < MIN_PEOPLE;
 
                 renderFinalizePanel(data);
                 fillSheet();
@@ -519,36 +660,34 @@
 
         updateStatus();
 
-        function copyText(text, btn) {
-            function done(ok) {
-                const original = btn.dataset.label || btn.textContent;
-                btn.dataset.label = original;
-                btn.textContent = ok ? 'Copied' : 'Could not copy';
-                setTimeout(() => { btn.textContent = original; }, 2000);
-            }
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(text).then(() => done(true)).catch(() => fallback());
-            } else {
-                fallback();
-            }
-            function fallback() {
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-                document.body.appendChild(ta);
-                ta.select();
-                let ok = false;
-                try { ok = document.execCommand('copy'); } catch (_e) {}
-                document.body.removeChild(ta);
-                done(ok);
-            }
+        const joinUrl = () => $('joinUrl').textContent.trim();
+        $('copyBtn').addEventListener('click', () => BB.copyText(joinUrl(), $('copyBtn')));
+        if (BB.canShare()) {
+            // On a phone the share sheet comes first; copying the link stays one tap away.
+            $('shareBtn').hidden = false;
+            $('copyBtn').classList.remove('btn--honey');
+            $('copyBtn').textContent = 'Copy link';
+            $('shareBtn').addEventListener('click', () => BB.share({
+                title: roomName,
+                text: `${hostName} invited you to ${roomName} on BillBear. Room code ${roomCode}.`,
+                url: joinUrl(),
+            }));
         }
 
+        const nudgeBtn = $('nudgeBtn');
+        if (nudgeBtn) {
+            nudgeBtn.addEventListener('click', () => {
+                const names = lastData ? lastData.still_editing.filter(n => n !== currentUser) : [];
+                if (!names.length) return;
+                const text = `${joinNames(names)}: we're waiting on your picks for ${roomName}. Tap what you had so I can split the bill.`;
+                if (BB.canShare()) BB.share({ title: roomName, text, url: joinUrl() });
+                else BB.copyText(`${text} ${joinUrl()}`, nudgeBtn);
+            });
+        }
 
-        $('copyBtn').addEventListener('click', () => copyText($('joinUrl').textContent.trim(), $('copyBtn')));
         const copyHostLinkBtn = $('copyHostLinkBtn');
         if (copyHostLinkBtn) {
-            copyHostLinkBtn.addEventListener('click', () => copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
+            copyHostLinkBtn.addEventListener('click', () => BB.copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
         }
     </script>
 {% endblock %}

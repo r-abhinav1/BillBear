@@ -20,6 +20,7 @@ from psycopg.types.json import Jsonb
 
 import db
 from utils.bill_totals import bill_signature, legacy_field_names
+from utils.portions import fit_claims
 from utils.room_assembler import assemble_room
 from utils.session import hash_secret, issue_recovery_token, issue_user_id, secrets_match
 from utils.validation import name_key
@@ -118,6 +119,20 @@ def _insert_items(cur, code: str, items: Iterable[dict], start: int = 0) -> None
 # Reads
 # ---------------------------------------------------------------------------
 
+def _room_rows(cur, code: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """A room's participant, item and claim rows, as `assemble_room` takes them."""
+    cur.execute("SELECT * FROM participants WHERE room_code = %s", (code,))
+    participants = cur.fetchall()
+    cur.execute("SELECT * FROM items WHERE room_code = %s", (code,))
+    items = cur.fetchall()
+    cur.execute(
+        "SELECT c.participant_id, c.item_id, c.portions, c.lowered_from FROM claims c"
+        " JOIN participants p ON p.id = c.participant_id WHERE p.room_code = %s",
+        (code,),
+    )
+    return participants, items, cur.fetchall()
+
+
 def get_room(code: str) -> Optional[Dict[str, Any]]:
     """Assembled room dict, or None if missing/expired."""
     code = normalize_code(code)
@@ -127,16 +142,7 @@ def get_room(code: str) -> Optional[Dict[str, Any]]:
         room_row = cur.fetchone()
         if not room_row:
             return None
-        cur.execute("SELECT * FROM participants WHERE room_code = %s", (code,))
-        participants = cur.fetchall()
-        cur.execute("SELECT * FROM items WHERE room_code = %s", (code,))
-        items = cur.fetchall()
-        cur.execute(
-            "SELECT c.participant_id, c.item_id, c.portions FROM claims c"
-            " JOIN participants p ON p.id = c.participant_id WHERE p.room_code = %s",
-            (code,),
-        )
-        claims = cur.fetchall()
+        participants, items, claims = _room_rows(cur, code)
     room = assemble_room(room_row, participants, items, claims)
     room["_device_index"] = {
         p["user_id_hash"]: p["id"] for p in participants if p["user_id_hash"]
@@ -203,6 +209,46 @@ def create_room(
     raise RoomError("CODE_EXHAUSTED", "Could not allocate a room code. Try again.", status=503)
 
 
+def _fit_held_claims(cur, code: str) -> None:
+    """
+    Make the claims people hold fit the quantities the bill now lists.
+
+    A claim counts against everyone else for as long as it is held, sent or
+    not (see submit_selection). So when the host lowers a dish's quantity,
+    two people can each hold a claim that fits alone but not together, and each
+    is then blocked by the other's: neither can send until one gives way by
+    hand. Trim them here instead, in the order people joined
+    (utils.portions.fit_claims). Everyone is asked to confirm again after an
+    edit like this. A trimmed claim remembers what it was (`lowered_from`, the
+    earliest value if it is trimmed twice before they send) so their pick
+    screen can say what changed.
+    """
+    # A dish the bill lists once is shared equally; a claim never counts more than one.
+    cur.execute(
+        "UPDATE claims c SET portions = 1, lowered_from = COALESCE(c.lowered_from, c.portions) FROM items i"
+        " WHERE i.id = c.item_id AND i.room_code = %s AND i.quantity = 1 AND c.portions > 1",
+        (code,),
+    )
+    cur.execute(
+        "SELECT c.participant_id, c.item_id, c.portions, i.quantity FROM claims c"
+        " JOIN items i ON i.id = c.item_id JOIN participants p ON p.id = c.participant_id"
+        " WHERE i.room_code = %s AND i.quantity > 1 ORDER BY c.item_id, p.joined_at, p.id",
+        (code,),
+    )
+    by_item: Dict[int, List[Dict[str, Any]]] = {}
+    for row in cur.fetchall():
+        by_item.setdefault(row["item_id"], []).append(row)
+    for item_id, held in by_item.items():
+        fitted = fit_claims(held[0]["quantity"], [row["portions"] for row in held])
+        for row, portions in zip(held, fitted):
+            if portions != row["portions"]:
+                cur.execute(
+                    "UPDATE claims SET portions = %s, lowered_from = COALESCE(lowered_from, %s)"
+                    " WHERE participant_id = %s AND item_id = %s",
+                    (portions, row["portions"], row["participant_id"], item_id),
+                )
+
+
 def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
     """
     Diff the host's edited item list against the DB by id: update in place,
@@ -244,12 +290,7 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
         if removed:
             cur.execute("DELETE FROM items WHERE id = ANY(%s)", (removed,))
 
-        # Nobody keeps a draft claim for more of a dish than the bill now lists.
-        cur.execute(
-            "UPDATE claims c SET portions = i.quantity FROM items i"
-            " WHERE i.id = c.item_id AND i.room_code = %s AND c.portions > i.quantity",
-            (code,),
-        )
+        _fit_held_claims(cur, code)
 
         after = sorted((pos, it["name"], it["price"], it.get("quantity") or 1) for pos, it in enumerate(items))
         new_ocr = dict(room_row["ocr_data"] or {})
@@ -305,7 +346,8 @@ def join_participant(code: str, raw_name: str) -> Tuple[str, Dict[str, Any], str
             raise RoomError(
                 "NAME_TAKEN",
                 f"'{existing['name']}' has already joined from another device. "
-                "Pick a different name, or ask the host to tap 'Reset device' next to that name.",
+                "Pick a different name. If that's you on a new phone, ask the host to tap Manage "
+                "next to your name and choose 'Move them to a new phone'.",
                 status=409,
             )
         cur.execute("SELECT count(*) AS n FROM participants WHERE room_code = %s", (code,))
@@ -573,11 +615,8 @@ def finalize_room(code: str, uid: str) -> Dict[str, Any]:
         _require_host(cur, code, uid)
         if room_row["finalized_at"] is not None:
             return {"already": True}
-        cur.execute(
-            "SELECT name, submitted_at FROM participants WHERE room_code = %s ORDER BY joined_at, id",
-            (code,),
-        )
-        rows = cur.fetchall()
+        participants, items, claims = _room_rows(cur, code)
+        rows = sorted(participants, key=lambda p: (p["joined_at"], p["id"]))
         missing = room_row["num_people"] - len(rows)
         if missing > 0:
             raise RoomError(
@@ -594,6 +633,21 @@ def finalize_room(code: str, uid: str) -> Dict[str, Any]:
                 f"{', '.join(editing)} {'is' if len(editing) == 1 else 'are'} still picking items.",
                 status=409,
                 still_editing=editing,
+            )
+        # Units of a several-of dish that nobody claimed or shares would be charged
+        # to no one, so the group would pay the restaurant less than the bill says.
+        # The host can always settle it: claim the rest, or share it.
+        unowned = assemble_room(room_row, participants, items, claims)["quantity_mismatches"]
+        if unowned:
+            raise RoomError(
+                "UNOWNED_UNITS",
+                " ".join(
+                    f"{m['name']}: {m['claimed']} of {m['quantity']} are claimed and nobody is sharing "
+                    f"the other {m['quantity'] - m['claimed']}."
+                    for m in unowned
+                ) + " Ask someone to claim the rest or share it, then split the bill.",
+                status=409,
+                quantity_mismatches=unowned,
             )
         cur.execute("UPDATE rooms SET finalized_at = now() WHERE code = %s", (code,))
         _touch(cur, code)

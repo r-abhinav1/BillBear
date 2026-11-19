@@ -40,13 +40,17 @@
         <span class="bear-spot" style="flex-shrink: 0; transform: rotate(-5deg)">{{ ui.bear(104, 'Bill Bear holding the receipt') }}</span>
     </div>
 
+    {# Your own card first: with a big table it would otherwise be a long scroll away. #}
+    {% set order = people.keys() | list %}
+    {% if caller_name in order %}{% set order = [caller_name] + (order | reject('equalto', caller_name) | list) %}{% endif %}
     <div class="stack" style="gap: 10px">
-        {% for user, d in people.items() %}
+        {% for user in order %}
+        {% set d = people[user] %}
         <section class="receipt stub{% if user == caller_name %} stub--me{% endif %}">
             {% if not loop.first %}<div class="tear tear--top"></div>{% endif %}
             <div class="paper stack" style="gap: 10px">
                 <div class="row row--between" style="align-items: baseline">
-                    <h2 style="font-size: 1.45rem; font-weight: 800; overflow-wrap: anywhere">{{ user }} pays</h2>
+                    <h2 style="font-size: 1.45rem; font-weight: 800; overflow-wrap: anywhere">{{ 'You pay' if user == caller_name else user ~ ' pays' }}</h2>
                     <span class="stub__total">{{ d.final_amount | money(cur) }}</span>
                 </div>
                 <hr class="dash dash--ink">
@@ -66,7 +70,7 @@
                     <div class="line line--muted"><span>{{ c.label }}</span><span>{{ '-' if c.kind == 'discount' }}{{ c.amount | amount(cur) }}</span></div>
                     {% endfor %}
                 </div>
-                <p class="fineprint">{% if user == caller_name %}Your share. {% endif %}{{ d.percentage }}% of the dishes</p>
+                <p class="fineprint">{{ d.percentage }}% of the dishes</p>
             </div>
             <div class="tear"></div>
         </section>
@@ -99,6 +103,9 @@
     <div class="actions actions--center">
         {% if pdf_available %}
         <a href="/room/{{ room_code }}/download" class="btn btn--primary btn--block">Download the split as PDF</a>
+        <p class="fineprint" style="text-align: center; margin-top: -4px">This split is cleared {{ ttl_hours }} {{ 'hour' if ttl_hours == 1 else 'hours' }} after the bill is split. Download the PDF to keep a copy.</p>
+        {% else %}
+        <p class="fineprint" style="text-align: center">This split is cleared {{ ttl_hours }} {{ 'hour' if ttl_hours == 1 else 'hours' }} after the bill is split. Screenshot it to keep a copy.</p>
         {% endif %}
         <a href="/" class="btn btn--block">Split another bill</a>
         {% if caller_is_host %}

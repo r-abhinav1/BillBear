@@ -10,9 +10,23 @@ Selections are keyed by item *display name*, so duplicate item names
 ("Naan", "Naan") get a read-time suffix ("Naan (2)") to keep them distinct.
 """
 from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Iterable, List
 
 from .money import format_money, get_currency
+
+
+def each_label(price: Any, quantity: int, currency) -> str:
+    """"₹60.00 each" for a line the bill lists several of ("about" when it doesn't divide evenly).
+
+    The price on such a line is for all of them, which people read as the price of one.
+    """
+    if quantity <= 1 or price is None:
+        return ""
+    total = Decimal(str(price))
+    one = (total / quantity).quantize(currency.minor, rounding=ROUND_HALF_UP)
+    label = f"{format_money(one, currency)} each"
+    return label if one * quantity == total else f"about {label}"
 
 
 def unique_display_names(names: List[str]) -> List[str]:
@@ -55,6 +69,7 @@ def assemble_room(
             "category": row.get("category") or "other",
             # How many of this dish the bill lists; `price` is for all of them.
             "quantity": int(row.get("quantity") or 1),
+            "each": each_label(row["price"], int(row.get("quantity") or 1), currency),
         }
         for idx, row in enumerate(items_sorted)
     ]
@@ -63,15 +78,19 @@ def assemble_room(
 
     # participant id -> {item id: portions claimed}
     claims_by_pid: Dict[int, Dict[int, int]] = defaultdict(dict)
+    # participant id -> {item id: what the claim was before the host's edit trimmed it}
+    lowered_by_pid: Dict[int, Dict[int, int]] = defaultdict(dict)
     for claim in claim_rows:
         if claim["item_id"] in item_name_by_id:
             # Several-of dishes: whole units claimed, or 0 for "sharing what's left".
             # Rows from before portions existed, and single dishes, count as 1.
             raw = claim.get("portions")
             several = quantity_by_id[claim["item_id"]] > 1
-            claims_by_pid[claim["participant_id"]][claim["item_id"]] = (
-                max(0, int(raw)) if several and raw is not None else 1
-            )
+            held = max(0, int(raw)) if several and raw is not None else 1
+            claims_by_pid[claim["participant_id"]][claim["item_id"]] = held
+            was = claim.get("lowered_from")
+            if several and was and int(was) > held:
+                lowered_by_pid[claim["participant_id"]][claim["item_id"]] = int(was)
 
     position_by_id = {item["id"]: idx for idx, item in enumerate(items)}
     host = next((p for p in participants if p["is_host"]), None)
@@ -97,6 +116,8 @@ def assemble_room(
             "has_device": p.get("user_id_hash") is not None,
             "claim_ids": ids,
             "claim_portions": {i: mine[i] for i in ids},
+            # Dishes where the host's edit lowered this person's claim: {item id: what it was}.
+            "claim_lowered": dict(lowered_by_pid.get(p["id"], {})),
         })
 
     claimed_by_submitted = {i for p in people if p["submitted"] for i in p["claim_ids"]}

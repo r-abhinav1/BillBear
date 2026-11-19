@@ -194,6 +194,7 @@ a, button, label, summary, select, input, [role="button"], [role="radio"] { -web
 .file-drop--static { cursor: default; }
 .file-drop-row { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .file-drop-row .file-drop { flex-direction: column; gap: 6px; padding: 12px 10px; }
+#pickerRow[hidden] ~ #photoTip { display: none; }
 input[type="file"].visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; }
 input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px solid var(--ink); outline-offset: 3px; }
 .stepper { display: inline-flex; align-items: center; gap: 4px; }
@@ -231,10 +232,28 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .person__meta { font-size: 0.85rem; color: var(--ink-soft); line-height: 1.2; }
 .seat { display: flex; align-items: center; gap: 12px; min-height: 62px; padding: 8px 14px; border: var(--line) dashed var(--on-ground); border-radius: 16px; font-weight: 600; }
 
+/* Host, once everyone has sent: the split button comes to the top. Dark card and
+   honey button, like the pay bar, so it is the one loud thing on the page. */
+.ready { display: flex; flex-direction: column; gap: 14px; padding: 16px 16px 18px; border: var(--line) solid var(--ink); border-radius: 18px; background: var(--ink); color: var(--paper); }
+:root[data-theme="dark"] .ready { background: #1E1208; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ready { background: #1E1208; } }
+.ready :focus-visible { outline-color: var(--honey); }
+.ready__top { display: flex; align-items: center; gap: 14px; }
+.ready__text { font-size: 1.15rem; font-weight: 700; line-height: 1.2; text-wrap: balance; }
+.ready .paw { width: 52px; height: 52px; animation: paw-stamp 0.24s ease-out; }
+.ready .paw svg { width: 30px; height: 30px; }
+.ready .btn--primary { min-height: 64px; border-color: var(--honey); background: var(--honey); color: var(--ink); font-size: 1.35rem; }
+.ready .btn--primary[disabled] { border-color: var(--disabled); background: var(--disabled); color: var(--paper); cursor: not-allowed; }
+.ready .notice { background: var(--paper-tint); color: var(--ink); }
+.ready .status-line { color: var(--paper); }
+.ready .status-line:empty { display: none; }
+
 .lines { display: flex; flex-direction: column; gap: 9px; }
 .line { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; font-size: 1.02rem; font-weight: 600; line-height: 1.2; }
 .line > :first-child { min-width: 0; overflow-wrap: anywhere; }
 .line > :last-child { flex-shrink: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 0.97rem; }
+.line > .tag { align-self: center; font-family: var(--font); font-variant-numeric: normal; }
+.sent-row .line__calc { margin-top: 3px; padding-left: 26px; }   /* lines up under the dish name, past the diet mark */
 .line--muted { font-weight: 500; }
 .line--total { font-size: 1.15rem; font-weight: 700; }
 .line__calc { display: block; font-family: var(--mono); font-size: 0.75rem; font-weight: 400; color: var(--ink-soft); }
@@ -259,15 +278,16 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .pick:has(input:focus-visible) { outline: 3px solid var(--ink); outline-offset: -3px; }
 .pick__name { font-size: 1.05rem; font-weight: 600; line-height: 1.15; overflow-wrap: anywhere; }
 .pick__qty { margin-left: 2px; font-family: var(--mono); font-size: 0.9rem; font-weight: 600; white-space: nowrap; }
-.pick__taken { display: block; margin-top: 2px; font-size: 0.82rem; font-weight: 600; line-height: 1.2; opacity: 0.8; }
+.pick__taken, .pick__each { display: block; margin-top: 2px; font-size: 0.82rem; font-weight: 600; line-height: 1.2; opacity: 0.8; }
 .pick__taken:empty { display: none; }
 .pick--many:has(input:checked) { border-bottom: 0; }
 .portions { display: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 0 10px 10px 62px; background: var(--paper-tint); border-bottom: 2px dashed var(--rule); }
 .pick--many:has(input:checked) + .portions { display: flex; }
 .pick[hidden] + .portions { display: none; }
 .portions__label { flex: 0 0 100%; font-size: 0.93rem; font-weight: 600; line-height: 1.2; }
+.portions__changed { flex: 0 0 100%; padding: 4px 9px; border: 2px solid var(--ink); border-radius: 10px; background: var(--honey); color: var(--ink); font-size: 0.85rem; font-weight: 700; line-height: 1.25; }
 .portions__hint { flex: 1 1 0; min-width: 0; font-size: 0.82rem; line-height: 1.2; opacity: 0.8; }
-.portions .stepper button:disabled { opacity: 0.35; cursor: default; }
+.stepper button:disabled { opacity: 0.35; cursor: default; }
 .pick__side { margin-left: auto; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .pick__mode { display: none; padding: 1px 8px; border: 2px solid var(--ink); border-radius: 10px; background: var(--honey); color: var(--ink); font-size: 0.78rem; font-weight: 700; line-height: 1.3; white-space: nowrap; }
 .pick:has(input:checked) .pick__mode { display: inline-block; }
@@ -282,6 +302,25 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .paybar__total { font-family: var(--mono); font-size: 1.45rem; font-weight: 600; line-height: 1.2; }
 .paybar .btn { border-color: var(--honey); background: var(--honey); color: var(--ink); }
 .paybar .btn[disabled] { border-color: var(--disabled); background: var(--disabled); color: var(--paper); }
+
+/* ---- Dish type picker (edit page) ----------------------------------- */
+/* A button that opens our own sheet; a browser's native menu can't be styled. */
+.typepick { min-width: 0; }
+.edit-row .typepick { grid-column: 1; grid-row: 2; }
+.typepick__btn { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 46px; padding: 0 34px 0 12px; border: var(--line) solid var(--ink); border-radius: 14px; background-color: var(--field); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='10' viewBox='0 0 14 10'%3E%3Cpath d='M2 2l5 5 5-5' fill='none' stroke='%232B1B0E' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; color: var(--ink); font-family: var(--font); font-size: 0.95rem; font-weight: 600; text-align: left; cursor: pointer; }
+.typepick__btn:active { transform: translateY(1px); }
+.typepick__mark { display: inline-flex; flex-shrink: 0; }
+.typepick__mark:empty { display: none; }
+.typepick__mark svg { color: var(--ink-soft); }
+.typeopt { min-height: 62px; }
+.typeopt[aria-checked="true"] { background: var(--paper-tint); }
+.typeopt__mark { display: inline-flex; justify-content: center; width: 30px; flex-shrink: 0; color: var(--ink-soft); }
+.typeopt__mark svg { width: 26px; height: 26px; }
+.typeopt__check { flex-shrink: 0; display: inline-flex; }
+.typeopt[aria-checked="false"] .typeopt__check { display: none; }
+/* The sheet's generic "span span" hint style would catch the paw stamp inside. */
+.sheet__action .typeopt__check .paw { display: inline-flex; width: 36px; height: 36px; font-size: inherit; color: var(--ink); }
+.typeopt__check .paw svg { width: 20px; height: 20px; }
 
 /* ---- Edit list ----------------------------------------------------- */
 
@@ -364,7 +403,6 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .total-check.is-ok { color: var(--ok); }
 .total-check.is-ok::before { content: "✓ "; }
 .total-check.is-off { color: var(--danger); }
-}
 
 /* ---- Code ticket --------------------------------------------------- */
 

@@ -39,19 +39,6 @@
         <a class="btn btn--honey" href="{{ url_for('select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
     </div>
 
-    <div>
-        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
-        <section class="card ticket">
-            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
-            <div class="grow stack" style="gap: 6px">
-                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
-                <span class="ticket__code">{{ room_code }}</span>
-                <span id="joinUrl" hidden>{{ join_url }}</span>
-                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
-            </div>
-        </section>
-    </div>
-
     <section class="stack">
         <div class="row row--between">
             <h2>At the table</h2>
@@ -74,6 +61,19 @@
         <p class="status-line small" id="numPeopleStatus" aria-live="polite"></p>
         {% endif %}
     </section>
+
+    <div>
+        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
+        <section class="card ticket">
+            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
+            <div class="grow stack" style="gap: 6px">
+                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
+                <span class="ticket__code">{{ room_code }}</span>
+                <span id="joinUrl" hidden>{{ join_url }}</span>
+                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
+            </div>
+        </section>
+    </div>
 
     {% if is_host %}
     <section class="stack" id="hostControls">

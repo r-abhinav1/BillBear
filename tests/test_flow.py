@@ -968,7 +968,7 @@ def test_status_gives_each_person_only_their_own_picks():
     assert submit(cara, code, "Cara", ["Coke"]).status_code == 200
     mine = bob.get(f"/room/{code}/status").get_json()["my_picks"]
     assert [r["name"] for r in mine] == ["Pasta", "Pizza"]           # in the order the bill lists them
-    assert set(mine[0]) == {"name", "category", "quantity", "portions"}
+    assert set(mine[0]) == {"id", "name", "category", "quantity", "portions"}
     assert [r["name"] for r in cara.get(f"/room/{code}/status").get_json()["my_picks"]] == ["Coke"]
     assert host.get(f"/room/{code}/status").get_json()["my_picks"] is None     # the host hasn't sent
     assert new_client().get(f"/room/{code}/status").get_json()["my_picks"] is None

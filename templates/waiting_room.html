@@ -45,6 +45,7 @@
             <h2>What you sent</h2>
             <hr class="dash dash--ink">
             <div class="lines" id="sentLines"></div>
+            <p class="fineprint" id="sentCaveat" style="text-wrap: balance" hidden>Shared dishes can still change while others are picking.</p>
             <p class="fineprint" style="text-wrap: balance">Your total shows once the host splits the bill.</p>
         </div>
         <div class="tear"></div>
@@ -267,27 +268,64 @@
             return tpl ? tpl.content.firstElementChild.cloneNode(true) : null;
         }
 
-        function renderSent(rows) {
-            const key = JSON.stringify(rows);
-            if (key === sentKey) return;          // polled every few seconds; only redraw on a change
+        // For a dish the bill lists several of: the tag for my own pick, and a line saying who else
+        // holds what. `others` is what other people have sent for it (the pick screen's data):
+        // units claimed, or 0 for someone sharing whatever nobody claims.
+        const people = (names) => (names.length <= 3 ? joinNames(names) : `${names.length} people`);
+
+        function severalOf(r, others) {
+            const claimed = others.reduce((sum, h) => sum + h.portions, 0);
+            const sharers = others.filter(h => h.portions === 0).map(h => h.name);
+            const holders = others.filter(h => h.portions > 0);
+            const holds = holders.length ? `${joinNames(holders.map(h => `${h.name} has ${h.portions}`))}.` : '';
+            if (r.portions === 0) {
+                // Sharing: I split every unit nobody has claimed with the other sharers.
+                const left = r.quantity - claimed;
+                const tag = left <= 0 ? 'Nothing left' : left === r.quantity ? `Sharing all ${r.quantity}` : `Sharing ${left} of ${r.quantity}`;
+                const together = left <= 0 ? `All ${r.quantity} are claimed.` : sharers.length ? `With ${people(sharers)}.` : '';
+                const note = [together, holds].filter(Boolean).join(' ');
+                return { tag, note: note || 'Nobody else has sent this yet.' };
+            }
+            const unclaimed = Math.max(r.quantity - claimed - r.portions, 0);
+            let note;
+            if (sharers.length && unclaimed > 0) {
+                note = `${people(sharers)} ${sharers.length === 1 ? 'shares' : 'share'} the ${unclaimed === 1 ? 'last 1' : `other ${unclaimed}`}.`;
+            } else {
+                note = unclaimed > 0 ? `${unclaimed} still unclaimed.` : `All ${r.quantity} are claimed.`;
+            }
+            return { tag: `${r.portions} yours`, note: [note, holds].filter(Boolean).join(' ') };
+        }
+
+        function renderSent(rows, taken, settled) {
+            // Polled every few seconds; only redraw when something shown could have changed.
+            const key = JSON.stringify([rows, rows.map(r => taken[r.id] || []), settled]);
+            $('sentCaveat').hidden = settled || !rows.some(r => r.quantity > 1);
+            if (key === sentKey) return;
             sentKey = key;
             if (!rows.length) {
                 $('sentLines').replaceChildren(el('p', 'fineprint', "You didn't pick any dishes."));
                 return;
             }
             $('sentLines').replaceChildren(...rows.map(r => {
+                const row = el('div', 'sent-row');
                 const line = el('div', 'line');
                 const what = el('span', 'with-diet');
                 const mark = dietMark(r.category);
                 if (mark) what.appendChild(mark);
                 const name = el('span', null, r.name);
-                if (r.quantity > 1) name.append(' ', el('span', 'pick__qty', `×${r.quantity}`));
+                let said = null;
+                if (r.quantity > 1) {
+                    name.append(' ', el('span', 'pick__qty', `×${r.quantity}`));
+                    said = severalOf(r, taken[r.id] || []);
+                }
                 what.appendChild(name);
                 line.appendChild(what);
-                // Single dishes are split at the end; only several-of dishes have a status to show.
-                const status = r.portions === null ? '' : r.portions === 0 ? 'Shared' : `${r.portions} yours`;
-                line.appendChild(status ? el('span', 'tag', status) : el('span'));
-                return line;
+                // A single dish is split between whoever picked it at the end, so it has no tag.
+                line.appendChild(said ? el('span', 'tag', said.tag) : el('span'));
+                row.appendChild(line);
+                // Who else holds what, on its own line so it has the full width.
+                if (said) row.appendChild(el('div', 'line__calc', said.note));
+                return row;
             }));
         }
 
@@ -585,7 +623,7 @@
                 $('pickCard').style.display = meSubmitted ? 'none' : 'flex';
                 const sent = Array.isArray(data.my_picks);
                 $('sentCard').hidden = !(meSubmitted && sent);
-                if (sent) renderSent(data.my_picks);
+                if (sent) renderSent(data.my_picks, data.taken || {}, data.still_editing.length === 0 && data.waiting_for === 0);
 
                 renderHeadline(data);
                 $('statusCount').textContent = `${data.submitted_count}/${data.expected_people} sent`;

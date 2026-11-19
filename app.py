@@ -992,6 +992,7 @@ def _pick_rows(room: dict, name: str) -> list:
     counts = room["portions"].get(name, {})
     return [
         {
+            "id": item["id"],
             "name": item["name"],
             "category": item["category"],
             "quantity": item["quantity"],

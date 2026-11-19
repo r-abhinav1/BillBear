@@ -473,10 +473,10 @@ def test_pick_rows_show_the_bill_order_and_shared_status():
 
     room = {
         "items": [
-            {"name": "Tikka", "category": "veg", "quantity": 1},
-            {"name": "Naan", "category": "veg", "quantity": 4},
-            {"name": "Beer", "category": "alcohol", "quantity": 3},
-            {"name": "Chicken", "category": "nonveg", "quantity": 1},
+            {"id": 1, "name": "Tikka", "category": "veg", "quantity": 1},
+            {"id": 2, "name": "Naan", "category": "veg", "quantity": 4},
+            {"id": 3, "name": "Beer", "category": "alcohol", "quantity": 3},
+            {"id": 4, "name": "Chicken", "category": "nonveg", "quantity": 1},
         ],
         "selections": {"Rohan": ["Chicken", "Beer", "Naan"]},          # picked in a different order
         "portions": {"Rohan": {"Beer": 2, "Naan": 0}},
@@ -485,5 +485,6 @@ def test_pick_rows_show_the_bill_order_and_shared_status():
     assert [r["name"] for r in rows] == ["Naan", "Beer", "Chicken"]    # the bill's order
     assert [r["portions"] for r in rows] == [0, 2, None]               # shared, 2 yours, a single dish
     assert [r["quantity"] for r in rows] == [4, 3, 1]
+    assert [r["id"] for r in rows] == [2, 3, 4]
     assert rows[2]["category"] == "nonveg"
     assert _pick_rows(room, "Nobody") == []

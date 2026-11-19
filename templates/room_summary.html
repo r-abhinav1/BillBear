@@ -20,7 +20,8 @@
             <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">Your picks are in. See who's left</a>
             {% else %}
             <a href="{{ url_for('select_items', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">Pick my dishes</a>
-            <a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--block">See who's here</a>
+            {# The host's controls (head count, guests, split) live on the waiting page. #}
+            {% if is_host %}<a href="{{ url_for('waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--block">Manage the table</a>{% endif %}
             {% endif %}
             {% if is_host and not room.finalized %}
             <a href="{{ url_for('edit_items', room_code=room_code) }}" class="btn btn--block">Edit dishes</a>
@@ -30,23 +31,10 @@
         {% endif %}
     </div>
 
-    <div>
-        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
-        <section class="card ticket">
-            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
-            <div class="grow stack" style="gap: 6px">
-                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
-                <span class="ticket__code">{{ room_code }}</span>
-                <span id="joinUrl" hidden>{{ join_url }}</span>
-                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
-            </div>
-        </section>
-    </div>
-
     <section class="stack">
         <div class="row row--between">
             <h2>At the table</h2>
-            <span class="small mono"><span id="joinedValue">{{ room.users | length }}</span> of <span id="expectedValue">{{ room.num_people }}</span> here, <span id="submittedValue">{{ room.get('submitted_users', []) | length }} / {{ room.users | length }}</span> sent</span>
+            <span class="small mono"><span id="joinedValue">{{ room.users | length }}</span> of <span id="expectedValue">{{ room.num_people }}</span> here, <span id="submittedValue">{{ room.get('submitted_users', []) | length }}</span> sent</span>
         </div>
         <div class="stack" id="members-container" style="gap: 10px">
             {% for user in room.users %}
@@ -62,13 +50,27 @@
         </div>
     </section>
 
+    <div>
+        <div class="bear-peek" style="width: 120px; height: 76px; margin-left: auto; margin-right: 20px">{{ ui.bear(120) }}</div>
+        <section class="card ticket">
+            <img class="ticket__qr" src="{{ qr_b64 }}" alt="QR code to join this room" width="104" height="104">
+            <div class="grow stack" style="gap: 6px">
+                <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
+                <span class="ticket__code">{{ room_code }}</span>
+                <span id="joinUrl" hidden>{{ join_url }}</span>
+                <button type="button" class="btn btn--small btn--honey" id="shareBtn" hidden>Share invite</button>
+                <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
+            </div>
+        </section>
+    </div>
+
     <section class="receipt">
         <div class="paper stack">
             <h2>On the bill</h2>
             <hr class="dash dash--ink">
             <div class="lines">
                 {% for item in room['items'] %}
-                <div class="line"><span class="with-diet">{{ ui.diet(item.category) }}<span>{{ item.name }}{% if item.quantity > 1 %} <span class="pick__qty">×{{ item.quantity }}</span>{% endif %}</span></span><span>{{ item.price }}</span></div>
+                <div class="line"><span class="with-diet">{{ ui.diet(item.category) }}<span>{{ item.name }}{% if item.quantity > 1 %} <span class="pick__qty">×{{ item.quantity }}</span>{% if item.each %}<span class="line__calc">{{ item.each }}</span>{% endif %}{% endif %}</span></span><span>{{ item.price }}</span></div>
                 {% else %}
                 <p class="fineprint">No dishes yet.</p>
                 {% endfor %}
@@ -101,37 +103,23 @@
 {% endblock %}
 {% block scripts %}
     <script>
-        function copyText(text, btn) {
-            function done(ok) {
-                const original = btn.dataset.label || btn.textContent;
-                btn.dataset.label = original;
-                btn.textContent = ok ? 'Copied' : 'Could not copy';
-                setTimeout(() => { btn.textContent = original; }, 2000);
-            }
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(text).then(() => done(true)).catch(() => fallback());
-            } else {
-                fallback();
-            }
-            function fallback() {
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-                document.body.appendChild(ta);
-                ta.select();
-                let ok = false;
-                try { ok = document.execCommand('copy'); } catch (_e) {}
-                document.body.removeChild(ta);
-                done(ok);
-            }
-        }
-
-
         const $ = (id) => document.getElementById(id);
-        $('copyBtn').addEventListener('click', () => copyText($('joinUrl').textContent.trim(), $('copyBtn')));
+        const joinUrl = () => $('joinUrl').textContent.trim();
+        $('copyBtn').addEventListener('click', () => BB.copyText(joinUrl(), $('copyBtn')));
+        if (BB.canShare()) {
+            // On a phone the share sheet comes first; copying the link stays one tap away.
+            $('shareBtn').hidden = false;
+            $('copyBtn').classList.remove('btn--honey');
+            $('copyBtn').textContent = 'Copy link';
+            $('shareBtn').addEventListener('click', () => BB.share({
+                title: {{ room.room_name | tojson }},
+                text: {{ (room.host_name ~ ' invited you to ' ~ room.room_name ~ ' on BillBear. Room code ' ~ room_code ~ '.') | tojson }},
+                url: joinUrl(),
+            }));
+        }
         const copyHostLinkBtn = $('copyHostLinkBtn');
         if (copyHostLinkBtn) {
-            copyHostLinkBtn.addEventListener('click', () => copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
+            copyHostLinkBtn.addEventListener('click', () => BB.copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
         }
 
         // Live updates: members and counts refresh every few seconds.
@@ -179,7 +167,7 @@
                     if (d.finalized || meSubmitted !== MY_SUBMITTED) { window.location.reload(); return; }
                     $('expectedValue').textContent = d.expected_people;
                     $('joinedValue').textContent = d.total_users;
-                    $('submittedValue').textContent = `${d.submitted_count} / ${d.total_users}`;
+                    $('submittedValue').textContent = d.submitted_count;
                     renderMembers(d);
                     setIndicator('connected', 'Live');
                 } catch (_e) {

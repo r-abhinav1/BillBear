@@ -10,9 +10,23 @@ Selections are keyed by item *display name*, so duplicate item names
 ("Naan", "Naan") get a read-time suffix ("Naan (2)") to keep them distinct.
 """
 from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Iterable, List
 
 from .money import format_money, get_currency
+
+
+def each_label(price: Any, quantity: int, currency) -> str:
+    """"₹60.00 each" for a line the bill lists several of ("about" when it doesn't divide evenly).
+
+    The price on such a line is for all of them, which people read as the price of one.
+    """
+    if quantity <= 1 or price is None:
+        return ""
+    total = Decimal(str(price))
+    one = (total / quantity).quantize(currency.minor, rounding=ROUND_HALF_UP)
+    label = f"{format_money(one, currency)} each"
+    return label if one * quantity == total else f"about {label}"
 
 
 def unique_display_names(names: List[str]) -> List[str]:
@@ -55,6 +69,7 @@ def assemble_room(
             "category": row.get("category") or "other",
             # How many of this dish the bill lists; `price` is for all of them.
             "quantity": int(row.get("quantity") or 1),
+            "each": each_label(row["price"], int(row.get("quantity") or 1), currency),
         }
         for idx, row in enumerate(items_sorted)
     ]

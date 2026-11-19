@@ -11,7 +11,7 @@
     <div class="row" style="align-items: flex-end">
         <div class="grow">
             <h1>Check the bill</h1>
-            <p class="lede" style="margin-top: 8px">Fix any dish, price or type Bear got wrong before everyone starts picking.</p>
+            <p class="lede" style="margin-top: 8px">{% if manual %}Add each dish with its price, then any taxes and charges printed on the bill.{% else %}Fix any dish, price or type Bear got wrong before everyone starts picking.{% endif %}</p>
         </div>
         <span class="bear-spot" style="flex-shrink: 0">{{ ui.bear(88) }}</span>
     </div>
@@ -46,6 +46,7 @@
         <section class="receipt">
             <div class="paper">
                 <h2>Dishes</h2>
+                <p class="small soft" style="margin-top: 2px">The price is for the whole line, as printed on the bill. If it says ×4, that's the price of all four.</p>
                 <div id="itemsTable">
                 {% for item in items['items'] %}
                 <div class="edit-row item-row">

@@ -305,7 +305,8 @@ def join_participant(code: str, raw_name: str) -> Tuple[str, Dict[str, Any], str
             raise RoomError(
                 "NAME_TAKEN",
                 f"'{existing['name']}' has already joined from another device. "
-                "Pick a different name, or ask the host to tap 'Reset device' next to that name.",
+                "Pick a different name. If that's you on a new phone, ask the host to tap Manage "
+                "next to your name and choose 'Move them to a new phone'.",
                 status=409,
             )
         cur.execute("SELECT count(*) AS n FROM participants WHERE room_code = %s", (code,))

@@ -194,6 +194,7 @@ a, button, label, summary, select, input, [role="button"], [role="radio"] { -web
 .file-drop--static { cursor: default; }
 .file-drop-row { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .file-drop-row .file-drop { flex-direction: column; gap: 6px; padding: 12px 10px; }
+#pickerRow[hidden] ~ #photoTip { display: none; }
 input[type="file"].visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; }
 input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px solid var(--ink); outline-offset: 3px; }
 .stepper { display: inline-flex; align-items: center; gap: 4px; }
@@ -274,7 +275,7 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .pick:has(input:focus-visible) { outline: 3px solid var(--ink); outline-offset: -3px; }
 .pick__name { font-size: 1.05rem; font-weight: 600; line-height: 1.15; overflow-wrap: anywhere; }
 .pick__qty { margin-left: 2px; font-family: var(--mono); font-size: 0.9rem; font-weight: 600; white-space: nowrap; }
-.pick__taken { display: block; margin-top: 2px; font-size: 0.82rem; font-weight: 600; line-height: 1.2; opacity: 0.8; }
+.pick__taken, .pick__each { display: block; margin-top: 2px; font-size: 0.82rem; font-weight: 600; line-height: 1.2; opacity: 0.8; }
 .pick__taken:empty { display: none; }
 .pick--many:has(input:checked) { border-bottom: 0; }
 .portions { display: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 0 10px 10px 62px; background: var(--paper-tint); border-bottom: 2px dashed var(--rule); }
@@ -379,7 +380,6 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .total-check.is-ok { color: var(--ok); }
 .total-check.is-ok::before { content: "✓ "; }
 .total-check.is-off { color: var(--danger); }
-}
 
 /* ---- Code ticket --------------------------------------------------- */
 

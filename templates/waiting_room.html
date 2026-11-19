@@ -39,6 +39,12 @@
         <a class="btn btn--honey" href="{{ url_for('select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
     </div>
 
+    <div class="notice notice--quiet stack" id="sentCard" style="gap: 4px" hidden>
+        <strong>What you sent</strong>
+        <span id="sentDishes"></span>
+        <span class="small">Your total shows once the host splits the bill.</span>
+    </div>
+
     <section class="stack">
         <div class="row row--between">
             <h2>At the table</h2>
@@ -50,6 +56,7 @@
             {% if is_host %}<button type="button" class="link-btn" id="seatDropBtn">Not coming</button>{% endif %}
         </div>
         {% if is_host %}
+        <button type="button" class="btn btn--block" id="nudgeBtn" hidden></button>
         <div class="row row--between">
             <span style="font-weight: 600">People at the table</span>
             <div class="stepper">
@@ -70,6 +77,7 @@
                 <span class="small" style="color: var(--ink-soft); font-weight: 600">Room code</span>
                 <span class="ticket__code">{{ room_code }}</span>
                 <span id="joinUrl" hidden>{{ join_url }}</span>
+                <button type="button" class="btn btn--small btn--honey" id="shareBtn" hidden>Share invite</button>
                 <button type="button" class="btn btn--small btn--honey" id="copyBtn">Copy invite link</button>
             </div>
         </section>
@@ -141,6 +149,7 @@
     <script>
         const roomCode = {{ room_code | tojson }};
         const hostName = {{ room.host_name | tojson }};
+        const roomName = {{ room.room_name | tojson }};
         const currentUser = {{ user_name | tojson }};
         const isHost = {{ is_host | tojson }};
 
@@ -343,6 +352,20 @@
             const detail = $('finalizeDetail');
             const ready = !!data.can_finalize;
 
+            // Anyone still picking can be nudged through the phone's share sheet.
+            const nudge = $('nudgeBtn');
+            const slow = data.still_editing.filter(n => n !== currentUser);
+            nudge.hidden = ready || slow.length === 0;
+            if (slow.length) {
+                const who = slow.length <= 2 ? joinNames(slow) : `${slow.length} people`;
+                const label = BB.canShare() ? `Nudge ${who}` : `Copy a nudge for ${who}`;
+                if (nudge.dataset.shown !== label) {   // not every poll: a "Copied" flash must survive
+                    nudge.dataset.shown = label;
+                    nudge.dataset.label = label;
+                    nudge.textContent = label;
+                }
+            }
+
             // Ready: the split button and its warnings sit at the top. Not yet: the
             // status line and the greyed-out button stay down with the host controls.
             $('readyCard').hidden = !ready;
@@ -522,6 +545,9 @@
                 }
                 prevMeSubmitted = meSubmitted;
                 $('pickCard').style.display = meSubmitted ? 'none' : 'flex';
+                const sent = Array.isArray(data.my_picks);
+                $('sentCard').hidden = !(meSubmitted && sent);
+                if (sent) $('sentDishes').textContent = data.my_picks.length ? data.my_picks.join(', ') : "You didn't pick any dishes.";
 
                 renderHeadline(data);
                 $('statusCount').textContent = `${data.submitted_count}/${data.expected_people} sent`;
@@ -545,36 +571,34 @@
 
         updateStatus();
 
-        function copyText(text, btn) {
-            function done(ok) {
-                const original = btn.dataset.label || btn.textContent;
-                btn.dataset.label = original;
-                btn.textContent = ok ? 'Copied' : 'Could not copy';
-                setTimeout(() => { btn.textContent = original; }, 2000);
-            }
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(text).then(() => done(true)).catch(() => fallback());
-            } else {
-                fallback();
-            }
-            function fallback() {
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-                document.body.appendChild(ta);
-                ta.select();
-                let ok = false;
-                try { ok = document.execCommand('copy'); } catch (_e) {}
-                document.body.removeChild(ta);
-                done(ok);
-            }
+        const joinUrl = () => $('joinUrl').textContent.trim();
+        $('copyBtn').addEventListener('click', () => BB.copyText(joinUrl(), $('copyBtn')));
+        if (BB.canShare()) {
+            // On a phone the share sheet comes first; copying the link stays one tap away.
+            $('shareBtn').hidden = false;
+            $('copyBtn').classList.remove('btn--honey');
+            $('copyBtn').textContent = 'Copy link';
+            $('shareBtn').addEventListener('click', () => BB.share({
+                title: roomName,
+                text: `${hostName} invited you to ${roomName} on BillBear. Room code ${roomCode}.`,
+                url: joinUrl(),
+            }));
         }
 
+        const nudgeBtn = $('nudgeBtn');
+        if (nudgeBtn) {
+            nudgeBtn.addEventListener('click', () => {
+                const names = lastData ? lastData.still_editing.filter(n => n !== currentUser) : [];
+                if (!names.length) return;
+                const text = `${joinNames(names)}: we're waiting on your picks for ${roomName}. Tap what you had so I can split the bill.`;
+                if (BB.canShare()) BB.share({ title: roomName, text, url: joinUrl() });
+                else BB.copyText(`${text} ${joinUrl()}`, nudgeBtn);
+            });
+        }
 
-        $('copyBtn').addEventListener('click', () => copyText($('joinUrl').textContent.trim(), $('copyBtn')));
         const copyHostLinkBtn = $('copyHostLinkBtn');
         if (copyHostLinkBtn) {
-            copyHostLinkBtn.addEventListener('click', () => copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
+            copyHostLinkBtn.addEventListener('click', () => BB.copyText($('hostLinkText').textContent.trim(), copyHostLinkBtn));
         }
     </script>
 {% endblock %}

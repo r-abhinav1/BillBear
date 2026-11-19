@@ -10,7 +10,8 @@ from utils.bill_audit import audit_bill
 from utils.bill_split import calculate_bill_split
 from utils.image_prep import ImageRejected, prepare_receipt_image
 from utils.receipt_pipeline import VisionFailed, VisionUnavailable, extract_receipt_from_vision
-from utils.room_assembler import assemble_room, unique_display_names
+from utils.money import get_currency
+from utils.room_assembler import assemble_room, each_label, unique_display_names
 from utils.validation import clean_items, normalize_person_name, parse_price
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -456,3 +457,12 @@ def test_proportional_taxes_fall_back_to_equal_when_dishes_cost_nothing():
         item["price"] = "₹0.00"
     people = calculate_bill_split(room)["user_breakdown"]
     assert people["Asha"]["final_amount"] == people["Bala"]["final_amount"] == 40.0
+
+
+def test_each_label_for_lines_the_bill_lists_several_of():
+    inr, jpy = get_currency("INR"), get_currency("JPY")
+    assert each_label(Decimal("240.00"), 4, inr) == "₹60.00 each"
+    assert each_label(Decimal("100.00"), 3, inr) == "about ₹33.33 each"      # doesn't divide evenly
+    assert each_label(Decimal("1200"), 3, jpy) == "¥400 each"                 # yen have no decimals
+    assert each_label(Decimal("320.00"), 1, inr) == ""                        # a single dish needs no caption
+    assert each_label(None, 4, inr) == ""

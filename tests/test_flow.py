@@ -959,3 +959,52 @@ def test_pdf_is_rendered_once_per_split(monkeypatch):
     post_json(host, f"/room/{code}/finalize")
     host.get(f"/room/{code}/download")
     assert len(renders) == 2 and renders[0] != renders[1]
+
+
+def test_status_gives_each_person_only_their_own_picks():
+    code, host, bob, cara = _full_room()
+    assert bob.get(f"/room/{code}/status").get_json()["my_picks"] is None      # nothing sent yet
+    assert submit(bob, code, "Bob", ["Pasta", "Pizza"]).status_code == 200
+    assert submit(cara, code, "Cara", ["Coke"]).status_code == 200
+    assert bob.get(f"/room/{code}/status").get_json()["my_picks"] == ["Pasta", "Pizza"]
+    assert cara.get(f"/room/{code}/status").get_json()["my_picks"] == ["Coke"]
+    assert host.get(f"/room/{code}/status").get_json()["my_picks"] is None     # the host hasn't sent
+    assert new_client().get(f"/room/{code}/status").get_json()["my_picks"] is None
+
+
+def test_name_taken_points_at_the_buttons_the_host_really_has():
+    code, host, bob, cara = _full_room()
+    resp = join(new_client(), code, "bob")
+    assert resp.status_code == 409
+    text = resp.get_data(as_text=True)
+    assert "Move them to a new phone" in text and "Reset device" not in text
+
+
+def test_host_only_page_says_so_and_links_back():
+    code, host, bob, cara = _full_room()
+    resp = bob.get(f"/edit/{code}")
+    assert resp.status_code == 403
+    text = resp.get_data(as_text=True)
+    assert "Only the host can do that" in text and f"/room/{code}" in text
+
+
+def test_results_put_your_own_card_first():
+    code, host, bob, cara = _full_room()
+    for client, name, picks in ((host, "Alice", ["Pasta"]), (bob, "Bob", ["Pasta", "Pizza"]), (cara, "Cara", ["Coke"])):
+        assert submit(client, code, name, picks).status_code == 200
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+    bobs = bob.get(f"/room/{code}/results").get_data(as_text=True)
+    assert bobs.index("You pay") < bobs.index("Alice pays") < bobs.index("Cara pays")
+    assert "Bob pays" not in bobs
+    hosts = host.get(f"/room/{code}/results").get_data(as_text=True)
+    assert hosts.index("You pay") < hosts.index("Bob pays")
+    assert "hours after the bill is split" in bobs
+
+
+def test_room_page_buttons_by_role():
+    code, host, bob, cara = _full_room()
+    hosts = host.get(f"/room/{code}").get_data(as_text=True)
+    assert "Manage the table" in hosts and "Pick my dishes" in hosts
+    guests = bob.get(f"/room/{code}").get_data(as_text=True)
+    assert "Pick my dishes" in guests
+    assert "Manage the table" not in guests and "See who&#39;s here" not in guests and "See who's here" not in guests

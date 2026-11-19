@@ -31,8 +31,17 @@
                 <div class="field">
                     <label for="user_name">Your name</label>
                     <input class="input" type="text" id="user_name" name="user_name" placeholder="What your friends call you"
-                           maxlength="30" autocomplete="given-name" value="{{ request.form.get('user_name', '') }}" required>
+                           maxlength="30" autocomplete="given-name" value="{{ request.form.get('user_name') or prefill_name or '' }}" required>
                 </div>
+                {% if need_move_code %}
+                <div class="field">
+                    <label for="move_code">Move code from your host</label>
+                    <input class="input mono" type="text" id="move_code" name="move_code" placeholder="6 letters and numbers"
+                           maxlength="12" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"
+                           value="{{ prefill_move or '' }}" required>
+                    <p class="fineprint">Your host gets it from Manage, next to your name, then 'Move them to a new phone'.</p>
+                </div>
+                {% endif %}
                 <button type="submit" class="btn btn--primary btn--block">Join the table</button>
             </form>
             <div class="tear"></div>

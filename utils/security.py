@@ -19,8 +19,12 @@ def scan_daily_cap() -> int:
 
 # name -> (limit, window_seconds); counted per client IP
 RATE_LIMITS = {
-    "scan": (12, 600),        # vision calls cost money
-    "scan_day": (60, 86400),
+    # Vision calls cost money (~₹0.2 each). A host scans one to three times a
+    # bill, so 10 a day leaves room for a few tables on one office Wi-Fi or a
+    # shared mobile IP, while one network can take at most a tenth of a
+    # SCAN_DAILY_CAP of 100.
+    "scan": (5, 600),
+    "scan_day": (10, 86400),
     "create": (20, 3600),
     "join": (40, 600),
     "miss": (30, 600),        # 404s on room codes / bad host links (code guessing)

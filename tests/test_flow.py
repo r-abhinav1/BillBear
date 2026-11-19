@@ -327,18 +327,72 @@ def test_join_with_cookie_is_reclaim_not_duplicate():
     assert room(code)["users"] == ["Alice", "Bob"]
 
 
+def _reset(host, code, name):
+    resp = post_json(host, f"/room/{code}/host/reset-device", {"target_user": name})
+    assert resp.status_code == 200
+    return resp.get_json()
+
+
+def _rejoin(client, code, name, move_code):
+    return client.post(f"/join/{code}", data={"user_name": name, "move_code": move_code})
+
+
 def test_reset_device_lets_guest_rejoin_and_keep_picks():
     code, host, bob, _cara = _full_room()
     submit(bob, code, "Bob", ["Pizza"])
     new_phone = new_client()
     assert join(new_phone, code, "Bob").status_code == 409
-    assert post_json(host, f"/room/{code}/host/reset-device", {"target_user": "Bob"}).status_code == 200
+    body = _reset(host, code, "Bob")
+    assert body["reset"] == "Bob" and len(body["move_code"]) == 6
+    assert f"/join/{code}?" in body["move_link"] and f"move={body['move_code']}" in body["move_link"]
     # Old phone is unlinked
     assert bob.get(f"/room/{code}/status").get_json()["caller_name"] is None
-    assert join(new_phone, code, "bob").status_code == 302
+    # Typed in lower case with a space, as people do
+    typed = body["move_code"][:3].lower() + " " + body["move_code"][3:].lower()
+    assert _rejoin(new_phone, code, "bob", typed).status_code == 302
     r = room(code)
     assert "Bob" in r["submitted_users"] and r["selections"]["Bob"] == ["Pizza"]
     assert new_phone.get(f"/room/{code}/status").get_json()["caller_name"] == "Bob"
+
+
+def test_reset_seat_cannot_be_taken_without_the_move_code():
+    # Anyone holding the room code used to get the seat by joining with the name first.
+    code, host, _bob, _cara = _full_room()
+    body = _reset(host, code, "Bob")
+    stranger = new_client()
+    resp = join(stranger, code, "Bob")
+    assert resp.status_code == 403
+    page = resp.get_data(as_text=True)
+    assert "move code" in page and 'name="move_code"' in page
+    assert _rejoin(stranger, code, "Bob", "AAAAAA" if body["move_code"] != "AAAAAA" else "BBBBBB").status_code == 403
+    assert stranger.get(f"/room/{code}/status").get_json()["caller_in_room"] is False
+    # The room-code form sends them to the room's own form, which has the field
+    resp = stranger.post("/join", data={"room_code": code, "user_name": "Bob"})
+    assert resp.status_code == 403 and 'name="move_code"' in resp.get_data(as_text=True)
+    # The real Bob, with the code, still gets in, and the code works only once
+    bob_phone = new_client()
+    assert _rejoin(bob_phone, code, "Bob", body["move_code"]).status_code == 302
+    post_json(host, f"/room/{code}/host/reset-device", {"target_user": "Bob"})
+    assert _rejoin(new_client(), code, "Bob", body["move_code"]).status_code == 403
+
+
+def test_resetting_again_replaces_the_move_code():
+    code, host, _bob, _cara = _full_room()
+    first = _reset(host, code, "Bob")["move_code"]
+    second = _reset(host, code, "Bob")["move_code"]
+    if first != second:
+        assert _rejoin(new_client(), code, "Bob", first).status_code == 403
+    assert _rejoin(new_client(), code, "Bob", second).status_code == 302
+
+
+def test_move_link_prefills_but_get_never_joins():
+    code, host, _bob, _cara = _full_room()
+    body = _reset(host, code, "Bob")
+    phone = new_client()
+    page = phone.get(f"/join/{code}?name=Bob&move={body['move_code']}").get_data(as_text=True)
+    assert 'value="Bob"' in page and f'value="{body["move_code"]}"' in page
+    assert phone.get(f"/room/{code}/status").get_json()["caller_in_room"] is False
+    assert room(code)["participants"][1]["has_device"] is False
 
 
 def test_reset_device_reclaim_allowed_after_finalize():
@@ -349,9 +403,10 @@ def test_reset_device_reclaim_allowed_after_finalize():
     submit(host, code, "Alice", ["Pasta"])
     submit(bob, code, "Bob", ["Pizza"])
     post_json(host, f"/room/{code}/finalize")
-    post_json(host, f"/room/{code}/host/reset-device", {"target_user": "Bob"})
+    move_code = _reset(host, code, "Bob")["move_code"]
     phone = new_client()
-    assert join(phone, code, "Bob").status_code == 302
+    assert join(phone, code, "Bob").status_code == 403
+    assert _rejoin(phone, code, "Bob", move_code).status_code == 302
     assert phone.get(f"/room/{code}/results").status_code == 200
 
 

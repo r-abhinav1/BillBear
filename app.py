@@ -776,7 +776,8 @@ def create_room():
                 raise ValueError("Scan the bill first, or tap 'Enter items manually'.")
             try:
                 parsed = json.loads(raw)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):
+                # RecursionError: thousands of nested brackets, never a real scan.
                 raise ValueError("The scanned receipt data was corrupted. Please scan again.")
             if not isinstance(parsed, dict):
                 raise ValueError("The scanned receipt data was invalid. Please scan again.")
@@ -1066,12 +1067,12 @@ def room_status(room_code):
 # Joining
 # ---------------------------------------------------------------------------
 
-def _do_join(code: str, raw_name: str):
+def _do_join(code: str, raw_name: str, move_code: str = ""):
     """Shared join logic. Returns a response on success, raises ValueError/RoomError otherwise."""
     name = normalize_person_name(raw_name)
     if rate_limited("join"):
         raise RoomError("RATE_LIMITED", "Too many join attempts. Wait a few minutes.", status=429)
-    status, row, uid = storage.join_participant(code, name)
+    status, row, uid = storage.join_participant(code, name, move_code)
     print(f"[join] {status} room={code}")
     count("room.joined", result=status.lower())
     response = make_response(redirect(url_for("user_room", room_code=code, user_name=row["name"])))
@@ -1095,9 +1096,30 @@ def join():
         return _redirect_for(room, me)
     try:
         return _do_join(room["code"], request.form.get("user_name"))
-    except (ValueError, RoomError) as exc:
-        message = exc.message if isinstance(exc, RoomError) else str(exc)
-        return render_template("join_room.html", error=message), getattr(exc, "status", 400)
+    except RoomError as exc:
+        if exc.code in MOVE_CODE_ERRORS:
+            # The code form has no move-code field: show the room's own join form, which does.
+            return _join_direct_page(room, exc)
+        return render_template("join_room.html", error=exc.message), exc.status
+    except ValueError as exc:
+        return render_template("join_room.html", error=str(exc)), 400
+
+
+MOVE_CODE_ERRORS = {"NEEDS_MOVE_CODE", "BAD_MOVE_CODE"}
+
+
+def _join_direct_page(room: dict, exc):
+    """The room's join form again, with the error; the move-code field shows when a reset name needs it."""
+    message = exc.message if isinstance(exc, RoomError) else str(exc)
+    return render_template(
+        "join_room_direct.html",
+        error=message,
+        room=room,
+        room_code=room["code"],
+        need_move_code=isinstance(exc, RoomError) and exc.code in MOVE_CODE_ERRORS,
+        prefill_name=request.form.get("user_name", ""),
+        prefill_move="",
+    ), getattr(exc, "status", 400)
 
 
 @app.route("/join/<room_code>", methods=["GET", "POST"])
@@ -1116,20 +1138,25 @@ def join_room(room_code):
         return _redirect_for(room, me)
     if request.method == "POST":
         try:
-            return _do_join(code, request.form.get("user_name"))
+            return _do_join(code, request.form.get("user_name"), request.form.get("move_code", ""))
         except (ValueError, RoomError) as exc:
-            message = exc.message if isinstance(exc, RoomError) else str(exc)
-            return render_template(
-                "join_room_direct.html", error=message, room=room, room_code=code
-            ), getattr(exc, "status", 400)
-    if room["finalized"]:
-        return render_template(
-            "join_room_direct.html",
-            error="This bill has already been finalized. If you were part of it, ask the host to move you to a new phone (Manage, next to your name), then join with the same name.",
-            room=room,
-            room_code=code,
+            return _join_direct_page(room, exc)
+    # The host's "send them this link" fills both fields in. A GET never joins,
+    # so a link preview bot opening it takes nothing.
+    move = storage.normalize_move_code(request.args.get("move"))[:storage.MOVE_CODE_LENGTH]
+    page = dict(
+        room=room,
+        room_code=code,
+        need_move_code=bool(move),
+        prefill_name=request.args.get("name", "")[:30],
+        prefill_move=move,
+    )
+    if room["finalized"] and not move:
+        page["error"] = (
+            "This bill has already been finalized. If you were part of it, ask the host to move you "
+            "to a new phone (Manage, next to your name), then join with the same name and the move code."
         )
-    return render_template("join_room_direct.html", room=room, room_code=code)
+    return render_template("join_room_direct.html", **page)
 
 
 @app.route("/room/<room_code>/host", methods=["GET", "POST"])
@@ -1333,8 +1360,10 @@ def host_reset_device(room_code):
     target = str(_json_body().get("target_user", "")).strip()
     if not target:
         raise RoomError("BAD_REQUEST", "Missing target_user", status=400)
-    name = storage.reset_device(room["code"], uid, target)
-    return jsonify({"status": "success", "reset": name})
+    name, move_code = storage.reset_device(room["code"], uid, target)
+    # Only the host sees the code; the link fills in the name and the code on the new phone.
+    move_link = share_url("join_room", room_code=room["code"], name=name, move=move_code)
+    return jsonify({"status": "success", "reset": name, "move_code": move_code, "move_link": move_link})
 
 
 @app.route("/room/<room_code>/host/num-people", methods=["POST"])

@@ -131,8 +131,17 @@
     </button>
     <button type="button" class="sheet__action" data-action="reset">
         {{ ui.icon('phone', 26) }}
-        <span><b>Move them to a new phone</b><span>Unlinks this device. They rejoin with the same name and keep their picks.</span></span>
+        <span><b>Move them to a new phone</b><span>Unlinks this device and gives you a code. They rejoin with the same name and the code, and keep their picks.</span></span>
     </button>
+    <div class="stack" id="sheetMove" hidden style="padding: 12px 14px; border: var(--line) solid var(--ink); border-radius: 16px; background: var(--field); gap: 8px">
+        <b id="sheetMoveTitle"></b>
+        <span class="mono" id="sheetMoveCode" style="font-size: 1.9rem; font-weight: 800; letter-spacing: 0.18em"></span>
+        <span class="small" id="sheetMoveHow" style="color: var(--ink-soft)"></span>
+        <div class="row" style="gap: 10px">
+            <button type="button" class="btn btn--primary" id="sheetMoveShare" style="flex: 1">Send them the link</button>
+            <button type="button" class="btn btn--ghost" id="sheetMoveDone">Done</button>
+        </div>
+    </div>
     <hr class="dash" style="margin: 6px 0">
     <button type="button" class="sheet__action sheet__action--danger" id="sheetRemoveAsk">
         {{ ui.icon('remove', 26) }}
@@ -368,8 +377,21 @@
             $('sheetRemoveText').textContent = `Remove ${sheetUser}? Their picks are thrown away.`;
         }
 
+        // After "Move them to a new phone": the one-time code, and a link that fills it in.
+        let moveLink = null;
+        function showMoveCode(name, code, link) {
+            moveLink = link;
+            $('sheetMoveTitle').textContent = `${name}'s move code`;
+            $('sheetMoveCode').textContent = code;
+            $('sheetMoveHow').textContent = `Send ${name} the link, or tell them the code: on the new phone they open the room, type ${name} and enter it. It works once, and only for ${name}.`;
+            $('sheetMoveShare').textContent = 'Send them the link';
+            $('sheetMove').hidden = false;
+        }
+
         function openSheet(user) {
             sheetUser = user;
+            moveLink = null;
+            $('sheetMove').hidden = true;
             $('sheetRemoveAsk').hidden = false;
             $('sheetRemoveConfirm').hidden = true;
             $('sheetStatus').textContent = '';
@@ -395,6 +417,21 @@
                 $('sheetRemoveAsk').hidden = true;
                 $('sheetRemoveConfirm').hidden = false;
             });
+            $('sheetMoveDone').addEventListener('click', closeSheet);
+            $('sheetMoveShare').addEventListener('click', async () => {
+                if (!moveLink) return;
+                const name = $('sheetMoveTitle').textContent.replace(/'s move code$/, '');
+                const text = `${name}, open this on your new phone to get back into ${roomName} on BillBear. Move code ${$('sheetMoveCode').textContent}.`;
+                if (navigator.share) {
+                    try { await navigator.share({ title: roomName, text, url: moveLink }); return; } catch (_e) { /* closed: fall back to copying */ }
+                }
+                try {
+                    await navigator.clipboard.writeText(moveLink);
+                    $('sheetMoveShare').textContent = 'Link copied';
+                } catch (_e) {
+                    $('sheetMoveHow').textContent = moveLink;
+                }
+            });
             $('sheetRemoveCancel').addEventListener('click', () => {
                 $('sheetRemoveAsk').hidden = false;
                 $('sheetRemoveConfirm').hidden = true;
@@ -405,7 +442,11 @@
                 btn.disabled = true;
                 const r = await HOST_ACTIONS[btn.dataset.action](sheetUser);
                 btn.disabled = false;
-                if (r.ok) {
+                if (r.ok && btn.dataset.action === 'reset' && r.data && r.data.move_code) {
+                    // Keep the sheet open: the host has to pass the code on.
+                    $('sheetStatus').textContent = '';
+                    showMoveCode(r.data.reset, r.data.move_code, r.data.move_link);
+                } else if (r.ok) {
                     closeSheet();
                 } else {
                     $('sheetStatus').textContent = (r.data && r.data.message) || 'That did not work. Try again.';

@@ -318,11 +318,17 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
     return reset
 
 
-def join_participant(code: str, raw_name: str) -> Tuple[str, Dict[str, Any], str]:
+def normalize_move_code(raw: Any) -> str:
+    """What someone typed as a move code: spaces and dashes dropped, upper case."""
+    return "".join(ch for ch in str(raw or "") if ch.isalnum()).upper()
+
+
+def join_participant(code: str, raw_name: str, move_code: str = "") -> Tuple[str, Dict[str, Any], str]:
     """
     Returns (status, participant_row, uid) where status is JOINED or RECLAIMED
     (a name whose device the host reset). Raises RoomError FULL / NAME_TAKEN /
-    FINALIZED / NOT_FOUND.
+    FINALIZED / NOT_FOUND, or NEEDS_MOVE_CODE / BAD_MOVE_CODE for a reset name
+    joined without the move code the host was given for it.
     """
     code = normalize_code(code)
     conn = db.get_conn()
@@ -336,8 +342,21 @@ def join_participant(code: str, raw_name: str) -> Tuple[str, Dict[str, Any], str
             _require_open(room_row)
         if existing:
             if existing["user_id_hash"] is None:
+                # The seat is theirs only with the host's move code: the room code
+                # alone is shared with the whole table, and maybe further.
+                typed = normalize_move_code(move_code)
+                if not secrets_match(typed, existing["move_code_hash"]):
+                    raise RoomError(
+                        "BAD_MOVE_CODE" if typed else "NEEDS_MOVE_CODE",
+                        (f"That move code isn't right for '{existing['name']}'. Check it with the host."
+                         if typed else
+                         f"'{existing['name']}' is moving to a new phone. Enter the move code the host got "
+                         "for you (Manage, next to your name, then 'Move them to a new phone')."),
+                        status=403,
+                        name=existing["name"],
+                    )
                 cur.execute(
-                    "UPDATE participants SET user_id_hash = %s WHERE id = %s RETURNING *",
+                    "UPDATE participants SET user_id_hash = %s, move_code_hash = NULL WHERE id = %s RETURNING *",
                     (hash_secret(uid), existing["id"]),
                 )
                 row = cur.fetchone()
@@ -538,8 +557,15 @@ def remove_participant(code: str, uid: str, target_name: str) -> str:
         return target["name"]
 
 
-def reset_device(code: str, uid: str, target_name: str) -> str:
-    """Forget a guest's device so they can rejoin with the same name (keeps their picks)."""
+MOVE_CODE_LENGTH = 6
+
+
+def reset_device(code: str, uid: str, target_name: str) -> Tuple[str, str]:
+    """
+    Forget a guest's device so they can rejoin with the same name (keeps their
+    picks). Returns (name, move_code): the one-time code the host passes on,
+    without which nobody can take the seat. Resetting again issues a new code.
+    """
     code = normalize_code(code)
     conn = db.get_conn()
     with conn.transaction(), conn.cursor() as cur:
@@ -552,9 +578,13 @@ def reset_device(code: str, uid: str, target_name: str) -> str:
             raise RoomError(
                 "USE_HOST_LINK", "Use your host recovery link to move host access to another device.", status=400
             )
-        cur.execute("UPDATE participants SET user_id_hash = NULL WHERE id = %s", (target["id"],))
+        move_code = "".join(secrets.choice(ROOM_CODE_ALPHABET) for _ in range(MOVE_CODE_LENGTH))
+        cur.execute(
+            "UPDATE participants SET user_id_hash = NULL, move_code_hash = %s WHERE id = %s",
+            (hash_secret(move_code), target["id"]),
+        )
         _touch(cur, code)
-        return target["name"]
+        return target["name"], move_code
 
 
 def set_num_people(code: str, uid: str, value: int) -> int:

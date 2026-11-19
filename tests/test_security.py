@@ -82,6 +82,16 @@ def test_guest_cannot_revoke_someone_else():
     assert "Alice" in room(code)["submitted_users"]
 
 
+@pytest.mark.parametrize("raw", ["[" * 40000 + "]" * 40000, '{"a":' * 30000 + "1" + "}" * 30000])
+def test_deeply_nested_receipt_json_is_a_400_not_a_crash(raw):
+    # json.loads raises RecursionError, not JSONDecodeError, past Python's nesting limit.
+    resp = new_client().post("/create", data={
+        "host_name": "Alice", "room_name": "x", "num_people": "2", "receipt_json": raw,
+    })
+    assert resp.status_code == 400
+    assert b"corrupted" in resp.data
+
+
 def test_cross_origin_post_blocked():
     code, _host, bob = _guest_room()
     resp = bob.post(
@@ -246,10 +256,20 @@ def test_scan_rate_limited(monkeypatch):
     import app as app_module
 
     monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
+    from utils.security import RATE_LIMITS
+
+    limit = RATE_LIMITS["scan"][0]
     c = new_client()
     c.get("/create")
-    codes = [_scan(c, _jpeg_bytes()).status_code for _ in range(13)]
-    assert codes[:12] == [200] * 12 and codes[12] == 429
+    codes = [_scan(c, _jpeg_bytes()).status_code for _ in range(limit + 1)]
+    assert codes[:limit] == [200] * limit and codes[limit] == 429
+
+
+def test_one_network_gets_a_small_share_of_the_days_scans():
+    # One IP must not be able to use up the site's whole daily allowance.
+    from utils.security import RATE_LIMITS
+
+    assert RATE_LIMITS["scan"][0] <= RATE_LIMITS["scan_day"][0] <= 10
 
 
 def test_secret_key_fails_closed_on_vercel(monkeypatch):
@@ -331,7 +351,7 @@ def test_junk_uploads_do_not_use_up_the_global_scan_cap(monkeypatch):
     )
     c = new_client()
     c.get("/create")
-    for _ in range(5):
+    for _ in range(2):      # junk still counts toward this network's own limit (5 per 10 min)
         assert _scan(c, b"%PDF-1.4 not an image").status_code == 400
     assert _scan(c, _jpeg_bytes()).status_code == 200
     assert _scan(c, _jpeg_bytes()).status_code == 200

@@ -18,6 +18,20 @@
         </p>
     </div>
 
+    {% if is_host %}
+    {# Once everyone has sent, the split button moves up here so the host never has to hunt for it. #}
+    <section class="ready" id="readyCard" role="status" hidden>
+        <div class="ready__top">
+            {{ ui.paw(true) }}
+            <p class="ready__text">Everyone has sent their picks. You can split the bill now.</p>
+        </div>
+        <p class="notice" id="unclaimedWarning" style="display: none"></p>
+        <p class="notice" id="quantityWarning" style="display: none"></p>
+        <button type="button" class="btn btn--primary btn--block" id="finalizeBtn">Split the bill</button>
+        <p id="finalizeStatus" class="status-line" aria-live="polite"></p>
+    </section>
+    {% endif %}
+
     {% set my_submitted = user_name in room.submitted_users %}
     <div class="notice stack" id="pickCard" {% if my_submitted %}style="display: none"{% endif %}>
         <strong>You haven't sent your picks yet.</strong>
@@ -63,11 +77,9 @@
 
     {% if is_host %}
     <section class="stack" id="hostControls">
-        <p class="notice" id="unclaimedWarning" style="display: none"></p>
-        <p class="notice" id="quantityWarning" style="display: none"></p>
+        <p class="notice" id="unclaimedEarly" style="display: none"></p>
         <p id="finalizeDetail" style="font-weight: 600">Checking…</p>
-        <button type="button" class="btn btn--primary btn--block" id="finalizeBtn" disabled>Split the bill</button>
-        <p id="finalizeStatus" class="status-line" aria-live="polite"></p>
+        <button type="button" class="btn btn--primary btn--block" id="finalizeWaitBtn" disabled>Split the bill</button>
         <div class="links">
             <a class="textlink" href="{{ url_for('edit_items', room_code=room_code) }}">Edit dishes</a>
         </div>
@@ -320,11 +332,23 @@
         /* Host: split the bill, change the head count                         */
         /* ------------------------------------------------------------------ */
 
+        function setNotice(node, text) {
+            node.textContent = text;
+            node.style.display = text ? 'block' : 'none';
+        }
+
         function renderFinalizePanel(data) {
             const btn = $('finalizeBtn');
             if (!btn) return;
             const detail = $('finalizeDetail');
-            const unclaimed = $('unclaimedWarning');
+            const ready = !!data.can_finalize;
+
+            // Ready: the split button and its warnings sit at the top. Not yet: the
+            // status line and the greyed-out button stay down with the host controls.
+            $('readyCard').hidden = !ready;
+            detail.hidden = ready;
+            $('finalizeWaitBtn').hidden = ready;
+            $('waitingDetail').hidden = ready;
 
             if (data.waiting_for > 0) {
                 detail.textContent = `Waiting for ${data.waiting_for} more ${data.waiting_for === 1 ? 'person' : 'people'} to join.`;
@@ -334,26 +358,27 @@
                 detail.textContent = 'Everyone has sent their picks.';
             }
 
+            // Unpicked dishes are worth knowing about early, so the same line shows in
+            // whichever place the host is looking: below while waiting, beside the button once ready.
+            let unclaimedText = '';
             if (data.unclaimed_items.length) {
                 const list = data.unclaimed_items.slice(0, 6).join(', ') + (data.unclaimed_items.length > 6 ? ' and more' : '');
-                unclaimed.textContent = `Nobody has picked: ${list}. Unpicked dishes aren't charged to anyone, so ask around first.`;
-                unclaimed.style.display = 'block';
-            } else {
-                unclaimed.style.display = 'none';
+                unclaimedText = `Nobody has picked: ${list}. Unpicked dishes aren't charged to anyone, so ask around first.`;
             }
+            setNotice($('unclaimedWarning'), ready ? unclaimedText : '');
+            setNotice($('unclaimedEarly'), ready ? '' : unclaimedText);
+
             // Only worth raising once everyone has sent: until then the count is still moving.
-            const quantity = $('quantityWarning');
-            const off = data.can_finalize ? (data.quantity_mismatches || []) : [];
+            const off = ready ? (data.quantity_mismatches || []) : [];
+            let quantityText = '';
             if (off.length) {
                 const list = off.slice(0, 4)
                     .map(m => `${m.name} (${m.claimed} of ${m.quantity} claimed: ${(m.by || []).map(h => `${h.name} ${h.portions}`).join(', ')})`).join('; ')
                     + (off.length > 4 ? '; and more' : '');
-                quantity.textContent = `Not fully claimed: ${list}. Nobody is sharing the rest, so it isn't charged to anyone. Ask around first.`;
-                quantity.style.display = 'block';
-            } else {
-                quantity.style.display = 'none';
+                quantityText = `Not fully claimed: ${list}. Nobody is sharing the rest, so it isn't charged to anyone. Ask around first.`;
             }
-            btn.disabled = !data.can_finalize;
+            setNotice($('quantityWarning'), quantityText);
+            btn.disabled = !ready;
         }
 
         async function finalizeBill() {
@@ -364,6 +389,7 @@
             const quantityOff = $('quantityWarning').style.display !== 'none';
             if (quantityOff && !confirm("Some dishes are only partly claimed and the rest will not be charged to anyone. Split the bill anyway?")) return;
             btn.disabled = true;
+            status.classList.remove('error');
             status.textContent = 'Splitting the bill…';
             const r = await postJson(`/room/${roomCode}/finalize`, {});
             if (r.ok && r.data && r.data.redirect) {

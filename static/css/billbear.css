@@ -231,6 +231,21 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .person__meta { font-size: 0.85rem; color: var(--ink-soft); line-height: 1.2; }
 .seat { display: flex; align-items: center; gap: 12px; min-height: 62px; padding: 8px 14px; border: var(--line) dashed var(--on-ground); border-radius: 16px; font-weight: 600; }
 
+/* Host, once everyone has sent: the split button comes to the top. Dark card and
+   honey button, like the pay bar, so it is the one loud thing on the page. */
+.ready { display: flex; flex-direction: column; gap: 14px; padding: 16px 16px 18px; border: var(--line) solid var(--ink); border-radius: 18px; background: var(--ink); color: var(--paper); }
+:root[data-theme="dark"] .ready { background: #1E1208; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ready { background: #1E1208; } }
+.ready :focus-visible { outline-color: var(--honey); }
+.ready__top { display: flex; align-items: center; gap: 14px; }
+.ready__text { font-size: 1.15rem; font-weight: 700; line-height: 1.2; text-wrap: balance; }
+.ready .paw { width: 52px; height: 52px; animation: paw-stamp 0.24s ease-out; }
+.ready .paw svg { width: 30px; height: 30px; }
+.ready .btn--primary { min-height: 64px; border-color: var(--honey); background: var(--honey); color: var(--ink); font-size: 1.35rem; }
+.ready .notice { background: var(--paper-tint); color: var(--ink); }
+.ready .status-line { color: var(--paper); }
+.ready .status-line:empty { display: none; }
+
 .lines { display: flex; flex-direction: column; gap: 9px; }
 .line { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; font-size: 1.02rem; font-weight: 600; line-height: 1.2; }
 .line > :first-child { min-width: 0; overflow-wrap: anywhere; }

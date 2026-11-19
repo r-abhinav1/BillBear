@@ -2,6 +2,7 @@
 Request-level security helpers: client IP, same-origin checks, security
 headers, rate limits and the optional bot check.
 """
+import logging
 import os
 from typing import Optional
 from urllib.parse import urlsplit
@@ -127,10 +128,18 @@ def load_test_pass(request) -> bool:
     return bool(sent) and hmac.compare_digest(sent.encode(), token.encode())
 
 
-def verify_turnstile(token: str, remote_ip: str) -> bool:
+def verify_turnstile(token: str, remote_ip: str, where: str = "") -> bool:
+    """
+    Check a Turnstile token with Cloudflare. `where` names the endpoint, for the
+    log. Every refusal is logged with its reason (Sentry Logs keeps warnings), but
+    never the token or the IP: "no token" means the browser sent none, while
+    error codes such as timeout-or-duplicate mean Cloudflare turned one down.
+    """
     if not turnstile_enabled():
         return True
+    log = logging.getLogger("billbear.security")
     if not token:
+        log.warning("bot check: no token sent (%s)", where or "?")
         return False
     try:
         resp = requests.post(
@@ -142,9 +151,14 @@ def verify_turnstile(token: str, remote_ip: str) -> bool:
             },
             timeout=4,
         )
-        return bool(resp.ok and resp.json().get("success"))
+        body = resp.json() if resp.ok else {}
+        if resp.ok and body.get("success"):
+            return True
+        log.warning(
+            "bot check: Cloudflare refused the token (%s): http=%s error_codes=%s",
+            where or "?", resp.status_code, body.get("error-codes"),
+        )
+        return False
     except Exception as exc:
-        import logging
-
-        logging.getLogger("billbear.security").warning("turnstile verify failed: %s", type(exc).__name__)
+        log.warning("bot check: could not reach Cloudflare (%s): %s", where or "?", type(exc).__name__)
         return False

@@ -398,3 +398,156 @@ def test_pdf_download_is_throttled(monkeypatch):
     statuses = [host.get(f"/room/{code}/download").status_code for _ in range(21)]
     assert statuses[:20] == [200] * 20
     assert statuses[20] == 429
+
+
+# ---------------------------------------------------------------------------
+# Bot check: a scan's token also covers Create, once
+# ---------------------------------------------------------------------------
+# A Turnstile token works once, and the next one takes seconds to arrive, so a
+# quick tap on Create after a scan used to be refused as a "bot". The server now
+# remembers a scan's accepted token for 15 minutes (cookie `bb_human`, sent only
+# to /create) and Create takes that in place of a second token.
+
+def _bot_check_on(monkeypatch, good=("good",)):
+    """Turnstile switched on, with a stand-in Cloudflare that accepts only the `good` tokens."""
+    import utils.security as security
+
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "test-secret")
+    monkeypatch.setenv("TURNSTILE_SITE_KEY", "test-site")
+    asked = []
+
+    def post(url, data=None, timeout=None):
+        asked.append(data["response"])
+        accepted = data["response"] in good
+
+        class Reply:
+            ok = True
+            status_code = 200
+
+            def json(self):
+                return {"success": True} if accepted else {"success": False, "error-codes": ["invalid-input-response"]}
+
+        return Reply()
+
+    monkeypatch.setattr(security.requests, "post", post)
+    return asked
+
+
+def _stub_vision(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {
+        "items": [{"name": "Tea", "price": "₹30"}], "total": "₹30.00",
+    })
+
+
+def _scan_with_token(c, token):
+    return c.post(
+        "/api/receipt/scan",
+        data={"image": (io.BytesIO(_jpeg_bytes()), "r.jpg"), "cf-turnstile-response": token},
+        content_type="multipart/form-data",
+    )
+
+
+def _create_form(**extra):
+    import json
+
+    receipt = {"items": [{"name": "Tea", "price": "30"}], "subtotal": "30", "total": "30",
+               "extraction_meta": {"source": "vision_llm"}}
+    data = {"host_name": "Alice", "room_name": "Dinner", "num_people": "2", "receipt_json": json.dumps(receipt)}
+    data.update(extra)
+    return data
+
+
+def test_a_scan_the_bot_check_accepted_lets_create_skip_a_second_token(monkeypatch):
+    asked = _bot_check_on(monkeypatch)
+    _stub_vision(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    scan = _scan_with_token(c, "good")
+    assert scan.status_code == 200, scan.get_json()
+    cookie = next(h for h in scan.headers.getlist("Set-Cookie") if h.startswith("bb_human="))
+    assert "Path=/create" in cookie and "HttpOnly" in cookie and "SameSite=Strict" in cookie
+    # The page's next token has not arrived yet: Create sends none, and still goes through.
+    resp = c.post("/create", data=_create_form())
+    assert resp.status_code == 302, resp.get_data(as_text=True)[:300]
+    assert asked == ["good"]          # Cloudflare was asked once, for the scan
+
+
+def test_create_without_a_token_or_a_pass_is_refused_and_says_why(monkeypatch, caplog):
+    asked = _bot_check_on(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    with caplog.at_level("WARNING", logger="billbear.security"):
+        resp = c.post("/create", data=_create_form())
+    assert resp.status_code == 403
+    assert "Bot check failed" in resp.get_data(as_text=True)
+    assert asked == []                # nothing to check, so Cloudflare was not called
+    assert "no token sent (create)" in caplog.text
+
+
+def test_create_with_its_own_fresh_token_still_works(monkeypatch):
+    """The manual path never scans: its token comes from the page load."""
+    asked = _bot_check_on(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    assert c.post("/create", data=_create_form(**{"cf-turnstile-response": "good"})).status_code == 302
+    assert asked == ["good"]
+
+
+def test_a_refused_token_is_logged_with_cloudflares_reason_but_not_the_token(monkeypatch, caplog):
+    _bot_check_on(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    with caplog.at_level("WARNING", logger="billbear.security"):
+        resp = c.post("/create", data=_create_form(**{"cf-turnstile-response": "secret-looking-token"}))
+    assert resp.status_code == 403
+    assert "invalid-input-response" in caplog.text
+    assert "secret-looking-token" not in caplog.text
+
+
+def test_the_pass_covers_one_room(monkeypatch):
+    _bot_check_on(monkeypatch)
+    _stub_vision(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    assert _scan_with_token(c, "good").status_code == 200
+    assert c.post("/create", data=_create_form()).status_code == 302
+    assert c.post("/create", data=_create_form()).status_code == 403     # used up
+
+
+def test_a_failed_scan_check_gives_no_pass(monkeypatch):
+    _bot_check_on(monkeypatch)
+    _stub_vision(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    assert _scan_with_token(c, "bad").status_code == 403
+    assert c.post("/create", data=_create_form()).status_code == 403
+
+
+def test_the_pass_does_not_skip_the_check_on_scans(monkeypatch):
+    """Scans are paid model calls: each needs its own token, pass or not."""
+    _bot_check_on(monkeypatch)
+    _stub_vision(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    assert _scan_with_token(c, "good").status_code == 200
+    assert _scan_with_token(c, "").status_code == 403
+
+
+def test_a_forged_or_stale_pass_is_ignored(monkeypatch):
+    _bot_check_on(monkeypatch)
+    c = new_client()
+    c.get("/create")
+    c.set_cookie("bb_human", "not-a-signed-value", path="/create")
+    assert c.post("/create", data=_create_form()).status_code == 403
+    # A real pass from another purpose's key (the scan ticket's) is no good either.
+    scan_ticket = URLSafeTimedSerializer("test-secret-key-for-pytest-only-0123456789", salt="bb-scan-v1").dumps({"n": "x"})
+    c.set_cookie("bb_human", scan_ticket, path="/create")
+    assert c.post("/create", data=_create_form()).status_code == 403
+
+
+def test_with_the_bot_check_off_nothing_changes():
+    c = new_client()
+    assert c.post("/create", data=_create_form()).status_code == 302
+    assert not any(h.startswith("bb_human=") for h in c.get("/create").headers.getlist("Set-Cookie"))

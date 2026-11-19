@@ -185,3 +185,47 @@ def has_valid_scan_ticket(request) -> bool:
         return True
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# "Passed the bot check" pass
+# ---------------------------------------------------------------------------
+# A Turnstile token works once, so a scan uses up the page's token and Create
+# would need a second one, which takes seconds to arrive. Instead, when the
+# server accepts a token on a scan it also hands back this short-lived signed
+# cookie, and Create accepts it in place of a fresh token. It is only sent to
+# /create (scans keep needing a fresh token: each one is a paid model call) and
+# is cleared once a room has been made.
+
+HUMAN_PASS_COOKIE = "bb_human"
+HUMAN_PASS_MAX_AGE = 15 * 60
+HUMAN_PASS_PATH = "/create"
+
+
+def set_human_pass(response):
+    response.set_cookie(
+        HUMAN_PASS_COOKIE,
+        _serializer("bb-human-v1").dumps({"n": secrets.token_urlsafe(8)}),
+        max_age=HUMAN_PASS_MAX_AGE,
+        httponly=True,
+        samesite="Strict",
+        secure=_secure_cookies(),
+        path=HUMAN_PASS_PATH,
+    )
+    return response
+
+
+def has_human_pass(request) -> bool:
+    raw = request.cookies.get(HUMAN_PASS_COOKIE)
+    if not raw:
+        return False
+    try:
+        _serializer("bb-human-v1").loads(raw, max_age=HUMAN_PASS_MAX_AGE)
+        return True
+    except Exception:
+        return False
+
+
+def clear_human_pass(response):
+    response.delete_cookie(HUMAN_PASS_COOKIE, path=HUMAN_PASS_PATH)
+    return response

@@ -73,11 +73,14 @@ from utils.security import (  # noqa: E402
     verify_turnstile,
 )
 from utils.session import (  # noqa: E402
+    clear_human_pass,
     get_secret_key,
+    has_human_pass,
     has_valid_scan_ticket,
     read_hostkey_cookie,
     read_session_cookie,
     set_hostkey_cookie,
+    set_human_pass,
     set_scan_ticket,
     set_session_cookie,
 )
@@ -228,6 +231,16 @@ def _csrf_origin_check():
 @app.after_request
 def _security_headers(response):
     return apply_security_headers(response, turnstile=turnstile_enabled())
+
+
+@app.after_request
+def _remember_human(response):
+    # A scan whose bot-check token Cloudflare accepted: let Create skip a second
+    # token for a while (see utils/session.py). Set on every response of that
+    # request, so it isn't lost if the scan itself then fails.
+    if g.get("human_verified"):
+        set_human_pass(response)
+    return response
 
 
 @app.errorhandler(RoomError)
@@ -616,9 +629,10 @@ def _scan_receipt():
     if not has_valid_scan_ticket(request):
         g.scan["outcome"] = "no_ticket"
         return error_response("Scan session expired. Reload the page and try again.", 403, "NO_TICKET")
-    if not verify_turnstile(request.form.get("cf-turnstile-response", ""), client_ip(request)):
+    if not verify_turnstile(request.form.get("cf-turnstile-response", ""), client_ip(request), "scan"):
         g.scan["outcome"] = "bot_check"
         return error_response("Bot check failed. Reload the page and try again.", 403, "BOT_CHECK")
+    g.human_verified = turnstile_enabled()
     if rate_limited("scan") or rate_limited("scan_day"):
         g.scan["outcome"] = "rate_limited"
         return error_response(
@@ -712,8 +726,12 @@ def create_room():
     form = request.form
     if rate_limited("create"):
         return _render_create(mode, "Too many rooms created from this network. Try again later.", 429, form)
-    if not g.get("load_test") and not verify_turnstile(form.get("cf-turnstile-response", ""), client_ip(request)):
-        return _render_create(mode, "Bot check failed. Please try again.", 403, form)
+    # A scan in the last 15 minutes already passed the bot check (its token is
+    # used up), so that stands in for a fresh token here.
+    if not (g.get("load_test") or has_human_pass(request)) and not verify_turnstile(
+        form.get("cf-turnstile-response", ""), client_ip(request), "create"
+    ):
+        return _render_create(mode, "Bot check failed. Wait a moment, then tap the button again.", 403, form)
 
     try:
         host_name = normalize_person_name(form.get("host_name"))
@@ -762,6 +780,7 @@ def create_room():
     response = make_response(redirect(url_for("edit_items", room_code=code)))
     set_session_cookie(response, code, host_uid, host_name)
     set_hostkey_cookie(response, code, recovery_token)
+    clear_human_pass(response)      # one room per bot check; the next one needs a new pass
     return response
 
 

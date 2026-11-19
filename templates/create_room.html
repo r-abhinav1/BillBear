@@ -225,6 +225,73 @@
             if (window.turnstile) { try { window.turnstile.reset(); } catch (_e) {} }
         }
 
+        /* ------------------------------------------------------------------ */
+        /* Bot check: never send before there is something to send            */
+        /* ------------------------------------------------------------------ */
+        // A token works once and takes a few seconds to arrive (longer on a phone).
+        // A scan uses the page's token; the server then remembers that scan for 15
+        // minutes, so Create needs no second token (humanUntil is our side of that).
+        const TS_ON = {{ (turnstile_site_key | length > 0) | tojson }};
+        const HUMAN_WAIT_MS = 25000;
+        const HUMAN_PASS_MS = 14 * 60 * 1000;     // a minute under the server's 15
+        const HUMAN_CHECKING = 'Checking that you are human…';
+        const HUMAN_STUCK = "The bot check didn't finish. Turn off any ad blocker for this site, or reload the page and try again.";
+        let humanUntil = 0;
+        let humanTimer = null;
+
+        // Can a request go out now without being refused for a missing token?
+        function humanReady() {
+            return !TS_ON || Date.now() < humanUntil || !!turnstileToken();
+        }
+
+        // Resolves with a fresh token (scans always need one), or '' after the wait.
+        function waitForToken(ms) {
+            if (!TS_ON || turnstileToken()) return Promise.resolve(turnstileToken());
+            return new Promise(resolve => {
+                const started = Date.now();
+                const timer = setInterval(() => {
+                    const token = turnstileToken();
+                    if (token || Date.now() - started > ms) { clearInterval(timer); resolve(token); }
+                }, 250);
+            });
+        }
+
+        // Run `action` once the bot check is ready: now if it is, else as soon as it is.
+        // Meanwhile the button says what is going on; after the wait it gives up with a reason.
+        function whenHuman(action) {
+            if (humanReady()) { action(); return; }
+            clearInterval(humanTimer);
+            const label = submitBtn.textContent;
+            const wasDisabled = submitBtn.disabled;
+            const settle = () => {
+                clearInterval(humanTimer);
+                submitBtn.textContent = label;
+                submitBtn.disabled = wasDisabled;
+            };
+            submitBtn.textContent = HUMAN_CHECKING;
+            submitBtn.disabled = true;
+            setStatus(HUMAN_CHECKING);
+            const started = Date.now();
+            humanTimer = setInterval(() => {
+                if (humanReady()) {
+                    settle();
+                    setStatus('');
+                    action();
+                } else if (Date.now() - started > HUMAN_WAIT_MS) {
+                    settle();
+                    setStatus(HUMAN_STUCK, 'error');
+                }
+            }, 250);
+        }
+
+        // The form's own submit handler does the checks and the loading state.
+        function submitForm() {
+            if (form.requestSubmit) { form.requestSubmit(); return; }
+            submitted = true;                // old browsers: no requestSubmit, so no handler run
+            form.classList.add('loading');
+            form.submit();
+        }
+
         function detailsFilled() {
             return ['host_name', 'room_name', 'num_people'].every(id => document.getElementById(id).value.trim());
         }
@@ -303,9 +370,13 @@
                 setReading(true);
                 setStatus('Getting the photo ready…');
                 const blob = await downscaleToJpeg(file);
+                // The photo is usually ready before the bot check is (a phone solves it slowly).
+                if (TS_ON && !turnstileToken()) setStatus(HUMAN_CHECKING);
+                const token = await waitForToken(HUMAN_WAIT_MS);
+                if (TS_ON && !token) throw new Error(HUMAN_STUCK);
                 const body = new FormData();
                 body.append('image', blob, 'receipt.jpg');
-                body.append('cf-turnstile-response', turnstileToken());
+                body.append('cf-turnstile-response', token);
                 setStatus('Bear is reading your bill. This can take up to 20 seconds, so keep this page open.');
                 const resp = await fetch('/api/receipt/scan', {
                     method: 'POST',
@@ -319,6 +390,7 @@
                 if (!resp.ok || !data || data.status !== 'success') {
                     throw new Error((data && data.message) || `Scan failed (HTTP ${resp.status}).`);
                 }
+                humanUntil = Date.now() + HUMAN_PASS_MS;      // the server accepted our token and remembers it
                 const label = file === lastCameraFile ? 'Photo taken' : (file.name || 'Photo selected');
                 store.set('bb_create_draft', { receipt: data.receipt, label });
                 applyScan(data.receipt, label);
@@ -539,6 +611,7 @@
         function startEmpty() {
             const problem = detailsProblem();
             if (problem) { setStatus(problem, 'error'); return; }
+            if (!humanReady()) { whenHuman(startEmpty); return; }
             if (scanController) scanController.abort();
             store.drop('bb_create_draft');
             skipInput.value = 'true';
@@ -576,6 +649,11 @@
             if (!receiptInput.value && skipInput.value !== 'true') {
                 e.preventDefault();
                 setStatus(MODE === 'json' ? 'Choose a saved scan file first.' : 'Add a bill photo first, or enter items manually.', 'error');
+                return;
+            }
+            if (!humanReady()) {
+                e.preventDefault();
+                whenHuman(submitForm);
                 return;
             }
             submitted = true;

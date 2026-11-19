@@ -39,11 +39,16 @@
         <a class="btn btn--honey" href="{{ url_for('select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
     </div>
 
-    <div class="notice notice--quiet stack" id="sentCard" style="gap: 4px" hidden>
-        <strong>What you sent</strong>
-        <span id="sentDishes"></span>
-        <span class="small">Your total shows once the host splits the bill.</span>
-    </div>
+    {# What this person sent, laid out like the bill: diet mark, dish, quantity, shared or not. #}
+    <section class="receipt" id="sentCard" hidden>
+        <div class="paper stack" style="gap: 10px">
+            <h2>What you sent</h2>
+            <hr class="dash dash--ink">
+            <div class="lines" id="sentLines"></div>
+            <p class="fineprint" style="text-wrap: balance">Your total shows once the host splits the bill.</p>
+        </div>
+        <div class="tear"></div>
+    </section>
 
     <section class="stack">
         <div class="row row--between">
@@ -144,6 +149,7 @@
 {% endif %}
 
 <template id="pawTpl">{{ ui.paw(true) }}</template>
+{% for c in ['veg', 'nonveg', 'egg', 'alcohol'] %}<template data-diet="{{ c }}">{{ ui.diet(c) }}</template>{% endfor %}
 {% endblock %}
 {% block scripts %}
     <script>
@@ -251,6 +257,38 @@
                 row.appendChild(b);
             }
             return row;
+        }
+
+        /* What you sent: the bill's own look. Dish names only ever go in through textContent. */
+        let sentKey = null;
+
+        function dietMark(category) {
+            const tpl = document.querySelector(`template[data-diet="${category}"]`);
+            return tpl ? tpl.content.firstElementChild.cloneNode(true) : null;
+        }
+
+        function renderSent(rows) {
+            const key = JSON.stringify(rows);
+            if (key === sentKey) return;          // polled every few seconds; only redraw on a change
+            sentKey = key;
+            if (!rows.length) {
+                $('sentLines').replaceChildren(el('p', 'fineprint', "You didn't pick any dishes."));
+                return;
+            }
+            $('sentLines').replaceChildren(...rows.map(r => {
+                const line = el('div', 'line');
+                const what = el('span', 'with-diet');
+                const mark = dietMark(r.category);
+                if (mark) what.appendChild(mark);
+                const name = el('span', null, r.name);
+                if (r.quantity > 1) name.append(' ', el('span', 'pick__qty', `×${r.quantity}`));
+                what.appendChild(name);
+                line.appendChild(what);
+                // Single dishes are split at the end; only several-of dishes have a status to show.
+                const status = r.portions === null ? '' : r.portions === 0 ? 'Shared' : `${r.portions} yours`;
+                line.appendChild(status ? el('span', 'tag', status) : el('span'));
+                return line;
+            }));
         }
 
         $('userList').addEventListener('click', async (e) => {
@@ -547,7 +585,7 @@
                 $('pickCard').style.display = meSubmitted ? 'none' : 'flex';
                 const sent = Array.isArray(data.my_picks);
                 $('sentCard').hidden = !(meSubmitted && sent);
-                if (sent) $('sentDishes').textContent = data.my_picks.length ? data.my_picks.join(', ') : "You didn't pick any dishes.";
+                if (sent) renderSent(data.my_picks);
 
                 renderHeadline(data);
                 $('statusCount').textContent = `${data.submitted_count}/${data.expected_people} sent`;

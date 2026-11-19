@@ -466,3 +466,24 @@ def test_each_label_for_lines_the_bill_lists_several_of():
     assert each_label(Decimal("1200"), 3, jpy) == "¥400 each"                 # yen have no decimals
     assert each_label(Decimal("320.00"), 1, inr) == ""                        # a single dish needs no caption
     assert each_label(None, 4, inr) == ""
+
+
+def test_pick_rows_show_the_bill_order_and_shared_status():
+    from app import _pick_rows
+
+    room = {
+        "items": [
+            {"name": "Tikka", "category": "veg", "quantity": 1},
+            {"name": "Naan", "category": "veg", "quantity": 4},
+            {"name": "Beer", "category": "alcohol", "quantity": 3},
+            {"name": "Chicken", "category": "nonveg", "quantity": 1},
+        ],
+        "selections": {"Rohan": ["Chicken", "Beer", "Naan"]},          # picked in a different order
+        "portions": {"Rohan": {"Beer": 2, "Naan": 0}},
+    }
+    rows = _pick_rows(room, "Rohan")
+    assert [r["name"] for r in rows] == ["Naan", "Beer", "Chicken"]    # the bill's order
+    assert [r["portions"] for r in rows] == [0, 2, None]               # shared, 2 yours, a single dish
+    assert [r["quantity"] for r in rows] == [4, 3, 1]
+    assert rows[2]["category"] == "nonveg"
+    assert _pick_rows(room, "Nobody") == []

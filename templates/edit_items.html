@@ -7,6 +7,18 @@
 {% block head %}<style>form.loading { opacity: 0.6; pointer-events: none; }</style>{% endblock %}
 {% block body_attrs %} data-live{% endblock %}
 {% block content %}
+{# The dish type. The select stays (hidden) as the value that is saved; the button opens our own sheet,
+   because a browser's native menu can't be styled. #}
+{% macro typepick(selected) -%}
+<div class="typepick">
+    <select name="item_category" class="item-category" hidden>
+        {%- for value, label in CATEGORIES %}
+        <option value="{{ value }}"{% if selected == value %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+    </select>
+    <button type="button" class="typepick__btn" aria-haspopup="dialog"><span class="typepick__mark" aria-hidden="true"></span><span class="typepick__label"></span></button>
+</div>
+{%- endmacro %}
 <main class="stack stack--lg">
     <div class="row" style="align-items: flex-end">
         <div class="grow">
@@ -55,11 +67,7 @@
                     <input class="input input--mono js-money" type="text" name="item_price" value="{{ item.price }}" required inputmode="decimal" placeholder="{{ currency.symbol }}0" aria-label="Item price">
                     <button type="button" class="icon-btn" onclick="removeRow(this)" aria-label="Remove item">{{ ui.icon('close') }}</button>
                     <label class="qty-field"><span aria-hidden="true">×</span><input class="input input--mono" type="text" name="item_quantity" value="{{ item.quantity or 1 }}" inputmode="numeric" maxlength="2" aria-label="How many of this dish are on the bill"></label>
-                    <select name="item_category" class="select item-category" aria-label="Item type">
-                        {% for value, label in CATEGORIES %}
-                        <option value="{{ value }}"{% if (item.category or 'other') == value %} selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
+                    {{ typepick(item.category or 'other') }}
                 </div>
                 {% endfor %}
                 </div>
@@ -138,11 +146,7 @@
                     <input class="input input--mono js-money" type="text" name="item_price" value="" required inputmode="decimal" placeholder="0" aria-label="Item price">
                     <button type="button" class="icon-btn" onclick="removeRow(this)" aria-label="Remove item">{{ ui.icon('close') }}</button>
                     <label class="qty-field"><span aria-hidden="true">×</span><input class="input input--mono" type="text" name="item_quantity" value="1" inputmode="numeric" maxlength="2" aria-label="How many of this dish are on the bill"></label>
-                    <select name="item_category" class="select item-category" aria-label="Item type">
-                        {% for value, label in CATEGORIES %}
-                        <option value="{{ value }}"{% if 'other' == value %} selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
+                    {{ typepick('other') }}
                 </div>
     </template>
     <template id="chargeTemplate">
@@ -155,6 +159,24 @@
         </div>
     </template>
 </main>
+
+<div class="scrim" id="typeScrim" hidden></div>
+<div class="sheet" id="typeSheet" role="dialog" aria-modal="true" aria-labelledby="typeSheetTitle" hidden>
+    <div class="row" style="padding-bottom: 4px">
+        <h2 class="grow" id="typeSheetTitle" style="font-size: 1.4rem; font-weight: 800">What kind of dish is it?</h2>
+        <button type="button" class="icon-btn" id="typeClose" aria-label="Close">{{ ui.icon('close') }}</button>
+    </div>
+    <div class="stack" style="gap: 8px" role="radiogroup" aria-label="Dish type">
+        {% set HINTS = {'veg': 'No meat, fish or egg', 'nonveg': 'Has meat or fish', 'egg': 'Has egg, no meat or fish', 'alcohol': 'Beer, wine, spirits', 'other': "Anything the menu doesn't mark"} %}
+        {% for value, label in CATEGORIES %}
+        <button type="button" class="sheet__action typeopt" role="radio" aria-checked="false" data-value="{{ value }}">
+            <span class="typeopt__mark" aria-hidden="true">{% if value == 'other' %}<svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"/></svg>{% else %}{{ ui.diet(value, false) }}{% endif %}</span>
+            <span class="grow"><b>{{ label }}</b><span>{{ HINTS[value] }}</span></span>
+            <span class="typeopt__check" aria-hidden="true">{{ ui.paw(true) }}</span>
+        </button>
+        {% endfor %}
+    </div>
+</div>
 {% endblock %}
 {% block scripts %}
     <script src="{{ url_for('static', filename='js/money.js') }}"></script>
@@ -514,11 +536,77 @@
             e.returnValue = '';
         });
 
+        /* ------------------------------------------------------------------ */
+        /* Dish type: our own sheet instead of the browser's menu              */
+        /* ------------------------------------------------------------------ */
+        const typeSheet = document.getElementById('typeSheet');
+        const typeScrim = document.getElementById('typeScrim');
+        let typeOwner = null;                       // the .typepick that opened the sheet
+        const typeOption = (value) => typeSheet.querySelector(`.typeopt[data-value="${value}"]`);
+
+        // Show the hidden select's value on the button: the diet mark and the name.
+        function syncTypePick(pick) {
+            const opt = typeOption(pick.querySelector('select').value) || typeOption('other');
+            const label = opt.querySelector('b').textContent;
+            pick.querySelector('.typepick__mark').innerHTML = opt.querySelector('.typeopt__mark').innerHTML;
+            pick.querySelector('.typepick__label').textContent = label;
+            pick.querySelector('.typepick__btn').setAttribute('aria-label', `Dish type: ${label}. Tap to change.`);
+        }
+
+        function openTypeSheet(pick) {
+            typeOwner = pick;
+            const current = pick.querySelector('select').value;
+            typeSheet.querySelectorAll('.typeopt').forEach(o => o.setAttribute('aria-checked', o.dataset.value === current ? 'true' : 'false'));
+            typeScrim.hidden = false;
+            typeSheet.hidden = false;
+            (typeOption(current) || typeSheet.querySelector('.typeopt')).focus();
+        }
+
+        function closeTypeSheet() {
+            if (typeSheet.hidden) return;
+            typeSheet.hidden = true;
+            typeScrim.hidden = true;
+            if (typeOwner) typeOwner.querySelector('.typepick__btn').focus();
+            typeOwner = null;
+        }
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.typepick__btn');
+            if (btn) { openTypeSheet(btn.closest('.typepick')); return; }
+            const opt = e.target.closest('.typeopt');
+            if (opt && typeOwner) {
+                const select = typeOwner.querySelector('select');
+                select.value = opt.dataset.value;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                syncTypePick(typeOwner);
+                closeTypeSheet();
+            }
+        });
+        typeScrim.addEventListener('click', closeTypeSheet);
+        document.getElementById('typeClose').addEventListener('click', closeTypeSheet);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTypeSheet(); });
+        // Arrow keys move between the types; Tab stays inside the sheet while it is open.
+        typeSheet.addEventListener('keydown', (e) => {
+            const opts = Array.from(typeSheet.querySelectorAll('.typeopt'));
+            const stops = opts.concat(document.getElementById('typeClose'));
+            const at = stops.indexOf(document.activeElement);
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const i = opts.indexOf(document.activeElement);
+                opts[(i + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length].focus();
+            } else if (e.key === 'Tab') {
+                e.preventDefault();
+                stops[(at + (e.shiftKey ? stops.length - 1 : 1)) % stops.length].focus();
+            }
+        });
+        document.querySelectorAll('.typepick').forEach(syncTypePick);
+
         function addRow() {
             const list = document.getElementById('itemsTable');
             const row = document.getElementById('rowTemplate').content.firstElementChild.cloneNode(true);
             row.querySelector('input[name="item_price"]').placeholder = cur.symbol + '0';
             list.appendChild(row);
+            syncTypePick(row.querySelector('.typepick'));
             row.querySelector('input[name="item_name"]').focus();
         }
 

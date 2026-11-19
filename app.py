@@ -982,6 +982,26 @@ def _pick_labels(room: dict, name: str, several: set = None) -> list:
     return shown
 
 
+def _pick_rows(room: dict, name: str) -> list:
+    """One person's sent picks as rows for the waiting page, in the order the bill lists them.
+
+    `portions` is None for a single dish, 0 for a several-of dish they share, or how many
+    of them they had to themselves.
+    """
+    chosen = set(room["selections"].get(name, []))
+    counts = room["portions"].get(name, {})
+    return [
+        {
+            "name": item["name"],
+            "category": item["category"],
+            "quantity": item["quantity"],
+            "portions": counts.get(item["name"], 0) if item["quantity"] > 1 else None,
+        }
+        for item in room["items"]
+        if item["name"] in chosen
+    ]
+
+
 def _picks_for_host(room: dict) -> dict:
     """Each person's sent picks, for the host's Manage sheet."""
     several = {item["name"] for item in room["items"] if item["quantity"] > 1}
@@ -1022,7 +1042,7 @@ def room_status(room_code):
         "picks": _picks_for_host(room) if me and me["is_host"] else None,
         # The caller's own sent picks (None until they have sent), so the waiting
         # page can show what they sent without anyone else's picks leaking.
-        "my_picks": _pick_labels(room, me["name"]) if me and me["name"] in room["submitted_users"] else None,
+        "my_picks": _pick_rows(room, me["name"]) if me and me["name"] in room["submitted_users"] else None,
         # Dishes where the portions sent don't add up to the bill's quantity.
         "quantity_mismatches": room["quantity_mismatches"] if me and me["is_host"] else [],
         # For dishes the bill lists several of: what each *other* person has sent

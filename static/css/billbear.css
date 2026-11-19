@@ -243,6 +243,7 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .ready .paw { width: 52px; height: 52px; animation: paw-stamp 0.24s ease-out; }
 .ready .paw svg { width: 30px; height: 30px; }
 .ready .btn--primary { min-height: 64px; border-color: var(--honey); background: var(--honey); color: var(--ink); font-size: 1.35rem; }
+.ready .btn--primary[disabled] { border-color: var(--disabled); background: var(--disabled); color: var(--paper); cursor: not-allowed; }
 .ready .notice { background: var(--paper-tint); color: var(--ink); }
 .ready .status-line { color: var(--paper); }
 .ready .status-line:empty { display: none; }
@@ -284,8 +285,9 @@ input[type="file"].visually-hidden:focus-visible + .file-drop { outline: 3px sol
 .pick--many:has(input:checked) + .portions { display: flex; }
 .pick[hidden] + .portions { display: none; }
 .portions__label { flex: 0 0 100%; font-size: 0.93rem; font-weight: 600; line-height: 1.2; }
+.portions__changed { flex: 0 0 100%; padding: 4px 9px; border: 2px solid var(--ink); border-radius: 10px; background: var(--honey); color: var(--ink); font-size: 0.85rem; font-weight: 700; line-height: 1.25; }
 .portions__hint { flex: 1 1 0; min-width: 0; font-size: 0.82rem; line-height: 1.2; opacity: 0.8; }
-.portions .stepper button:disabled { opacity: 0.35; cursor: default; }
+.stepper button:disabled { opacity: 0.35; cursor: default; }
 .pick__side { margin-left: auto; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .pick__mode { display: none; padding: 1px 8px; border: 2px solid var(--ink); border-radius: 10px; background: var(--honey); color: var(--ink); font-size: 0.78rem; font-weight: 700; line-height: 1.3; white-space: nowrap; }
 .pick:has(input:checked) .pick__mode { display: inline-block; }

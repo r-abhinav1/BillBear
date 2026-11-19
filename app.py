@@ -85,6 +85,8 @@ from utils.session import (  # noqa: E402
     set_session_cookie,
 )
 from utils.validation import (  # noqa: E402
+    MAX_PEOPLE,
+    MIN_PEOPLE,
     clean_items,
     normalize_quantity,
     normalize_person_name,
@@ -179,7 +181,12 @@ app.add_template_filter(pdf_text, "pdf_text")
 
 @app.context_processor
 def _currency_context():
-    return {"CURRENCY_CHOICES": currency_choices(), "MAX_CHARGES": MAX_CHARGES}
+    return {
+        "CURRENCY_CHOICES": currency_choices(),
+        "MAX_CHARGES": MAX_CHARGES,
+        "MIN_PEOPLE": MIN_PEOPLE,
+        "MAX_PEOPLE": MAX_PEOPLE,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -758,8 +765,8 @@ def create_room():
             num_people = int(form.get("num_people", "").strip())
         except ValueError:
             raise ValueError("Number of people must be a whole number.")
-        if not 1 <= num_people <= 50:
-            raise ValueError("Number of people must be between 1 and 50.")
+        if not MIN_PEOPLE <= num_people <= MAX_PEOPLE:
+            raise ValueError(f"Number of people must be between {MIN_PEOPLE} and {MAX_PEOPLE}.")
 
         if form.get("skip_ocr", "").lower() == "true":
             receipt, source = {}, "manual"
@@ -1231,6 +1238,7 @@ def select_items(room_code, user_name):
         user_name=me["name"],
         pre_selected=me["claim_ids"],
         pre_portions=me["claim_portions"],
+        pre_lowered=me["claim_lowered"],
     )
 
 
@@ -1337,8 +1345,8 @@ def host_update_num_people(room_code):
         value = int(str(_json_body().get("num_people", "")).strip())
     except (TypeError, ValueError):
         raise RoomError("BAD_REQUEST", "num_people must be an integer", status=400)
-    if not 1 <= value <= 50:
-        raise RoomError("BAD_REQUEST", "num_people must be between 1 and 50", status=400)
+    if not MIN_PEOPLE <= value <= MAX_PEOPLE:
+        raise RoomError("BAD_REQUEST", f"Number of people must be between {MIN_PEOPLE} and {MAX_PEOPLE}.", status=400)
     storage.set_num_people(room["code"], uid, value)
     return jsonify({"status": "success", "num_people": value})
 

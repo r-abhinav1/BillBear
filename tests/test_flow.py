@@ -90,19 +90,50 @@ def test_full_flow_finalize_and_results():
 def test_finalize_requires_party_full():
     host = new_client()
     code = make_room(host, num_people=3)
+    bob = new_client()
+    join(bob, code, "Bob")
     submit(host, code, "Alice", ["Pasta"])
+    submit(bob, code, "Bob", ["Pizza"])
     resp = post_json(host, f"/room/{code}/finalize")
-    assert resp.status_code == 409 and resp.get_json()["waiting_for"] == 2
+    assert resp.status_code == 409 and resp.get_json()["waiting_for"] == 1
     # Host lowers party size instead of force-completing
-    assert post_json(host, f"/room/{code}/host/num-people", {"num_people": 1}).status_code == 200
+    assert post_json(host, f"/room/{code}/host/num-people", {"num_people": 2}).status_code == 200
     assert post_json(host, f"/room/{code}/finalize").status_code == 200
 
 
-def test_solo_room_finalizes():
+def test_room_from_before_the_minimum_still_finalizes():
+    # One-person rooms can no longer be created; ones made earlier keep working.
     host = new_client()
     code = make_room(host, num_people=1)
+    assert room(code)["num_people"] == 1
     submit(host, code, "Alice", ["Pasta", "Pizza", "Coke"])
     assert post_json(host, f"/room/{code}/finalize").status_code == 200
+
+
+def test_a_room_needs_at_least_two_people():
+    for people in ("1", "0", "-2"):
+        resp = new_client().post("/create", data={
+            "host_name": "Alice", "room_name": "x", "num_people": people, "skip_ocr": "true",
+        })
+        assert resp.status_code == 400, people
+        assert b"between 2 and 50" in resp.data
+
+
+def test_head_count_cannot_be_lowered_below_two():
+    host = new_client()
+    code = make_room(host, num_people=3)
+    resp = post_json(host, f"/room/{code}/host/num-people", {"num_people": 1})
+    assert resp.status_code == 400 and "between 2 and 50" in resp.get_json()["message"]
+    assert room(code)["num_people"] == 3
+    assert post_json(host, f"/room/{code}/host/num-people", {"num_people": 2}).status_code == 200
+
+
+def test_create_and_waiting_pages_state_the_minimum():
+    host = new_client()
+    assert 'min="2"' in host.get("/create").get_data(as_text=True)
+    code = make_room(host, num_people=3)
+    page = host.get(f"/room/{code}/waiting/Alice").get_data(as_text=True)
+    assert "const MIN_PEOPLE = 2" in page
 
 
 def test_writes_rejected_after_finalize_and_reopen_clears():
@@ -552,6 +583,152 @@ def test_lowering_quantity_resets_and_trims_claims():
     assert r["submitted_users"] == set()                # Bob has to confirm again
     bob_row = next(p for p in r["participants"] if p["name"] == "Bob")
     assert list(bob_row["claim_portions"].values()) == [2]
+
+
+def _set_dosas_to(host, code, quantity):
+    r = room(code)
+    resp = host.post(f"/edit/{code}", data={
+        "item_id": [str(i["id"]) for i in r["items"]],
+        "item_name": ["Masala Dosa", "Coffee"],
+        "item_price": ["500", "60"],
+        "item_quantity": [str(quantity), "1"],
+        "item_category": ["veg", "veg"],
+        "subtotal": "560", "total": "560",
+    })
+    assert resp.status_code == 302
+
+
+def _dosa_claims(code):
+    return {p["name"]: list(p["claim_portions"].values()) for p in room(code)["participants"]}
+
+
+def test_lowering_quantity_below_what_two_people_hold_leaves_both_able_to_resend():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 4)
+    # Five became four: the one who joined last gives up the unit that is gone.
+    assert _dosa_claims(code) == {"Alice": [3], "Bob": [1]}
+    assert room(code)["submitted_users"] == set()
+    # Each confirms exactly what their own screen now shows.
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 1}).status_code == 200
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert room(code)["quantity_mismatches"] == []
+
+
+def test_lowering_quantity_can_turn_a_claim_with_no_room_into_sharing():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 2)
+    # Bob has nothing left to claim, so he shares; one unit stays back for him.
+    assert _dosa_claims(code) == {"Alice": [1], "Bob": [0]}
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 1}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    assert room(code)["quantity_mismatches"] == []
+
+
+def test_lowering_quantity_leaves_claims_that_still_fit_alone():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 1}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    _set_dosas_to(host, code, 3)
+    assert _dosa_claims(code) == {"Alice": [1], "Bob": [0]}
+
+
+def _pick_page(client, code, name):
+    resp = client.get(f"/room/{code}/user/{name}/select-items")
+    assert resp.status_code == 200
+    return resp.get_data(as_text=True)
+
+
+NOTE = "The host changed the bill"
+
+
+def test_trimmed_claim_is_explained_on_the_pick_screen():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 4)
+    assert "The host changed the bill: your 2 became 1." in _pick_page(bob, code, "Bob")
+    assert NOTE not in _pick_page(host, code, "Alice")          # Alice's claim was not touched
+
+    # Sending again settles it: the note is gone when they pick next.
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 1}).status_code == 200
+    assert post_json(host, f"/room/{code}/host/revoke/Bob").status_code == 200
+    assert NOTE not in _pick_page(bob, code, "Bob")
+
+
+def test_claim_trimmed_to_sharing_says_so():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 2)
+    page = _pick_page(bob, code, "Bob")
+    assert "none were left to claim, so you are sharing now (you had 2)." in page
+    assert "your 3 became 1." in _pick_page(host, code, "Alice")
+
+
+def test_a_second_edit_keeps_what_the_person_last_sent():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 4)        # Bob 2 -> 1
+    _set_dosas_to(host, code, 3)        # Alice 3 -> 2, Bob 1 -> sharing
+    assert "you are sharing now (you had 2)" in _pick_page(bob, code, "Bob")
+    assert "your 3 became 2." in _pick_page(host, code, "Alice")
+
+
+def test_no_note_when_the_claim_still_fits():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 1}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    _set_dosas_to(host, code, 3)
+    assert NOTE not in _pick_page(host, code, "Alice") + _pick_page(bob, code, "Bob")
+
+
+def test_making_a_dish_single_then_several_again_tells_them_their_count_dropped():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 2}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 1)
+    assert NOTE not in _pick_page(host, code, "Alice")          # one dish: nothing to count
+    _set_dosas_to(host, code, 5)
+    assert "your 2 became 1." in _pick_page(host, code, "Alice")
+
+
+def test_cannot_split_while_units_have_no_owner():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 1}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    resp = post_json(host, f"/room/{code}/finalize")
+    assert resp.status_code == 409 and resp.get_json()["code"] == "UNOWNED_UNITS"
+    assert resp.get_json()["message"].startswith("Masala Dosa: 3 of 5 are claimed and nobody is sharing the other 2.")
+    assert [m["name"] for m in resp.get_json()["quantity_mismatches"]] == ["Masala Dosa"]
+    assert not room(code)["finalized"]
+
+    # Bob takes the rest by sharing; now it adds up and the bill can be split.
+    assert post_json(host, f"/room/{code}/host/revoke/Bob").status_code == 200
+    assert post_json(host, f"/room/{code}/finalize").status_code == 409     # Bob is picking again
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+
+
+def test_unowned_units_are_named_for_every_dish():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 4}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Coffee": 1}).status_code == 200
+    resp = post_json(host, f"/room/{code}/finalize")
+    assert resp.status_code == 409
+    assert "Masala Dosa: 4 of 5 are claimed and nobody is sharing the other 1." in resp.get_json()["message"]
+
+
+def test_a_dish_nobody_picked_can_still_be_split_after_the_warning():
+    # Whole dishes nobody picked keep the old behaviour: the host is warned, then decides.
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Coffee": 1}).status_code == 200
+    assert submit(bob, code, "Bob", ["Coffee"]).status_code == 200
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
 
 
 def test_second_sender_sees_what_is_taken_and_takes_what_is_left():

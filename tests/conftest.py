@@ -75,6 +75,10 @@ def new_client():
 
 
 def make_room(client, host="Alice", num_people=3, items=DEFAULT_ITEMS, extra=None):
+    """Create a room through the real form. One-person rooms can no longer be made
+    that way (two is the minimum), but rooms made before the minimum still exist,
+    so for num_people=1 the count is lowered afterwards to stand in for one."""
+    stored_people, num_people = num_people, max(num_people, 2)
     receipt = {
         "items": [{"name": n, "price": p} for n, p in items],
         "subtotal": "700",
@@ -92,6 +96,9 @@ def make_room(client, host="Alice", num_people=3, items=DEFAULT_ITEMS, extra=Non
     assert resp.status_code == 302, resp.get_data(as_text=True)[:500]
     match = re.search(r"/edit/([A-Z0-9]{6})", resp.headers["Location"])
     assert match, resp.headers["Location"]
+    if stored_people != num_people:
+        with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
+            conn.execute("UPDATE rooms SET num_people = %s WHERE code = %s", (stored_people, match.group(1)))
     return match.group(1)
 
 

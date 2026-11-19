@@ -353,7 +353,9 @@ def _dosa_room(claims):
         {"id": 10, "position": 0, "name": "Masala Dosa", "price": Decimal("500"), "quantity": 5},
         {"id": 11, "position": 1, "name": "Coffee", "price": Decimal("60"), "quantity": 1},
     ]
-    rows = [{"participant_id": p, "item_id": i, "portions": n} for p, i, n in claims]
+    # (participant id, item id, portions[, what the claim was before the host's edit trimmed it])
+    rows = [{"participant_id": p, "item_id": i, "portions": n, "lowered_from": (rest or [None])[0]}
+            for p, i, n, *rest in claims]
     return assemble_room(room, people, items, rows)
 
 
@@ -403,6 +405,15 @@ def test_units_nobody_owns_are_not_charged_and_are_flagged():
     audit = audit_bill(r, split)
     assert audit[0]["title"] == "Masala Dosa: 4 of 5 claimed" and audit[0]["severity"] == "warn"
     assert "ok" not in [w["severity"] for w in audit]
+
+
+def test_trimmed_claims_are_reported_per_person_and_dish():
+    r = _dosa_room([(1, 10, 2, 3), (2, 10, 1), (3, 10, 2, 2), (1, 11, 1, 4)])
+    by_name = {p["name"]: p["claim_lowered"] for p in r["participants"]}
+    assert by_name["Asha"] == {10: 3}       # had 3, holds 2; the coffee is one dish, nothing to count
+    assert by_name["Bala"] == {}            # never trimmed
+    assert by_name["Chitra"] == {}          # a stale "was" that is not higher than the claim is ignored
+    assert by_name["Dev"] == {}
 
 
 def test_rows_without_portions_count_as_one_each():
@@ -488,3 +499,24 @@ def test_pick_rows_show_the_bill_order_and_shared_status():
     assert [r["id"] for r in rows] == [2, 3, 4]
     assert rows[2]["category"] == "nonveg"
     assert _pick_rows(room, "Nobody") == []
+
+
+# --- fitting held claims to a smaller quantity ---------------------------------
+
+@pytest.mark.parametrize("quantity, held, fitted", [
+    (5, [3, 2], [3, 2]),            # fits: untouched
+    (5, [2, 0], [2, 0]),
+    (5, [1, 1, 1, 1, 1], [1, 1, 1, 1, 1]),
+    (4, [3, 2], [3, 1]),            # the last in line gives up what is gone
+    (3, [2, 0], [2, 0]),
+    (3, [3, 0], [2, 0]),            # a sharer needs one unit left for them
+    (2, [3, 2], [1, 0]),            # nothing left to claim: they share instead
+    (3, [2, 2, 2], [2, 0, 0]),
+    (4, [0, 0], [0, 0]),
+    (1, [1, 1], [1, 1]),            # a single dish is shared, never counted in units
+])
+def test_fit_claims(quantity, held, fitted):
+    from utils.portions import fit_claims
+
+    assert fit_claims(quantity, held) == fitted
+    assert fit_claims(quantity, fitted) == fitted       # already valid: a second pass changes nothing

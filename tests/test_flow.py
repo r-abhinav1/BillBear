@@ -44,6 +44,14 @@ def test_create_rejects_bad_people_count(client):
     assert resp.status_code == 400
 
 
+def test_join_link_for_a_missing_room_is_a_friendly_page(client):
+    # An expired or mistyped invite used to crash: "Try another code" pointed at a route needing a code.
+    resp = client.get("/join/ZZZZZZ")
+    assert resp.status_code == 404
+    assert b"Bear ate this room" in resp.data
+    assert b'href="/join"' in resp.data
+
+
 def test_room_get_is_read_only(client):
     code = make_room(client)
     before = room(code)["last_activity_at"]

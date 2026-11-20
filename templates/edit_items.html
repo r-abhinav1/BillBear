@@ -407,7 +407,7 @@
         function downloadScan() {
             const data = collectScan();
             if (data.items.length === 0) {
-                alert('Add at least one item before saving the scan.');
+                BB.alert({ title: 'Nothing to save yet', text: 'Add at least one dish, then save the scan to a file.' });
                 return;
             }
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -568,16 +568,55 @@
         capCheck();
         setTimeout(reconRender, 50);
 
-        // Leaving with unsaved edits (Room, the logo, Back) asks first; an
-        // untouched screen never does.
+        // Leaving with unsaved edits asks first; an untouched screen never does.
+        // Links on the page (Room, the logo) and the Back button ask with Bear's
+        // own dialog. Reloading or closing the tab can only be asked about by the
+        // browser's box, which no page can restyle, so that stays as the last net.
         const snapshot = () => new URLSearchParams(new FormData(editForm)).toString();
         const savedState = snapshot();
         let saving = false;
+        const dirty = () => !saving && snapshot() !== savedState;
         window.addEventListener('beforeunload', (e) => {
-            if (saving || snapshot() === savedState) return;
+            if (!dirty()) return;
             e.preventDefault();
             e.returnValue = '';
         });
+
+        const askToLeave = () => BB.confirm({
+            title: 'Leave without saving?',
+            text: "Your changes to the bill aren't saved yet. Leave now and they're lost.",
+            ok: 'Leave without saving',
+            cancel: 'Keep editing',
+            danger: true,
+        });
+
+        document.addEventListener('click', async (e) => {
+            const link = e.target.closest('a[href]');
+            if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            if (link.target === '_blank' || link.hasAttribute('download')) return;
+            const to = new URL(link.href, window.location.href);
+            if (to.pathname === window.location.pathname && to.hash) return;   // a jump within this page
+            if (!dirty()) return;
+            e.preventDefault();
+            if (await askToLeave()) {
+                saving = true;
+                window.location.href = to.href;
+            }
+        }, true);
+
+        // Back: an extra history entry for this page lets Bear ask first. Without
+        // edits, Back carries straight on to where it would have gone.
+        try {
+            if (!(history.state && history.state.bbGuard)) history.pushState({ bbGuard: true }, '');
+            window.addEventListener('popstate', async () => {
+                if (!dirty()) { history.back(); return; }
+                history.pushState({ bbGuard: true }, '');       // stay here while Bear asks
+                if (await askToLeave()) {
+                    saving = true;
+                    history.go(-2);
+                }
+            });
+        } catch (_e) { /* no history API: the browser's box still asks */ }
 
         /* ------------------------------------------------------------------ */
         /* Dish type: our own sheet instead of the browser's menu              */

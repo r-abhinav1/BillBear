@@ -480,7 +480,7 @@
                 window.location.href = r.data.redirect;
             } else {
                 edit.disabled = false;
-                alert((r.data && r.data.message) || 'Could not reopen your picks.');
+                BB.alert({ title: "Couldn't reopen your picks", text: (r.data && r.data.message) || 'Try again in a moment.' });
             }
         });
 
@@ -670,11 +670,30 @@
             btn.disabled = !ready || off.length > 0;
         }
 
+        // What the host is asked before splitting with something nobody picked.
+        function unpickedQuestion(data) {
+            const list = (names) => names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : joinNames(names);
+            let what;
+            if (BY_TYPE) {
+                const missing = data.unpicked_types || [];
+                const total = missing.reduce((s, p) => s + p.total, 0);
+                what = `Nobody picked ${list(missing.map(p => p.label.toLowerCase()))} (${BBMoney.format(total, CURRENCY)}).`;
+            } else {
+                what = `Nobody picked ${list(data.unclaimed_items || [])}.`;
+            }
+            return {
+                title: BY_TYPE ? 'Split with a food type nobody picked?' : 'Split with dishes nobody picked?',
+                text: `${what} It won't be charged to anyone, so the shares will come to less than the bill.`,
+                ok: 'Split anyway',
+                cancel: 'Ask around first',
+            };
+        }
+
         async function finalizeBill() {
             const btn = $('finalizeBtn');
             const status = $('finalizeStatus');
             const unclaimedVisible = $('unclaimedWarning').style.display !== 'none';
-            if (unclaimedVisible && !confirm('Some dishes are not picked by anyone and will not be charged. Split the bill anyway?')) return;
+            if (unclaimedVisible && !(await BB.confirm(unpickedQuestion(lastData || {})))) return;
             btn.disabled = true;
             status.classList.remove('error');
             status.textContent = 'Splitting the bill…';

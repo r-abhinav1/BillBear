@@ -174,9 +174,9 @@
                     });
                     const data = await resp.json().catch(() => null);
                     if (resp.ok && data && data.redirect) { window.location.href = data.redirect; return; }
-                    alert((data && data.message) || 'Could not open the bill.');
+                    BB.alert({ title: "Couldn't open the bill", text: (data && data.message) || 'Try again in a moment.' });
                 } catch (_e) {
-                    alert('Could not reach the server. Try again.');
+                    BB.alert({ title: "Couldn't reach BillBear", text: 'Check your connection and try again.' });
                 }
                 fixBtn.disabled = false;
                 fixBtn.textContent = 'Fix the bill';
@@ -186,9 +186,14 @@
         const revertBtn = document.getElementById('revertCalcBtn');
         if (revertBtn) {
             revertBtn.addEventListener('click', async () => {
-                if (!confirm(
-                    'Send everyone back to pick again? Their current picks stay ticked and can be changed.'
-                )) return;
+                const sure = await BB.confirm({
+                    title: 'Send everyone back to pick?',
+                    text: "The split is undone until you split again. Everyone's picks stay ticked, so they only change what was wrong.",
+                    ok: 'Reopen the picks',
+                    cancel: 'Keep the split',
+                    danger: true,
+                });
+                if (!sure) return;
                 revertBtn.disabled = true;
                 revertBtn.textContent = 'Reopening…';
                 try {
@@ -203,7 +208,7 @@
                     });
                     const data = await resp.json().catch(() => null);
                     if (!resp.ok) {
-                        alert((data && data.message) || 'Could not reopen the picks.');
+                        BB.alert({ title: "Couldn't reopen the picks", text: (data && data.message) || 'Try again in a moment.' });
                         revertBtn.disabled = false;
                         revertBtn.textContent = REOPEN_LABEL;
                         return;
@@ -217,7 +222,7 @@
                         window.location.reload();
                     }
                 } catch (err) {
-                    alert('Could not reach the server. Try again.');
+                    BB.alert({ title: "Couldn't reach BillBear", text: 'Check your connection and try again.' });
                     revertBtn.disabled = false;
                     revertBtn.textContent = REOPEN_LABEL;
                 }

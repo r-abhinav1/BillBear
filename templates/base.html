@@ -60,6 +60,25 @@
             window.addEventListener('pageshow', function (e) { if (e.persisted) window.location.reload(); });
         }
     </script>
+    {# Bear's own confirm and alert (BB.confirm / BB.alert in bb.js), in place of the browser's grey boxes. #}
+    <template id="bbDialogTpl">
+        <div class="bbd">
+            <div class="bbd__scrim"></div>
+            <div class="bbd__sheet" role="alertdialog" aria-modal="true" aria-labelledby="bbdTitle" aria-describedby="bbdText">
+                <span class="bbd__bear" aria-hidden="true">{{ ui.bear(96) }}</span>
+                <div class="bbd__tear bbd__tear--top"></div>
+                <div class="bbd__paper">
+                    <h2 class="bbd__title" id="bbdTitle"></h2>
+                    <p class="bbd__text" id="bbdText"></p>
+                    <div class="bbd__actions">
+                        <button type="button" class="btn btn--primary btn--block bbd__ok"></button>
+                        <button type="button" class="btn btn--block bbd__cancel"></button>
+                    </div>
+                </div>
+                <div class="bbd__tear bbd__tear--bottom"></div>
+            </div>
+        </div>
+    </template>
     <script src="{{ url_for('static', filename='js/bb.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>

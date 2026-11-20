@@ -520,3 +520,23 @@ def test_fit_claims(quantity, held, fitted):
 
     assert fit_claims(quantity, held) == fitted
     assert fit_claims(quantity, fitted) == fitted       # already valid: a second pass changes nothing
+
+
+def test_pages_use_bears_dialogs_not_the_browsers():
+    """confirm(), alert() and prompt() show a grey box the site can't style; BB.confirm / BB.alert instead."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    native = re.compile(r"(?<![\w.])(alert|confirm|prompt)\s*\(")
+    offenders = []
+    comments = re.compile(r"\{#.*?#\}|/\*.*?\*/", re.S)
+    for path in list((root / "templates").rglob("*.html")) + list((root / "static" / "js").glob("*.js")):
+        text = comments.sub(lambda m: "\n" * m.group(0).count("\n"), path.read_text())
+        for number, line in enumerate(text.splitlines(), 1):
+            code = line.split("//")[0]
+            if native.search(code):
+                offenders.append(f"{path.relative_to(root)}:{number}")
+    assert offenders == []
+    base = (root / "templates" / "base.html").read_text()
+    assert 'id="bbDialogTpl"' in base and 'role="alertdialog"' in base

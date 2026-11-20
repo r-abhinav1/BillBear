@@ -332,7 +332,12 @@
         document.getElementById('selectionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             if (document.querySelectorAll('input[name="selected_items"]:checked').length === 0
-                && !confirm(`You haven't picked anything, so you'll owe ${BBMoney.format(0, CURRENCY)}. Send anyway?`)) {
+                && !(await BB.confirm({
+                    title: 'Send without picking anything?',
+                    text: `You'll owe ${BBMoney.format(0, CURRENCY)} and none of the taxes. Fine if you didn't eat or drink anything.`,
+                    ok: 'Send anyway',
+                    cancel: 'Pick my dishes',
+                }))) {
                 return;
             }
             const sid = ensureSubmissionId();

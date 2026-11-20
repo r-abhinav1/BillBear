@@ -167,7 +167,14 @@
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!boxes().some(b => b.checked)
-                && !confirm("You haven't tapped a food type, so you'll only pay your part of what everyone shares. Send anyway?")) {
+                && !(await BB.confirm({
+                    title: 'Send without a food type?',
+                    text: SHARED_TOTAL
+                        ? "You'll only pay your part of what everyone shares. Fine if that's all you had."
+                        : `You'll owe ${BBMoney.format(0, CURRENCY)}. Fine if you didn't eat or drink anything.`,
+                    ok: 'Send anyway',
+                    cancel: 'Pick my food types',
+                }))) {
                 return;
             }
             const sid = ensureSubmissionId();

@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 
 from billbear import storage
+from billbear.bill.food_types import COUNTS, TYPES, pots, public_pots
 from billbear.storage import RoomError
 from billbear.web.access import caller, load_room, not_linked_page, redirect_for, require_caller
 from billbear.web.errors import wants_json
@@ -38,6 +39,18 @@ def select_items(room_code, user_name):
         me, uid = require_caller(room)
         if me["name"] != user_name:
             raise RoomError("NOT_YOUR_SESSION", "You can only submit your own selection.", status=403)
+        target = url_for("picks.waiting_room", room_code=code, user_name=me["name"])
+        # The pick page says which way it was made for; storage refuses it if the
+        # host has switched since (MODE_CHANGED), so a page left open never sends
+        # dishes into a food-type split or the other way round.
+        if request.form.get("split_mode") == TYPES:
+            result = storage.submit_types(
+                code, uid, request.form.getlist("selected_types"), request.form.get("submission_id", "").strip()
+            )
+            count("picks.sent", repeat=bool(result["idempotent"]), empty=not result["types"], mode=TYPES)
+            if wants_json():
+                return jsonify({"status": "success", "idempotent": result["idempotent"], "redirect": target})
+            return redirect(target)
         item_ids = _resolve_item_ids(room, request.form.getlist("selected_items"))
         # "portions_<item id>": whole units of a several-of dish the caller had to
         # themselves; 0 or absent means they are sharing whatever nobody claims.
@@ -50,7 +63,6 @@ def select_items(room_code, user_name):
             code, uid, item_ids, request.form.get("submission_id", "").strip(), portions
         )
         count("picks.sent", repeat=bool(result["idempotent"]), empty=not item_ids)
-        target = url_for("picks.waiting_room", room_code=code, user_name=me["name"])
         if wants_json():
             return jsonify({"status": "success", "idempotent": result["idempotent"], "redirect": target})
         return redirect(target)
@@ -58,8 +70,22 @@ def select_items(room_code, user_name):
     me = caller(room)
     if not me:
         return not_linked_page(room)
+    if room["split_mode"] == COUNTS and not room["finalized"]:
+        # A rate card has nothing to pick.
+        if me["is_host"]:
+            return redirect(url_for("rate_card.rate_card_page", room_code=code))
+        return redirect(url_for("rooms.room_summary", room_code=code))
     if me["name"] != user_name or room["finalized"] or me["submitted"]:
         return redirect_for(room, me)
+    if room["split_mode"] == TYPES:
+        return render_template(
+            "select_types.html",
+            room=room,
+            room_code=code,
+            user_name=me["name"],
+            pots=pots(room["items"]),
+            pre_selected=me["categories"],
+        )
     return render_template(
         "select_items.html",
         room=room,
@@ -105,12 +131,17 @@ def waiting_room(room_code, user_name=None):
         return not_linked_page(room)
     if room["finalized"]:
         return redirect(url_for("results.results_page", room_code=room["code"]))
+    if room["split_mode"] == COUNTS:
+        if me["is_host"]:
+            return redirect(url_for("rate_card.rate_card_page", room_code=room["code"]))
+        return redirect(url_for("rooms.room_summary", room_code=room["code"]))
     if user_name != me["name"]:
         return redirect(url_for("picks.waiting_room", room_code=room["code"], user_name=me["name"]))
     join_url = share_url("join.join_room", room_code=room["code"])
     return render_template(
         "waiting_room.html",
         room=room,
+        pots=public_pots(room["items"]),
         room_code=room["code"],
         user_name=me["name"],
         is_host=me["is_host"],

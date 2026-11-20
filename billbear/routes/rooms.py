@@ -5,6 +5,10 @@ from itertools import zip_longest
 from flask import Blueprint, g, jsonify, make_response, redirect, render_template, request, url_for
 
 from billbear import storage
+from billbear.bill.food_types import (
+    COUNTS, SPLIT_MODES, TYPES, pots, type_labels, type_pickers, unpicked_pots,
+)
+from billbear.bill.split import calculate_bill_split
 from billbear.bill.money import DEFAULT_CURRENCY, format_money, get_currency, is_supported
 from billbear.bill.totals import as_number, clean_charges, read_bill, starter_rows, stored_charges
 from billbear.bill.validation import (
@@ -17,6 +21,7 @@ from billbear.bill.validation import (
     parse_price,
 )
 from billbear.scan.contracts import normalize_item_category, normalize_receipt_payload
+from billbear.storage import RoomError
 from billbear.web.access import caller, load_room, rate_limited, require_host
 from billbear.web.observability import count, count_sampled, distribution
 from billbear.web.security import client_ip, turnstile_enabled, turnstile_site_key, verify_turnstile
@@ -200,7 +205,7 @@ def _edit_view(room: dict) -> dict:
 @bp.route("/edit/<room_code>", methods=["GET", "POST"])
 def edit_items(room_code):
     room = load_room(room_code)
-    require_host(room)
+    uid = require_host(room)
     code = room["code"]
 
     if room["finalized"]:
@@ -238,6 +243,27 @@ def edit_items(room_code):
             error = str(exc)
         else:
             storage.replace_items(code, items, totals)
+            # "Split by food type" on this page saves the bill and the way to
+            # split it together. Empty keeps the way the room already splits.
+            mode = form.get("next_mode", "").strip()
+            if mode in SPLIT_MODES:
+                try:
+                    storage.set_split_mode(code, uid, mode, reopen=form.get("reopen") == "1")
+                except RoomError as exc:
+                    # The dishes are saved; only the switch was refused (someone
+                    # sent picks meanwhile, or no dish has a type).
+                    return render_template(
+                        "message.html",
+                        title="Dishes saved, way to split not changed",
+                        message=exc.message,
+                        link=url_for("rooms.room_summary", room_code=code),
+                        link_text="Go to the room",
+                    ), exc.status
+                count("split_mode.chosen", mode=mode, where="edit")
+            else:
+                mode = room["split_mode"]
+            if mode == COUNTS:
+                return redirect(url_for("rate_card.rate_card_page", room_code=code))
             return redirect(url_for("rooms.room_summary", room_code=code))
 
     if error:
@@ -274,6 +300,7 @@ def edit_items(room_code):
         error=error,
         submitted_count=len(room["submitted_users"]),
         manual=room["ocr_source"] == "manual",
+        split_mode=room["split_mode"],
     ), (400 if error else 200)
 
 
@@ -285,6 +312,7 @@ def room_summary(room_code):
     return render_template(
         "room_summary.html",
         room=room,
+        pots=pots(room["items"]),
         room_code=room["code"],
         qr_b64=generate_qr_base64(join_url),
         join_url=join_url,
@@ -332,9 +360,32 @@ def _pick_rows(room: dict, name: str) -> list:
 
 
 def _picks_for_host(room: dict) -> dict:
-    """Each person's sent picks, for the host's Manage sheet."""
+    """Each person's sent picks, for the host's Manage sheet: dishes, or food types when split by type."""
+    if room["split_mode"] == TYPES:
+        return {
+            p["name"]: type_labels(p["categories"]) for p in room["participants"] if p["submitted"]
+        }
     several = {item["name"] for item in room["items"] if item["quantity"] > 1}
     return {name: _pick_labels(room, name, several) for name in room["selections"]}
+
+
+def _type_status(room: dict, me) -> dict:
+    """What the room's pages need when it is split by food type."""
+    if room["split_mode"] != TYPES:
+        return {}
+    data = {
+        # How many of the people who have sent tapped each type: no names.
+        "type_pickers": type_pickers(room),
+        "unpicked_types": unpicked_pots(room) if me and me["is_host"] else [],
+    }
+    if me and me["submitted"]:
+        data["my_types"] = me["categories"]
+        # What the caller would pay if the bill were split now, between the
+        # people who have sent. Only their own amount.
+        split = calculate_bill_split(room)
+        mine = split["user_breakdown"].get(me["name"])
+        data["my_estimate"] = mine["final_amount"] if mine else 0
+    return data
 
 
 @bp.route("/room/<room_code>/status")
@@ -348,6 +399,8 @@ def room_status(room_code):
     submitted = [u for u in users if u in room["submitted_users"]]
     return jsonify({
         "status": "success",
+        "split_mode": room["split_mode"],
+        **_type_status(room, me),
         "users": users,
         "submitted_users": submitted,
         "devices": {p["name"]: p["has_device"] for p in room["participants"]},

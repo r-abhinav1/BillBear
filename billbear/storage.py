@@ -22,6 +22,9 @@ from billbear import db
 from billbear.bill.totals import bill_signature, legacy_field_names
 from billbear.bill.portions import fit_claims
 from billbear.bill.assembler import assemble_room
+from billbear.bill.food_types import (
+    COUNTS, ITEMS, SPLIT_MODES, TYPES, clean_counts, clean_types, present_types, split_mode,
+)
 from billbear.web.session import hash_secret, issue_recovery_token, issue_user_id, secrets_match
 from billbear.bill.validation import name_key
 
@@ -285,8 +288,9 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
     with conn.transaction(), conn.cursor() as cur:
         room_row = _lock_room(cur, code)
         _require_open(room_row)
-        cur.execute("SELECT id, position, name, price, quantity FROM items WHERE room_code = %s", (code,))
+        cur.execute("SELECT id, position, name, price, quantity, category FROM items WHERE room_code = %s", (code,))
         existing = {row["id"]: row for row in cur.fetchall()}
+        by_type = split_mode(room_row.get("split_mode")) == TYPES
 
         before = sorted((r["position"], r["name"], r["price"], r["quantity"]) for r in existing.values())
         kept_ids = set()
@@ -338,6 +342,18 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
         changed = before != after or bill_signature(new_ocr) != bill_signature(room_row["ocr_data"] or {})
 
         signature_same = bill_signature(new_ocr) == bill_signature(room_row["ocr_data"] or {})
+        if by_type:
+            # Split by type, a dish's type decides whose pot it is in, so retyping
+            # one moves money like changing a price. Its quantity moves nothing:
+            # everyone in the pot shares all of them either way.
+            typed_before = sorted(
+                (r["position"], r["name"], r["price"], r["category"] or "other") for r in existing.values()
+            )
+            typed_after = sorted(
+                (pos, it["name"], it["price"], it.get("category") or "other") for pos, it in enumerate(items)
+            )
+            changed = typed_before != typed_after or not signature_same
+            requantified = []
         cur.execute("UPDATE rooms SET ocr_data = %s WHERE code = %s", (Jsonb(new_ocr), code))
         reset = False
         if changed and unchanged_but_quantity and signature_same and requantified:
@@ -464,6 +480,7 @@ def submit_selection(
             raise RoomError("NOT_MEMBER", "You are no longer in this room.", status=403)
         if submission_id and me["submitted_at"] is not None and me["submission_id"] == submission_id:
             return {"idempotent": True, "participant": me}
+        _require_mode(room_row, ITEMS)
 
         cur.execute(
             "SELECT id, name, quantity FROM items WHERE room_code = %s AND id = ANY(%s)",
@@ -537,6 +554,136 @@ def submit_selection(
         )
         _touch(cur, code)
         return {"idempotent": False, "participant": me, "item_ids": valid_ids}
+
+
+MODE_CHANGED_MESSAGE = {
+    ITEMS: "The host has switched to splitting dish by dish. Reload the page to pick your dishes.",
+    TYPES: "The host has switched to splitting by food type. Reload the page to pick your food types.",
+    COUNTS: "The host is splitting this bill with a rate card, so there is nothing to pick.",
+}
+
+
+def _require_mode(room_row: Dict[str, Any], wanted: str) -> None:
+    """Picks sent from a page made for another way of splitting are refused, not misread."""
+    mode = split_mode(room_row.get("split_mode"))
+    if mode != wanted:
+        raise RoomError("MODE_CHANGED", MODE_CHANGED_MESSAGE[mode], status=409, split_mode=mode)
+
+
+def submit_types(code: str, uid: str, types: List[str], submission_id: str) -> Dict[str, Any]:
+    """
+    Split by type: save the food types the caller had and mark them sent.
+    Idempotent on submission_id. Types the bill has no dish of are dropped;
+    none at all is allowed (they share only what everyone shares).
+    """
+    code = normalize_code(code)
+    conn = db.get_conn()
+    with conn.transaction(), conn.cursor() as cur:
+        room_row = _lock_room(cur, code)
+        _require_open(room_row)
+        me = _participant_by_uid(cur, code, uid)
+        if not me:
+            raise RoomError("NOT_MEMBER", "You are no longer in this room.", status=403)
+        if submission_id and me["submitted_at"] is not None and me["submission_id"] == submission_id:
+            return {"idempotent": True, "participant": me, "types": me.get("categories") or []}
+        _require_mode(room_row, TYPES)
+        cur.execute("SELECT DISTINCT category FROM items WHERE room_code = %s", (code,))
+        present = present_types({"category": row["category"]} for row in cur.fetchall())
+        chosen = clean_types(types, present)
+        cur.execute(
+            "UPDATE participants SET categories = %s, submitted_at = now(), submission_id = %s WHERE id = %s",
+            (chosen, submission_id or None, me["id"]),
+        )
+        _touch(cur, code)
+        return {"idempotent": False, "participant": me, "types": chosen}
+
+
+def set_split_mode(code: str, uid: str, mode: str, reopen: bool = False) -> Dict[str, Any]:
+    """
+    Host only: change how the bill is split ("items", "types" or "counts").
+
+    People who have sent picks chose them for the old way, so while anyone has,
+    the switch is refused (PICKS_SENT) unless `reopen` is set: then everyone is
+    sent back to picking in the same step (what they sent stays as a draft, for
+    switching back). Splitting by type needs at least one dish with a type.
+    Returns {"mode", "reopened": how many people were sent back}.
+    """
+    if mode not in SPLIT_MODES:
+        raise RoomError("BAD_REQUEST", "Unknown way to split.", status=400)
+    code = normalize_code(code)
+    conn = db.get_conn()
+    with conn.transaction(), conn.cursor() as cur:
+        room_row = _lock_room(cur, code)
+        _require_host(cur, code, uid)
+        _require_open(room_row)
+        current = split_mode(room_row.get("split_mode"))
+        if mode == current:
+            return {"mode": mode, "reopened": 0}
+        if mode != ITEMS:
+            cur.execute("SELECT DISTINCT category FROM items WHERE room_code = %s", (code,))
+            if not present_types({"category": row["category"]} for row in cur.fetchall()):
+                raise RoomError(
+                    "NO_FOOD_TYPES",
+                    "No dish on the bill has a food type yet. Mark them veg, non-veg, egg or alcohol on "
+                    "Check the bill first.",
+                    status=409,
+                )
+        cur.execute(
+            "SELECT name FROM participants WHERE room_code = %s AND submitted_at IS NOT NULL ORDER BY joined_at, id",
+            (code,),
+        )
+        sent = [row["name"] for row in cur.fetchall()]
+        if sent and not reopen:
+            raise RoomError(
+                "PICKS_SENT",
+                f"{_join_names(sent) if len(sent) <= 3 else f'{len(sent)} people'} "
+                f"{'has' if len(sent) == 1 else 'have'} already sent picks. Switching sends everyone back to pick again.",
+                status=409,
+                sent=sent,
+            )
+        if sent:
+            cur.execute(
+                "UPDATE participants SET submitted_at = NULL, submission_id = NULL WHERE room_code = %s",
+                (code,),
+            )
+        cur.execute("UPDATE rooms SET split_mode = %s WHERE code = %s", (mode, code))
+        _touch(cur, code)
+        return {"mode": mode, "reopened": len(sent)}
+
+
+def set_type_counts(code: str, uid: str, head: int, raw_counts: Any) -> Dict[str, int]:
+    """
+    Host only, for a rate-card room: how many people are at the table and how
+    many had each food type. Raises RoomError BAD_COUNTS with a message for the
+    host. Returns the saved counts.
+    """
+    code = normalize_code(code)
+    conn = db.get_conn()
+    with conn.transaction(), conn.cursor() as cur:
+        room_row = _lock_room(cur, code)
+        _require_host(cur, code, uid)
+        _require_open(room_row)
+        _require_mode(room_row, COUNTS)
+        cur.execute("SELECT DISTINCT category FROM items WHERE room_code = %s", (code,))
+        present = present_types({"category": row["category"]} for row in cur.fetchall())
+        cur.execute("SELECT count(*) AS n FROM participants WHERE room_code = %s", (code,))
+        joined = cur.fetchone()["n"]
+        if head < joined:
+            raise RoomError(
+                "BAD_COUNTS",
+                f"{joined} people have already joined this room, so at least {joined} are at the table.",
+                status=400,
+            )
+        try:
+            counts = clean_counts(raw_counts, present, head)
+        except ValueError as exc:
+            raise RoomError("BAD_COUNTS", str(exc), status=400)
+        cur.execute(
+            "UPDATE rooms SET num_people = %s, type_counts = %s WHERE code = %s",
+            (head, Jsonb(counts), code),
+        )
+        _touch(cur, code)
+        return counts
 
 
 def _unsubmit(cur, participant_id: int) -> None:
@@ -686,6 +833,13 @@ def finalize_room(code: str, uid: str) -> Dict[str, Any]:
         _require_host(cur, code, uid)
         if room_row["finalized_at"] is not None:
             return {"already": True}
+        if split_mode(room_row.get("split_mode")) == COUNTS:
+            raise RoomError(
+                "RATE_CARD",
+                "This bill is split with a rate card, so there's nothing to split here. "
+                "Switch to dish by dish or let everyone pick their food types first.",
+                status=409,
+            )
         participants, items, claims = _room_rows(cur, code)
         rows = sorted(participants, key=lambda p: (p["joined_at"], p["id"]))
         missing = room_row["num_people"] - len(rows)

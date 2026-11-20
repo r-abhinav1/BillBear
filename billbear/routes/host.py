@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, url_for
 
 from billbear import storage
+from billbear.bill.food_types import COUNTS
 from billbear.bill.validation import MAX_PEOPLE, MIN_PEOPLE
 from billbear.storage import RoomError
 from billbear.web.access import load_room, require_host
@@ -75,6 +76,23 @@ def host_fix_bill(room_code):
     storage.unfinalize(room["code"], uid)
     count("bill.fix")
     return jsonify({"status": "success", "redirect": url_for("rooms.edit_items", room_code=room["code"])})
+
+
+@bp.route("/room/<room_code>/host/split-mode", methods=["POST"])
+def host_split_mode(room_code):
+    """Switch how the bill is split. {"mode": "items"|"types"|"counts", "reopen": true to send everyone back}."""
+    room = load_room(room_code)
+    uid = require_host(room)
+    body = _json_body()
+    mode = body.get("mode")
+    if not isinstance(mode, str):
+        raise RoomError("BAD_REQUEST", "Missing mode", status=400)
+    reopen = body.get("reopen") is True or body.get("reopen") == "1"
+    result = storage.set_split_mode(room["code"], uid, mode.strip(), reopen=reopen)
+    count("split_mode.chosen", mode=result["mode"], where="room", reopened=bool(result["reopened"]))
+    target = (url_for("rate_card.rate_card_page", room_code=room["code"]) if result["mode"] == COUNTS
+              else url_for("rooms.room_summary", room_code=room["code"]))
+    return jsonify({"status": "success", **result, "redirect": target})
 
 
 @bp.route("/room/<room_code>/host/revoke/<target_user>", methods=["POST"])

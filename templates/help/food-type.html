@@ -1,0 +1,70 @@
+{% extends 'help/_layout.html' %}
+{% from 'help/_layout.html' import say, tag with context %}
+{% block topic %}
+    {{ say("Big bill? Skip tapping every dish. Each food type becomes a pot, and everyone who had some of it splits it equally.") }}
+
+    {# The example: four people, three pots and the water everyone shares. Adds up to 3,000. #}
+    <section class="pots" aria-label="The bill as pots">
+        {% for key, label, total, dishes, who in [
+            ('veg', 'Veg', '₹1,200.00', 'Dal makhani, Paneer tikka, Butter naan ×4', 'Shlok, Sanjana, Manjari and Abhinav: ₹300.00 each'),
+            ('nonveg', 'Non-veg', '₹900.00', 'Chicken biryani ×2', 'Shlok and Manjari: ₹450.00 each'),
+            ('alcohol', 'Alcohol', '₹800.00', 'Kingfisher ×4', 'Manjari and Abhinav: ₹400.00 each'),
+            ('other', 'Everyone shares', '₹100.00', 'Mineral water', 'All four: ₹25.00 each, nobody taps it'),
+        ] %}
+        <div class="pot">
+            <div class="tear tear--top"></div>
+            <div class="pot__paper">
+                <div class="pot__head">{{ ui.type_mark(key, 24) }}<span class="pot__name">{{ label }}</span><span class="pot__total">{{ total }}</span></div>
+                <span class="pot__meta">{{ dishes }}</span>
+                <span class="pot__meta"><b style="font-family: var(--font)">{{ who }}</b></span>
+            </div>
+            <div class="tear"></div>
+        </div>
+        {% endfor %}
+    </section>
+
+    <section class="receipt">
+        <div class="paper stack">
+            <h2>So each person pays</h2>
+            <div class="lines">
+                <div class="line"><span>Shlok <span class="line__calc">veg, non-veg</span></span><span>₹775.00</span></div>
+                <div class="line"><span>Sanjana <span class="line__calc">veg</span></span><span>₹325.00</span></div>
+                <div class="line"><span>Manjari <span class="line__calc">veg, non-veg, alcohol</span></span><span>₹1,175.00</span></div>
+                <div class="line"><span>Abhinav <span class="line__calc">veg, alcohol</span></span><span>₹725.00</span></div>
+                <hr class="dash">
+                <div class="line line--total"><span>Adds up to</span><span>₹3,000.00</span></div>
+            </div>
+        </div>
+        <div class="tear"></div>
+    </section>
+
+    <div class="formula" role="group" aria-label="The two formulas">
+        <p><b>a type</b> = its dishes ÷ people who had some</p>
+        <p><b>you pay</b> = every type you had + your part of what everyone shares</p>
+    </div>
+
+    <section class="card stack">
+        <h2>Two ways to do it</h2>
+        <p class="help__small">The host chooses on Check the bill: under <b>Save and open the room</b>, tap <b>Big bill? Split by food type instead</b>. Splitting dish by dish stays the usual way, so nothing changes unless the host picks this.</p>
+        <hr class="dash">
+        <h3>I know how many had what</h3>
+        <p class="help__small">The host types how many people had each type, and gets a rate card: a price per person for each type, taxes included, and an "Everyone also pays" line. People add up the lines for what they had. Share it to the group chat or save it as a PDF. Nobody needs to join the room.</p>
+        <hr class="dash">
+        <h3>Let everyone pick</h3>
+        <p class="help__small">The room, QR and waiting room work as usual. Guests tap the food types they had instead of each dish, and see every dish in their types before the bill is split.</p>
+    </section>
+
+    <section class="card stack">
+        <h2>Worth knowing</h2>
+        <ul class="points">
+            <li><b>Had a bit of everything?</b> Tap every type. Each one is its own pot.</li>
+            <li><b>Dishes marked Other</b> (water, packing, anything not marked) are shared by everyone at the table. If Bear marked a real dish as Other, the host fixes it on Check the bill.</li>
+            <li><b>Taxes and service</b> follow the same switch as dish by dish. By what each person had, a type that costs more carries more of the tax. Equally, they're split between everyone. Discounts always follow the food. See <a class="textlink" href="{{ url_for('pages.help_topic', topic='tax') }}">Tax and service</a>.</li>
+            <li><b>Several of a dish</b> (Chicken biryani ×2) are shared by everyone in that type. Claiming one to yourself is only for splitting dish by dish.</li>
+            <li><b>A type nobody picked</b> isn't charged to anyone, so the host is warned before splitting, with what it comes to.</li>
+            <li><b>The host moves a dish to another type</b> after people have sent? Everyone confirms again, because the money moves between pots. Changing only how many are on the bill doesn't ask anyone.</li>
+            <li><b>Changing back to dish by dish</b> is fine while nobody has sent. After that, everyone is sent back to pick again, and what they sent is kept in case the host switches back.</li>
+            <li><b>The rate card rounds to the paisa</b> per person, so the lines can add up to a few paise more or less than the bill. The card says by how much.</li>
+        </ul>
+    </section>
+{% endblock %}

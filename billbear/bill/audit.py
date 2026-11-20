@@ -7,6 +7,7 @@ group collectively didn't assign every item to someone.
 """
 from typing import Any, Dict, List
 
+from billbear.bill.food_types import EVERYONE, TYPES, pots
 from billbear.bill.split import item_amount
 from billbear.bill.totals import read_bill
 from billbear.bill.money import format_money
@@ -46,6 +47,21 @@ def audit_bill(room: Dict[str, Any], bill_split: Dict[str, Any]) -> List[Dict[st
     # --- Items nobody selected ----------------------------------------------
     item_sharing = bill_split.get("item_sharing", {})
     unassigned = [name for name, count in item_sharing.items() if not count]
+    if unassigned and room.get("split_mode") == TYPES:
+        # Split by type, a dish is left out because nobody had its type.
+        missing = [p for p in pots(items) if p["key"] != EVERYONE and all(
+            not item_sharing.get(i["name"]) for i in p["dishes"])]
+        if missing:
+            warnings.append({
+                "severity": "warn",
+                "title": f"Nobody picked {', '.join(p['label'].lower() for p in missing)}",
+                "detail": (
+                    f"{', '.join(p['label'] for p in missing)} "
+                    f"(~{money(sum(p['total'] for p in missing))}) "
+                    "isn't included in anyone's share."
+                ),
+            })
+            unassigned = []
     if unassigned:
         orphan_total = sum(item_amount(i) for i in items if i.get("name") in unassigned)
         warnings.append({

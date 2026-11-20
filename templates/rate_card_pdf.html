@@ -1,0 +1,133 @@
+{#- The rate card as a PDF. Same rules as results_pdf.html: tables only, built-in
+    fonts, so totals carry the currency's plain prefix ("Rs."). -#}
+{%- set cur = card.currency -%}
+{%- set MARKS = {'veg': 'Veg', 'nonveg': 'Non-veg', 'egg': 'Egg', 'alcohol': 'Alcohol'} -%}
+{%- macro money(value) -%}{{ value | amount(cur) }}{%- endmacro -%}
+{%- macro total_money(value) -%}{{ value | money(cur, pdf=True) }}{%- endmacro -%}
+{%- macro mark(category) -%}
+{%- if category in MARKS -%}<img src="bbasset/pdf-{{ category }}.png" width="{{ 10 if category == 'alcohol' else 8 }}" height="{{ 10 if category == 'alcohol' else 8 }}" style="vertical-align: middle" alt="{{ MARKS[category] }}">&nbsp;{%- else -%}<img src="bbasset/pdf-blank.png" width="8" height="8" style="vertical-align: middle" alt="">&nbsp;{% endif -%}
+{%- endmacro -%}
+{%- macro space(points=12) -%}
+<table cellspacing="0"><tr><td style="height: {{ points }}pt; font-size: 1pt; line-height: {{ points }}pt">&nbsp;</td></tr></table>
+{%- endmacro -%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ room['room_name'] }}, rate card from BillBear</title>
+<style>
+    {{ font_faces }}
+    @page {
+        size: a4 portrait;
+        margin: 1.5cm 1.6cm 1.8cm 1.6cm;
+        background-image: url("bbasset/pdf-watermark.jpg");
+        @frame footer { -pdf-frame-content: footer; left: 1.6cm; width: 17.8cm; top: 28.2cm; height: 0.9cm; }
+    }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #2B1B0E; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; padding: 0; }
+    .soft { color: #6B4A2B; }
+    .title { font-size: 22pt; font-weight: bold; line-height: 1.1; }
+    .subtitle { font-size: 10pt; color: #6B4A2B; padding-top: 3pt; }
+    .meta { text-align: right; font-size: 9.5pt; line-height: 1.5; color: #4A3319; }
+    .bar { background-color: #F6C445; height: 6pt; font-size: 1pt; line-height: 6pt; }
+    .heading { font-size: 15pt; font-weight: bold; }
+    .heading-note { text-align: right; font-size: 10pt; color: #4A3319; vertical-align: bottom; }
+    .mono { font-family: Courier; }
+    .strong { font-weight: bold; color: #2B1B0E; }
+    .rate-head { background-color: #F6C445; border: 1.2pt solid #2B1B0E; font-size: 12pt; font-weight: bold; padding: 7pt 9pt 4pt 9pt; }
+    .rate-line { font-size: 11pt; padding: 7pt 4pt 2pt 9pt; border-left: 1.2pt solid #2B1B0E; }
+    .rate-amount { font-family: Courier; font-size: 12pt; font-weight: bold; text-align: right; padding: 7pt 9pt 2pt 2pt; border-right: 1.2pt solid #2B1B0E; }
+    .rate-calc { font-size: 9pt; color: #6B4A2B; padding: 0 4pt 4pt 9pt; border-left: 1.2pt solid #2B1B0E; }
+    .rate-calc-r { border-right: 1.2pt solid #2B1B0E; }
+    .rate-end { border: 0; border-top: 1.2pt solid #2B1B0E; font-size: 3pt; line-height: 3pt; }
+    .plain-line { font-size: 10pt; padding: 4pt 4pt 0 0; }
+    .plain-amount { font-family: Courier; font-size: 10pt; text-align: right; padding: 4pt 0 0 2pt; }
+    .pot-name { font-size: 11pt; font-weight: bold; padding-top: 8pt; }
+    .grand { font-size: 12pt; font-weight: bold; padding-top: 7pt; border-top: 1.2pt solid #2B1B0E; }
+    .grand-amount { font-family: Courier; text-align: right; }
+    .footer { font-size: 8.5pt; color: #4A3319; border-top: 0.75pt solid #2B1B0E; padding-top: 5pt; }
+</style>
+</head>
+<body>
+<table cellspacing="0">
+    <tr>
+        <td style="width: 54pt"><img src="bbasset/pdf-bear.png" width="46" height="60" alt=""></td>
+        <td style="vertical-align: middle">
+            <div class="title">{{ room['room_name'] | pdf_text }}</div>
+            <div class="subtitle">Rate card by food type, from BillBear</div>
+        </td>
+        <td class="meta" style="width: 32%; vertical-align: middle">
+            Hosted by {{ room['host_name'] | pdf_text }}<br>
+            {{ card.head }} at the table<br>
+            {{ current_date.strftime('%d %b %Y, %I:%M %p') }}
+        </td>
+    </tr>
+</table>
+{{ space(12) }}
+<table cellspacing="0"><tr><td class="bar">&nbsp;</td></tr></table>
+{{ space(12) }}
+<table cellspacing="0">
+    <tr>
+        <td class="heading">Add up what you had</td>
+        <td class="heading-note">Bill total <span class="mono strong">{{ total_money(card.bill_total) }}</span>{% if card.has_charges %}, taxes and charges in{% endif %}</td>
+    </tr>
+</table>
+{{ space(10) }}
+<table cellspacing="0">
+    <tr><td class="rate-head" width="70%">Food type</td><td class="rate-head" width="30%" style="text-align: right">Per person</td></tr>
+    {% for row in card.rows %}
+    <tr>
+        <td class="rate-line" width="70%">{{ mark(row.key) }}{{ row.label }}</td>
+        <td class="rate-amount" width="30%">{{ money(row.each) }}</td>
+    </tr>
+    <tr>
+        <td class="rate-calc" width="70%">{{ money(row.total) }} for {{ row.people }} {{ 'person' if row.people == 1 else 'people' }}: {{ row.dishes | map(attribute='name') | map('pdf_text') | join(', ') }}</td>
+        <td class="rate-calc-r" width="30%">&nbsp;</td>
+    </tr>
+    {% endfor %}
+    {% if card.everyone %}
+    <tr>
+        <td class="rate-line" width="70%">{{ mark('other') }}Everyone also pays</td>
+        <td class="rate-amount" width="30%">{{ money(card.everyone.each) }}</td>
+    </tr>
+    <tr>
+        <td class="rate-calc" width="70%">{% if card.everyone.dishes %}{{ card.everyone.dishes | map(attribute='name') | map('pdf_text') | join(', ') }}{% endif %}{% if card.everyone.charges_in %}{{ ', plus ' if card.everyone.dishes else '' }}all taxes and charges{% endif %}, {{ card.head }} ways</td>
+        <td class="rate-calc-r" width="30%">&nbsp;</td>
+    </tr>
+    {% endif %}
+    <tr><td class="rate-end" width="70%">&nbsp;</td><td class="rate-end" width="30%">&nbsp;</td></tr>
+</table>
+{% if card.examples %}
+{{ space(12) }}
+<table cellspacing="0"><tr><td class="heading" style="font-size: 12pt">For example</td></tr></table>
+<table cellspacing="0">
+    {% for ex in card.examples %}
+    <tr><td class="plain-line" width="70%">{{ ex.labels[0] }}{% if ex.labels | length == 1 %} only{% else %}{% for label in ex.labels[1:] %}{{ ' and ' if loop.last else ', ' }}{{ label | lower }}{% endfor %}{% endif %}</td><td class="plain-amount" width="30%">{{ total_money(ex.amount) }}</td></tr>
+    {% endfor %}
+</table>
+{% endif %}
+{{ space(16) }}
+<table cellspacing="0"><tr><td class="heading">The bill</td></tr></table>
+<table cellspacing="0">
+    {% for row in card.rows + ([card.everyone] if card.everyone and card.everyone.dishes else []) %}
+    <tr><td class="pot-name" width="72%">{{ mark(row.key) }}{{ row.label }}</td><td class="plain-amount pot-name" width="28%">{{ money(row.total) }}</td></tr>
+    {% for dish in row.dishes %}
+    <tr>
+        <td class="plain-line" width="72%">{{ dish.name | pdf_text }}{% if dish.quantity > 1 %} <span class="soft">x{{ dish.quantity }}</span>{% endif %}</td>
+        <td class="plain-amount" width="28%">{{ money(dish.amount) if dish.amount is not none else 'N/A' }}</td>
+    </tr>
+    {% endfor %}
+    {% endfor %}
+    <tr><td class="grand" width="72%">Bill total</td><td class="grand grand-amount" width="28%">{{ total_money(card.bill_total) }}</td></tr>
+</table>
+<div id="footer">
+    <table cellspacing="0">
+        <tr>
+            <td class="footer">{% if card.difference == 0 %}Shares add up to the bill total. {% else %}Rounded per person, the shares come to {{ total_money(card.shares_total) }}. {% endif %}{% if card.has_charges %}Taxes and charges split {{ 'by what each type cost' if card.proportional else 'equally' }}. {% endif %}Amounts in {{ 'rupees' if cur == 'INR' else room.currency.name ~ ' (' ~ cur ~ ')' }}.</td>
+            <td class="footer" style="text-align: right">billbear.vercel.app</td>
+        </tr>
+    </table>
+</div>
+</body>
+</html>

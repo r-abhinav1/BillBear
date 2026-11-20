@@ -16,6 +16,7 @@ HELP_TOPICS = [
     {"slug": "basics", "title": "The basics", "blurb": "From scan to split in five steps"},
     {"slug": "sharing", "title": "Shared or yours", "blurb": "When the bill has several of one dish"},
     {"slug": "tax", "title": "Tax and service", "blurb": "Who pays how much of the charges"},
+    {"slug": "food-type", "title": "By food type", "blurb": "Splitting a big bill by veg, non-veg and drinks"},
     {"slug": "currency", "title": "Other currencies", "blurb": "Bills from abroad, and why nothing is converted"},
     {"slug": "host", "title": "For the host", "blurb": "Everything you can do in the room"},
     {"slug": "scan", "title": "The scan", "blurb": "How Bear reads the bill, and where it slips"},

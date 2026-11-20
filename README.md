@@ -39,6 +39,12 @@ Repository: https://github.com/r-abhinav1/BillBear
 - Tax, service charges, and discounts proportionally distributed
 - Per-user breakdown shown in results
 
+### Split by Food Type (optional)
+- For big bills: each food type on the bill (veg, non-veg, egg, alcohol) becomes a pot, split equally between the people who had it; dishes marked Other are shared by everyone
+- Reached only from a link under "Save and open the room" on Check the bill; dish by dish stays the default
+- **Rate card:** the host types how many people had each type and shares a per-person price for each (text or PDF); nobody joins
+- **Everyone picks:** the usual room and QR, but guests tap the food types they had instead of each dish
+
 ### PDF Export
 - Clean PDF summary of bill split downloadable by users
 
@@ -77,10 +83,12 @@ billbear/               The application package
     join.py             Joining, the host recovery link
     picks.py            Picking dishes, waiting room
     host.py             The host's controls and Split
+    rate_card.py        Split by food type with the host's counts: the rate card and its PDF
     results.py          Results page and PDF download
     cron.py             Daily clean-up
   bill/                 Bill maths: no Flask, no database
     money.py totals.py split.py audit.py portions.py validation.py assembler.py
+    food_types.py       Split by food type: pots, the rate card, what each person tapped
   scan/                 Reading a receipt photo
     image_prep.py pipeline.py llm.py rules.py contracts.py
   pdf/                  render.py (the split as a PDF), text.py (non-Latin fonts)

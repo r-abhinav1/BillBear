@@ -20,11 +20,21 @@
 } %}
 
 {# Square mark in the style printed on Indian menus. Nothing is drawn for "other". #}
-{% macro diet(category, labelled=true) -%}
+{% macro diet(category, labelled=true, size=18) -%}
 {%- if category in DIET -%}
 {%- set label, color, path = DIET[category] -%}
-<svg class="diet" {% if labelled %}role="img" aria-label="{{ label }}"{% else %}aria-hidden="true"{% endif %} width="18" height="18" viewBox="0 0 20 20"><rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="#fff" stroke="{{ color }}" stroke-width="2"/><path d="{{ path }}" fill="{{ color }}"/></svg>
+<svg class="diet" {% if labelled %}role="img" aria-label="{{ label }}"{% else %}aria-hidden="true"{% endif %} width="{{ size }}" height="{{ size }}" viewBox="0 0 20 20"><rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="#fff" stroke="{{ color }}" stroke-width="2"/><path d="{{ path }}" fill="{{ color }}"/></svg>
 {%- endif -%}
+{%- endmacro %}
+
+{# The dishes everyone shares when splitting by food type ("other"): a dashed square. #}
+{% macro everyone_mark(size=18) -%}
+<svg class="diet--other" aria-hidden="true" width="{{ size }}" height="{{ size }}" viewBox="0 0 20 20"><rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="#fff" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2"/><circle cx="10" cy="10" r="2.2" fill="currentColor"/></svg>
+{%- endmacro %}
+
+{# A food type's mark: the menu's diet mark, or the everyone mark for "other". #}
+{% macro type_mark(key, size=18) -%}
+{%- if key in DIET -%}{{ diet(key, false, size) }}{%- else -%}{{ everyone_mark(size) }}{%- endif -%}
 {%- endmacro %}
 
 {% macro icon(name, size=22) -%}
@@ -36,6 +46,7 @@
 {%- elif name == 'image' %}<rect x="4" y="5" width="16" height="14" rx="1.5"/><circle cx="9" cy="10" r="1.5"/><path d="M4 17l5-5 4 4 3-3 4 4"/>
 {%- elif name == 'file' %}<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/>
 {%- elif name == 'repick' %}<path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15.5"/><path d="M4 20v-4.5h4.5"/>
+{%- elif name == 'nudge' %}<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>
 {%- elif name == 'phone' %}<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/>
 {%- elif name == 'remove' %}<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>
 {%- elif name == 'moon' %}<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>

@@ -5,7 +5,8 @@
 {% set people = bill_split.user_breakdown %}
 {% set cats = {} %}
 {% set qtys = {} %}
-{% for item in room['items'] %}{% set _ = cats.update({item.name: item.category}) %}{% set _ = qtys.update({item.name: item.quantity}) %}{% endfor %}
+{% set prices = {} %}
+{% for item in room['items'] %}{% set _ = cats.update({item.name: item.category}) %}{% set _ = qtys.update({item.name: item.quantity}) %}{% set _ = prices.update({item.name: item.price}) %}{% endfor %}
 {# "note" entries are shown but don't stop the split from being square. #}
 {% set notes = audit_warnings | rejectattr('severity', 'equalto', 'ok') | list %}
 {% set problems = notes | rejectattr('severity', 'equalto', 'note') | list %}
@@ -55,6 +56,17 @@
                 </div>
                 <hr class="dash dash--ink">
                 <div class="lines">
+                    {% if pots %}
+                    {# Split by food type: one line per pot, the dishes one tap away. #}
+                    {% for pot in pots[user] %}
+                    <div class="line">
+                        <span class="with-diet">{{ ui.type_mark(pot.key) }}<span>{{ pot.label }}<span class="line__calc">{{ pot.total | money(cur) }} split {{ pot.ways }} {{ 'way' if pot.ways == 1 else 'ways' }}</span></span></span>
+                        <span>{{ pot.share | amount(cur) }}</span>
+                    </div>
+                    {% else %}
+                    <p class="fineprint">No food types picked.</p>
+                    {% endfor %}
+                    {% else %}
                     {% for item in d.item_details %}
                     <div class="line">
                         <span class="with-diet">{{ ui.diet(cats.get(item.name, 'other')) }}<span>{{ item.name }}
@@ -66,10 +78,24 @@
                     {% else %}
                     <p class="fineprint">Nothing picked.</p>
                     {% endfor %}
+                    {% endif %}
                     {% for c in d.charges %}
                     <div class="line line--muted"><span>{{ c.label }}</span><span>{{ '-' if c.kind == 'discount' }}{{ c.amount | amount(cur) }}</span></div>
                     {% endfor %}
                 </div>
+                {% if pots and pots[user] %}
+                <details class="fold">
+                    <summary>What was in {{ 'your' if user == caller_name else 'their' }} food types</summary>
+                    <div class="stack" style="gap: 8px; padding-bottom: 6px">
+                        {% for pot in pots[user] %}
+                        <div class="my-pot">
+                            <div class="my-pot__head">{{ ui.type_mark(pot.key) }}{{ pot.label }}</div>
+                            <ul>{% for name in pot.dishes %}<li><span>{{ name }}{% if qtys.get(name, 1) > 1 %} ×{{ qtys[name] }}{% endif %}</span><span>{{ prices.get(name, '') }}</span></li>{% endfor %}</ul>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </details>
+                {% endif %}
                 <p class="fineprint">{{ d.percentage }}% of the dishes</p>
             </div>
             <div class="tear"></div>
@@ -86,6 +112,9 @@
         <div class="line line--total"><span>Bill total</span><span>{{ t.grand_total | money(cur) }}</span></div>
         {% if t.has_charges %}
         <p class="fineprint" style="margin-top: 8px">Taxes and charges are split {{ 'equally between everyone who ordered' if t.tax_split == 'equal' else 'by what each person had' }}.</p>
+        {% endif %}
+        {% if pots %}
+        <p class="fineprint" style="margin-top: 4px">Split by food type: each type's dishes are shared equally by the people who had it.</p>
         {% endif %}
         {% if cur != 'INR' %}
         <p class="fineprint" style="margin-top: 4px">Amounts in {{ room.currency.name }} ({{ cur }}), as printed on the bill.</p>

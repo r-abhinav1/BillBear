@@ -6,7 +6,8 @@
     <section class="card stack">
         <h2>Manage a guest</h2>
         <p class="help__small">Tap Manage next to their name.</p>
-        <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('repick', 20) }}</span><div><h3>Let them re-pick</h3><p class="help__small">Reopens their picks. Their phone asks them to choose again.</p></div></div>
+        <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('nudge', 20) }}</span><div><h3>Nudge them</h3><p class="help__small">For someone who hasn't sent yet. Sends them a reminder with the room link through your messaging app, or copies it on a computer.</p></div></div>
+        <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('repick', 20) }}</span><div><h3>Let them re-pick</h3><p class="help__small">Reopens their picks. Their phone asks them to choose again, starting from what they sent. Works the same when splitting by food type.</p></div></div>
         <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('phone', 20) }}</span><div><h3>Move them to a new phone</h3><p class="help__small">For a dead battery or a closed tab. You get a one-time move code and a link to send them; they rejoin with the same name and the code, and keep their picks. Without the code nobody else can take their seat.</p></div></div>
         <div class="row" style="align-items: flex-start"><span class="help__icon">{{ ui.icon('remove', 20) }}</span><div><h3>Remove from the room</h3><p class="help__small">Their picks are thrown away and their seat is freed.</p></div></div>
     </section>
@@ -18,10 +19,13 @@
         </div>
         <hr class="dash">
         <h2>Edit dishes</h2>
-        <p class="help__small">Changing a name, price, quantity, currency or tax and charge row sends everyone back to confirm their picks. Changing veg or non-veg, the tax switch, or the subtotal and bill total printed on the bill, does not.</p>
+        <p class="help__small">Changing a name, price, quantity, currency or tax and charge row sends everyone back to confirm their picks. Changing veg or non-veg, the tax switch, or the subtotal and bill total printed on the bill, does not. When splitting by food type it's slightly different: moving a dish to another type does ask everyone, and changing only a quantity doesn't.</p>
         <hr class="dash">
         <h2>Split the bill</h2>
         <p class="help__small">Possible once everyone has joined and sent their picks. Bear warns you first about dishes nobody picked.</p>
+        <hr class="dash">
+        <h2>Split by food type</h2>
+        <p class="help__small">For a big bill: tap <b>Big bill? Split by food type instead</b> under the main button on Check the bill. Type how many had each type for a rate card, or let everyone pick their types. Change your mind from the same link, from the waiting room, or from the rate card. <a class="textlink" href="{{ url_for('pages.help_topic', topic='food-type') }}">How it works</a></p>
         <hr class="dash">
         <h2>Fix the bill</h2>
         <p class="help__small">Spotted a wrong price, a missing charge or a bill total that doesn't match? Tap Fix the bill on the results page. Everyone's picks stay sent, so after fixing only the total you can split again straight away.</p>

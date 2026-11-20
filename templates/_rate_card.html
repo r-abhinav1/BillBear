@@ -1,0 +1,47 @@
+{#- The rate card itself: drawn on the page, and redrawn from the server when the host changes a number. -#}
+{% import '_ui.html' as ui %}
+{% set cur = card.currency %}
+<section class="receipt">
+    <div class="paper stack rate-card" style="gap: 10px">
+        <h2>{{ room.room_name }}</h2>
+        <hr class="dash dash--ink">
+        <div class="lines">
+            {% for row in card.rows %}
+            <div class="line">
+                <span class="with-diet">{{ ui.type_mark(row.key) }}<span>{{ row.label }}<span class="line__calc">{{ row.total | money(cur) }} for {{ row.people }} {{ 'person' if row.people == 1 else 'people' }}{% if card.proportional and card.has_charges %}, with taxes{% endif %}</span></span></span>
+                <span>{{ row.each | money(cur) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% if card.everyone %}
+        <hr class="dash">
+        <div class="line line--total">
+            <span>Everyone also pays<span class="line__calc" style="font-weight: 400">
+                {%- if card.everyone.dishes %}{{ card.everyone.dishes | map(attribute='name') | join(', ') }}{% endif -%}
+                {%- if card.everyone.charges_in %}{{ ', plus ' if card.everyone.dishes else '' }}all taxes and charges{% endif %}, {{ card.head }} ways</span></span>
+            <span>{{ card.everyone.each | money(cur) }}</span>
+        </div>
+        {% endif %}
+    </div>
+    <div class="tear"></div>
+</section>
+
+{% if card.examples %}
+<section class="card combo stack" style="gap: 8px">
+    <p style="font-weight: 800">For example</p>
+    <div class="lines">
+        {% for ex in card.examples %}
+        <div class="line line--muted"><span><span class="marks">{% for k in ex["keys"] %}{{ ui.type_mark(k, 15) }}{% endfor %}</span>{{ ex.labels[0] }}{% if ex.labels | length == 1 %} only{% else %}{% for label in ex.labels[1:] %}{{ ' and ' if loop.last else ', ' }}{{ label | lower }}{% endfor %}{% endif %}</span><span>{{ ex.amount | money(cur) }}</span></div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% set paise = ((card.difference | abs) * (10 ** room.currency.decimals)) | round | int %}
+<p class="small" style="font-weight: 600" id="rateCheck">
+    {% if paise == 0 %}
+    The shares add up to {{ card.bill_total | money(cur) }}, the bill total.
+    {% else %}
+    Rounded per person, the shares add up to {{ card.shares_total | money(cur) }}: {{ (card.difference | abs) | money(cur) }} {{ 'more' if card.difference > 0 else 'less' }} than the bill's {{ card.bill_total | money(cur) }}.
+    {% endif %}
+</p>

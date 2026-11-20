@@ -1,0 +1,189 @@
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% set cur = card.currency %}
+{% block title %}Rate card, {{ room.room_name }}{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('rooms.edit_items', room_code=room_code) }}">{{ ui.icon('back', 18) }} Check the bill</a>{% endblock %}
+{% block content %}
+<main class="stack stack--lg">
+    <div>
+        <div class="row row--between">
+            <p class="eyebrow">{{ room.room_name }}</p>
+            <span class="mode-badge">{{ ui.diet('veg', false) }}By food type</span>
+        </div>
+        <h1>How many had each?</h1>
+        <p class="lede" style="margin-top: 8px">Count everyone who had any of it. One person can count in several types.</p>
+    </div>
+
+    {% if not card.rows %}
+    <div class="notice">No dish on the bill has a food type yet. Mark them on Check the bill first.</div>
+    {% endif %}
+
+    <section class="card row row--between">
+        <span><b style="display: block; font-weight: 800">At the table</b><span class="small" style="color: var(--ink-soft)">{% if card.everyone %}Everyone shares the dishes marked Other{% if not card.proportional and card.has_charges %} and the taxes{% endif %}.{% else %}How many people are paying.{% endif %}</span></span>
+        <span class="stepper" data-count="head">
+            <button type="button" data-step="-1" aria-label="One fewer at the table">−</button>
+            <output id="headOut" aria-live="polite">{{ card.head }}</output>
+            <button type="button" data-step="1" aria-label="One more at the table">+</button>
+        </span>
+    </section>
+
+    <div class="pots">
+        {% for row in card.rows %}
+        <div class="pot" data-type="{{ row.key }}">
+            <div class="tear tear--top"></div>
+            <div class="pot__paper">
+                <div class="pot__head">{{ ui.type_mark(row.key, 24) }}<span class="pot__name">{{ row.label }}</span><span class="pot__total">{{ row.total | money(cur) }}</span></div>
+                <span class="pot__meta">{{ row.dishes | length }} {{ 'dish' if row.dishes | length == 1 else 'dishes' }}: {{ row.dishes | map(attribute='name') | join(', ') }}</span>
+                <div class="pot__row">
+                    <span class="pot__q" id="q_{{ row.key }}">How many had some?</span>
+                    <span class="stepper" data-count="{{ row.key }}" role="group" aria-labelledby="q_{{ row.key }}">
+                        <button type="button" data-step="-1" aria-label="One fewer had {{ row.label }}">−</button>
+                        <output aria-live="polite">{{ counts[row.key] }}</output>
+                        <button type="button" data-step="1" aria-label="One more had {{ row.label }}">+</button>
+                    </span>
+                </div>
+                <span class="pot__each" data-each="{{ row.key }}">{{ row.each | money(cur) }} each</span>
+            </div>
+            <div class="tear"></div>
+        </div>
+        {% endfor %}
+    </div>
+    <p class="status-line error" id="countStatus" aria-live="polite"></p>
+
+    <a class="btn btn--primary btn--block" href="#rateCard">Show the rate card</a>
+
+    <div class="stack" id="rateCard" style="gap: 14px; scroll-margin-top: 16px">
+        <div>
+            <h1>Here's the rate card.</h1>
+            <p class="lede" style="margin-top: 8px">Everyone adds up the lines for what they had.{% if card.has_charges %} Taxes and charges are already in.{% endif %}</p>
+        </div>
+        <div class="stack" id="cardBox" style="gap: 14px">{% include '_rate_card.html' %}</div>
+    </div>
+
+    <div class="actions">
+        <button type="button" class="btn btn--primary btn--block" id="shareBtn">Share the rate card</button>
+        <pre class="share-text" id="shareText" hidden>{{ share_text }}</pre>
+        {% if pdf_available %}<a class="btn btn--block" href="{{ url_for('rate_card.download_rate_card', room_code=room_code) }}">Download the rate card as PDF</a>{% endif %}
+        <p class="fineprint" style="text-align: center">The rate card is cleared with the room, a day after it was last changed. Share it or save the PDF to keep it.</p>
+    </div>
+
+    <section class="outline-box stack" style="gap: 6px">
+        <b>Other ways to split</b>
+        <button type="button" class="link-btn" style="align-self: flex-start" data-mode="types">Let everyone pick their food types instead</button>
+        <button type="button" class="link-btn" style="align-self: flex-start" data-mode="items">Split dish by dish instead</button>
+        <p class="status-line error small" id="modeStatus" aria-live="polite"></p>
+    </section>
+</main>
+{% endblock %}
+{% block scripts %}
+    <script>
+        const ROOM_CODE = {{ room_code | tojson }};
+        const ROOM_NAME = {{ room.room_name | tojson }};
+        const MIN_HEAD = {{ MIN_PEOPLE }};
+        const MAX_HEAD = {{ MAX_PEOPLE }};
+        const $ = (id) => document.getElementById(id);
+
+        // What the server last accepted, and what the steppers show now.
+        let saved = { head: {{ card.head | tojson }}, counts: {{ counts | tojson }} };
+        let shown = JSON.parse(JSON.stringify(saved));
+        let timer = null;
+        let inFlight = 0;
+
+        function paint() {
+            $('headOut').textContent = shown.head;
+            const head = document.querySelector('.stepper[data-count="head"]');
+            head.querySelector('[data-step="-1"]').disabled = shown.head <= MIN_HEAD;
+            head.querySelector('[data-step="1"]').disabled = shown.head >= MAX_HEAD;
+            Object.keys(shown.counts).forEach(key => {
+                const stepper = document.querySelector(`.stepper[data-count="${key}"]`);
+                if (!stepper) return;
+                const n = shown.counts[key];
+                stepper.querySelector('output').textContent = n;
+                stepper.querySelector('[data-step="-1"]').disabled = n <= 1;
+                stepper.querySelector('[data-step="1"]').disabled = n >= shown.head;
+            });
+        }
+
+        async function save() {
+            timer = null;
+            const sent = JSON.parse(JSON.stringify(shown));
+            const mine = ++inFlight;
+            try {
+                const resp = await fetch(`/room/${ROOM_CODE}/rate-card`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+                    body: JSON.stringify(sent),
+                });
+                let data = null;
+                try { data = await resp.json(); } catch (_e) {}
+                if (mine !== inFlight) return;          // a newer change is on its way
+                if (resp.ok && data && data.status === 'success') {
+                    saved = { head: data.head, counts: data.counts };
+                    $('cardBox').innerHTML = data.html;      // rendered by the server from the saved numbers
+                    $('shareText').textContent = data.share_text;
+                    Object.entries(data.each).forEach(([key, text]) => {
+                        const el = document.querySelector(`[data-each="${key}"]`);
+                        if (el) el.textContent = `${text} each`;
+                    });
+                    $('countStatus').textContent = '';
+                    return;
+                }
+                if (data && data.code === 'MODE_CHANGED') { window.location.reload(); return; }
+                $('countStatus').textContent = (data && data.message) || 'Could not save that number. Try again.';
+            } catch (_e) {
+                if (mine !== inFlight) return;
+                $('countStatus').textContent = 'Could not reach the server. Check your connection and try again.';
+            }
+            // Refused: show the numbers the rate card was worked out from.
+            shown = JSON.parse(JSON.stringify(saved));
+            paint();
+        }
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.stepper button');
+            if (!btn || btn.disabled) return;
+            const which = btn.closest('.stepper').dataset.count;
+            const step = parseInt(btn.dataset.step, 10);
+            if (which === 'head') {
+                shown.head = Math.min(MAX_HEAD, Math.max(MIN_HEAD, shown.head + step));
+                // Nobody can be in a type who isn't at the table.
+                Object.keys(shown.counts).forEach(k => { shown.counts[k] = Math.min(shown.counts[k], shown.head); });
+            } else {
+                shown.counts[which] = Math.min(shown.head, Math.max(1, shown.counts[which] + step));
+            }
+            paint();
+            clearTimeout(timer);
+            timer = setTimeout(save, 300);
+        });
+
+        $('shareBtn').addEventListener('click', async () => {
+            const text = $('shareText').textContent;
+            if (BB.canShare()) {
+                const result = await BB.share({ title: ROOM_NAME, text });
+                if (result !== 'failed') return;
+            }
+            $('shareText').hidden = false;
+            BB.copyText(text, $('shareBtn'), 'Copied. Paste it in the group chat');
+        });
+
+        document.querySelectorAll('button[data-mode]').forEach(btn => btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            let data = null;
+            try {
+                const resp = await fetch(`/room/${ROOM_CODE}/host/split-mode`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+                    body: JSON.stringify({ mode: btn.dataset.mode }),
+                });
+                data = await resp.json();
+                if (resp.ok && data.redirect) { window.location.href = data.redirect; return; }
+            } catch (_e) {}
+            btn.disabled = false;
+            $('modeStatus').textContent = (data && data.message) || 'Could not switch. Try again.';
+        }));
+
+        paint();
+    </script>
+{% endblock %}

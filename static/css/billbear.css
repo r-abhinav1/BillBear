@@ -616,3 +616,38 @@ details.fold > summary { cursor: pointer; font-weight: 600; padding: 10px 0; min
 .my-pot li span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .my-pot li span:last-child { font-family: var(--mono); font-size: 0.86rem; flex-shrink: 0; }
 @media (prefers-reduced-motion: reduce) { .tile.is-on .paw { animation: none; } }
+
+/* ---- Bear's dialogs (BB.confirm / BB.alert) ---------------------------
+   A receipt slip that slides up with the bear peeking over its torn edge,
+   instead of the browser's grey box. Bottom of the screen on a phone, like
+   the other sheets; centred on a wide screen. */
+.bbd { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-end; justify-content: center; }
+.bbd__scrim { position: absolute; inset: 0; background: rgba(20, 12, 5, 0.55); animation: bbd-fade 0.18s ease-out; }
+.bbd__sheet { position: relative; width: 100%; max-width: 460px; filter: drop-shadow(0 -3px 0 var(--shadow)); animation: bbd-up 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+.bbd__bear { position: relative; display: block; width: 96px; height: 56px; margin: 0 28px -3px auto; overflow: hidden; pointer-events: none; }
+.bbd__bear img { position: absolute; left: 0; top: 4px; width: 100%; max-width: none; transform: rotate(-4deg); }
+.bbd__tear { height: 12px; }
+.bbd__tear--top { margin-bottom: -1px; background: linear-gradient(315deg, var(--paper) 50%, transparent 50%) 0 0 / 16px 12px, linear-gradient(45deg, var(--paper) 50%, transparent 50%) 0 0 / 16px 12px; }
+.bbd__tear--bottom { display: none; margin-top: -1px; background: linear-gradient(135deg, var(--paper) 50%, transparent 50%) 0 0 / 16px 12px, linear-gradient(225deg, var(--paper) 50%, transparent 50%) 0 0 / 16px 12px; }
+.bbd__paper { background: var(--paper); color: var(--ink); padding: 10px 22px calc(22px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; --primary-bg: var(--ink); --primary-fg: var(--paper); --on-ground: var(--ink); }
+.bbd__paper :focus-visible { outline-color: var(--ink); }
+.bbd__title { font-size: 1.5rem; font-weight: 800; line-height: 1.08; letter-spacing: -0.02em; text-wrap: balance; }
+.bbd__text { font-size: 1rem; line-height: 1.4; color: var(--ink-soft); white-space: pre-line; }
+.bbd__text:empty { display: none; }
+.bbd__actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding-top: 14px; border-top: 2px dashed var(--rule); }
+.bbd__cancel { background: var(--field); }
+/* Something that undoes work (reopening everyone's picks): the go-ahead is red. */
+.bbd--danger .bbd__ok { border-color: var(--danger); background: var(--danger); color: var(--paper); }
+/* Only a message: one button. */
+.bbd--alert .bbd__cancel { display: none; }
+@media (min-width: 720px) {
+    .bbd { align-items: center; padding: 24px; }
+    .bbd__paper { padding-bottom: 22px; }
+    .bbd__tear--bottom { display: block; }
+    .bbd__sheet { filter: drop-shadow(5px 6px 0 var(--shadow)); }
+}
+@keyframes bbd-up { from { transform: translateY(48px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes bbd-fade { from { opacity: 0; } to { opacity: 1; } }
+.bbd.is-leaving .bbd__sheet { animation: bbd-up 0.14s ease-in reverse forwards; }
+.bbd.is-leaving .bbd__scrim { animation: bbd-fade 0.14s ease-in reverse forwards; }
+@media (prefers-reduced-motion: reduce) { .bbd__sheet, .bbd__scrim, .bbd.is-leaving .bbd__sheet, .bbd.is-leaving .bbd__scrim { animation: none; } }

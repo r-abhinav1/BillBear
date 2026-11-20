@@ -61,5 +61,74 @@
         if (input.form) input.form.addEventListener('submit', function () { rememberName(input.value); }, true);
     }
 
-    window.BB = { copyText: copyText, canShare: canShare, share: share, savedName: savedName, rememberName: rememberName, nameField: nameField };
+    /* Bear's dialogs, in place of the browser's confirm() and alert().
+       BB.confirm({title, text, ok, cancel, danger}) resolves true or false;
+       BB.alert({title, text, ok}) (or BB.alert('text')) resolves once closed.
+       Escape, the backdrop and Cancel all mean "no". Pages without the
+       template (none today) fall back to the browser's own boxes. */
+    var openDialog = null;
+
+    function dialog(opts, isAlert) {
+        var tpl = document.getElementById('bbDialogTpl');
+        if (!tpl) {
+            var plain = [opts.title, opts.text].filter(Boolean).join('\n\n');
+            if (isAlert) { window.alert(plain); return Promise.resolve(); }
+            return Promise.resolve(window.confirm(plain));
+        }
+        if (openDialog) openDialog(false);       // one at a time: a new question replaces the old one
+
+        return new Promise(function (resolve) {
+            var node = tpl.content.firstElementChild.cloneNode(true);
+            var ok = node.querySelector('.bbd__ok');
+            var cancel = node.querySelector('.bbd__cancel');
+            var page = document.querySelector('.page');
+            var before = document.activeElement;
+            node.querySelector('.bbd__title').textContent = opts.title || '';
+            node.querySelector('.bbd__text').textContent = opts.text || '';
+            ok.textContent = opts.ok || (isAlert ? 'OK' : 'Yes');
+            cancel.textContent = opts.cancel || 'Cancel';
+            if (isAlert) node.classList.add('bbd--alert');
+            if (opts.danger) node.classList.add('bbd--danger');
+
+            var done = false;
+            function close(answer) {
+                if (done) return;
+                done = true;
+                openDialog = null;
+                document.removeEventListener('keydown', onKey, true);
+                if (page) page.inert = false;
+                var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+                node.classList.add('is-leaving');
+                setTimeout(function () { node.remove(); }, reduce ? 0 : 140);
+                if (before && typeof before.focus === 'function' && document.contains(before)) before.focus();
+                resolve(isAlert ? undefined : answer);
+            }
+            function onKey(e) {
+                if (e.key === 'Escape') { e.preventDefault(); close(false); return; }
+                if (e.key === 'Tab') {
+                    // Keep the keyboard inside the dialog.
+                    var stops = isAlert ? [ok] : [ok, cancel];
+                    var at = stops.indexOf(document.activeElement);
+                    e.preventDefault();
+                    stops[(at + (e.shiftKey ? stops.length - 1 : 1) + stops.length) % stops.length].focus();
+                }
+            }
+            ok.addEventListener('click', function () { close(true); });
+            cancel.addEventListener('click', function () { close(false); });
+            node.querySelector('.bbd__scrim').addEventListener('click', function () { close(false); });
+            document.addEventListener('keydown', onKey, true);
+            openDialog = close;
+
+            document.body.appendChild(node);
+            if (page) page.inert = true;          // the page behind can't be tapped or tabbed to
+            // Something that undoes work starts on the safe answer.
+            (opts.danger && !isAlert ? cancel : ok).focus();
+        });
+    }
+
+    function confirmDialog(opts) { return dialog(opts || {}, false); }
+    function alertDialog(opts) { return dialog(typeof opts === 'string' ? { text: opts } : (opts || {}), true); }
+
+    window.BB = { copyText: copyText, canShare: canShare, share: share, savedName: savedName, rememberName: rememberName, nameField: nameField,
+                  confirm: confirmDialog, alert: alertDialog };
 })();

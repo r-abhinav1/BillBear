@@ -160,7 +160,7 @@
         const MAX_WIDTH = 1600;
         const MAX_HEIGHT = 4000;
         const TARGET_BYTES = 3.5 * 1024 * 1024;   // Vercel body limit is 4.5 MB incl. multipart overhead
-        const SCAN_TIMEOUT_MS = 35000;            // server budget is ~25s
+        const SCAN_TIMEOUT_MS = 45000;            // server budget is ~30s (a 200-dish bill takes ~12s)
 
         const form = document.getElementById('createForm');
         const submitBtn = document.getElementById('submitBtn');
@@ -314,7 +314,7 @@
             return ['host_name', 'room_name', 'num_people'].every(id => document.getElementById(id).value.trim());
         }
 
-        // The same rules as the server (utils/validation.py), checked first so a
+        // The same rules as the server (billbear/bill/validation.py), checked first so a
         // refused name costs nothing. Returns a message, or '' when all is well.
         function detailsProblem() {
             if (!detailsFilled()) return 'Fill in your name, the occasion and how many people.';
@@ -448,7 +448,9 @@
             const currency = receipt.currency || {};
             if (currency.confirmed) {
                 receiptInput.value = JSON.stringify(receipt);
-                setStatus(`Found ${count} dish${count === 1 ? '' : 'es'}. You can fix or add dishes on the next screen.`, 'success');
+                setStatus(receipt.dropped
+                    ? `Found ${count} dishes, the most a bill can have. The last ${receipt.dropped} line${receipt.dropped === 1 ? ' was' : 's were'} left out: check the end of the bill on the next screen.`
+                    : `Found ${count} dish${count === 1 ? '' : 'es'}. You can fix or add dishes on the next screen.`, 'success');
                 submitBtn.disabled = false;
                 if (ask.box && CURRENCIES[currency.code] && currency.code !== 'INR') {
                     ask.box.hidden = false;

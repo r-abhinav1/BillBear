@@ -1,6 +1,6 @@
 /*
  * Amounts in the browser, read and written the same way the server does
- * (utils/money.py). A currency is {code, name, symbol, decimals, step}.
+ * (billbear/bill/money.py). A currency is {code, name, symbol, decimals, step}.
  *
  *   BBMoney.parse('₹1,234.50')  -> 1234.5     parse('')  -> null
  *   BBMoney.parse('12,50')      -> 12.5       parse('x') -> NaN

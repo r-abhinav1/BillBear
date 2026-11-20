@@ -25,7 +25,9 @@ from typing import Iterable, List, Optional, Set, Tuple
 
 from markupsafe import Markup, escape
 
-FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "fonts", "pdf")
+from billbear.config import STATIC_DIR
+
+FONT_DIR = str(STATIC_DIR / "fonts" / "pdf")
 
 # CSS family (what the template names) -> file, and the code points it covers.
 # ₹ has no glyph in Helvetica; the Devanagari font has one.

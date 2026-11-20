@@ -3,7 +3,7 @@
 {% set CATEGORIES = [('veg', 'Veg'), ('nonveg', 'Non-veg'), ('egg', 'Egg'), ('alcohol', 'Alcohol'), ('other', 'Other')] %}
 {% block title %}Check the bill, BillBear{% endblock %}
 {% block page_class %}page--wide{% endblock %}
-{% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('rooms.room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
 {% block head %}<style>form.loading { opacity: 0.6; pointer-events: none; }</style>{% endblock %}
 {% block body_attrs %} data-live{% endblock %}
 {% block content %}

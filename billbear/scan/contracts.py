@@ -2,8 +2,8 @@ import re
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from .bill_totals import clean_charges, has_gst_marker, legacy_charges, stored_charges
-from .money import DEFAULT_CURRENCY, get_currency, is_supported, parse_money
+from billbear.bill.totals import clean_charges, has_gst_marker, legacy_charges, stored_charges
+from billbear.bill.money import DEFAULT_CURRENCY, get_currency, is_supported, parse_money
 
 MISSING_VALUE = "N/A"
 

@@ -1,0 +1,4 @@
+# Local development and tests. Vercel installs requirements.txt only.
+-r requirements.txt
+pytest==9.2.0
+pyflakes==3.2.0

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from .receipt_rules import build_image_receipt_prompt
+from billbear.scan.rules import build_image_receipt_prompt
 
 
 class ProviderCallError(Exception):

@@ -16,7 +16,7 @@ import psycopg
 from flask import g
 from psycopg.rows import dict_row
 
-from utils.observability import distribution_sampled
+from billbear.web.observability import distribution_sampled
 
 
 class DatabaseUnavailable(Exception):

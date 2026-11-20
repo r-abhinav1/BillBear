@@ -60,10 +60,44 @@ Repository: https://github.com/r-abhinav1/BillBear
 
 ---
 
+## Project layout
+
+```
+app.py                  Entry point: app = create_app(). Vercel imports it (vercel.json).
+run.py                  Local launcher (checks the venv and the port, then runs app.py).
+billbear/               The application package
+  __init__.py           create_app(): config, database, template filters, hooks, blueprints
+  config.py             Paths and settings fixed at start-up
+  db.py                 One Postgres connection per request
+  storage.py            Every query; one transaction per write, room row locked
+  routes/               Blueprints, one per area
+    pages.py            Home, help, terms, health check
+    scan.py             POST /api/receipt/scan
+    rooms.py            Create a room, edit its bill, room page, live status
+    join.py             Joining, the host recovery link
+    picks.py            Picking dishes, waiting room
+    host.py             The host's controls and Split
+    results.py          Results page and PDF download
+    cron.py             Daily clean-up
+  bill/                 Bill maths: no Flask, no database
+    money.py totals.py split.py audit.py portions.py validation.py assembler.py
+  scan/                 Reading a receipt photo
+    image_prep.py pipeline.py llm.py rules.py contracts.py
+  pdf/                  render.py (the split as a PDF), text.py (non-Latin fonts)
+  web/                  Request plumbing
+    access.py           Loading a room, who is calling, rate limits
+    errors.py hooks.py  Error pages; CSRF check, headers, metrics around each request
+    security.py session.py observability.py sharing.py
+templates/  static/     Jinja templates and static files
+migrations/             SQL migrations, applied in order by scripts/migrate.py
+tests/                  pytest; integration tests need TEST_DATABASE_URL
+loadtest/               k6 load test
+```
+
 ## Local Development
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env          # then set SECRET_KEY and (optionally) GEMINI_API_KEYS
 
 # Postgres: any local instance works; e.g. Docker
@@ -79,11 +113,11 @@ python3 run.py                                            # http://localhost:500
 
 Without `GEMINI_API_KEYS` the scan endpoint returns "not configured" and hosts use **Enter items manually**.
 
-Scanning uses **Gemini 3.1 Flash-Lite** (`GEMINI_IMAGE_MODEL`), about ₹0.2 per bill with GST (up to ~₹0.5 for a very long bill; output tokens are most of it). `SCAN_DAILY_CAP` (default 15; production uses 100) caps total scans per day across all users, so at 100 a day spend can't pass ~₹50 a day. Each network (IP) gets at most 5 scans per 10 minutes and 10 per day (`RATE_LIMITS` in `utils/security.py`). Past a limit, users get "enter items manually". Each scan logs its token usage (`[receipt_llm] gemini usage ...`), so you can check real costs in the Vercel logs.
+Scanning uses **Gemini 3.1 Flash-Lite** (`GEMINI_IMAGE_MODEL`), about ₹0.15 for a typical bill with GST, rising by about ₹0.004 a dish (₹0.85 for a 200-dish bill; output tokens are most of it). `SCAN_DAILY_CAP` (default 15; production uses 200) caps total scans per day across all users. Each network (IP) gets at most 5 scans per 10 minutes and 10 per day (`RATE_LIMITS` in `billbear/web/security.py`). Past a limit, users get "enter items manually". Each scan logs its token usage (`[receipt_llm] gemini usage ...`), so you can check real costs in the Vercel logs.
 
 ## How it works
 
-- **Scan:** the browser downscales the photo (never upscales) and posts it to `POST /api/receipt/scan`, which validates and re-encodes it (Pillow) and asks Gemini vision for the items within a ~25s budget (one random key, a second key only on 429/5xx/timeout, then OpenRouter best effort). The host always reviews items on the edit screen.
+- **Scan:** the browser downscales the photo (never upscales) and posts it to `POST /api/receipt/scan`, which validates and re-encodes it (Pillow) and asks Gemini vision for the items within a ~30s budget (one random key, a second key only on 429/5xx/timeout, then OpenRouter best effort). The host always reviews items on the edit screen.
 - **Storage:** normalized tables (`rooms`, `participants`, `items`, `claims`, `rate_limits`) in `migrations/001_init.sql`. Every write runs in a transaction that locks the room row, so simultaneous submits/joins/finalize resolve to one consistent outcome. Rooms expire 24h after the last write; a daily Vercel cron (`/api/cron/cleanup`, Bearer `CRON_SECRET`) writes a heartbeat row (`app_heartbeat`) and deletes expired rooms.
 - **Flow:** join → pick items → host taps **Finalize** (only when everyone has joined and submitted) → results/PDF. Results are hidden until finalized; the host can reopen.
 
@@ -91,7 +125,7 @@ Scanning uses **Gemini 3.1 Flash-Lite** (`GEMINI_IMAGE_MODEL`), about ₹0.2 per
 
 - **The room link is the invitation.** Anyone with the code can join (rate-limited; repeated wrong codes from one IP get 429).
 - **Your device is your identity in a room.** Joining mints a random id; the DB stores only its SHA-256 and the browser gets it in a signed, HttpOnly, SameSite=Lax cookie. Every write checks cookie → DB row; names in URLs are never trusted.
-- **The host** has the same cookie plus a private **host link** (shown on the host's room page) that restores host rights on another device. If a guest loses their phone, the host taps **Reset device** and the guest rejoins with the same name.
+- **The host** has the same cookie plus a private **host link** (shown on the host's room page) that restores host rights on another device. If a guest loses their phone, the host taps **Move them to a new phone** and passes on the one-time move code (or its link); the guest rejoins with the same name and the code.
 - **Abuse controls:** per-IP rate limits in Postgres, a short-lived scan ticket cookie for the paid scan endpoint, optional Cloudflare Turnstile (`TURNSTILE_*`), same-origin checks on all POSTs, CSP / X-Frame-Options / Referrer-Policy headers, strict name validation, and the app refuses to start on Vercel without a strong `SECRET_KEY`.
 
 ## Deploying (Vercel + Supabase)

@@ -5,6 +5,7 @@ sample
 
 # Local documentation (not for the repo)
 CODEBASE.md
+docs/LLM_COSTS.md
 
 # Python
 .venv/

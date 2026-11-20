@@ -24,7 +24,7 @@ os.environ.pop("VERCEL", None)
 os.environ.pop("TURNSTILE_SECRET_KEY", None)
 os.environ.pop("TURNSTILE_SITE_KEY", None)
 os.environ["CRON_SECRET"] = "test-cron-secret"
-# Tests never report to Sentry, even with a DSN in .env (empty, so app.py's
+# Tests never report to Sentry, even with a DSN in .env (empty, so billbear's
 # load_dotenv can't fill it back in).
 os.environ["SENTRY_DSN"] = ""
 
@@ -57,9 +57,7 @@ def _clean_tables():
 @pytest.fixture(autouse=True)
 def _no_real_ngrok(monkeypatch):
     """Don't let a tunnel running on the dev machine leak into share links."""
-    import app as app_module
-
-    monkeypatch.setattr(app_module, "_ngrok_public_url", lambda: None)
+    monkeypatch.setattr("billbear.web.sharing._ngrok_public_url", lambda: None)
 
 
 @pytest.fixture
@@ -107,7 +105,7 @@ def join(client, code, name):
 
 
 def room(code):
-    import storage
+    from billbear import storage
 
     with app.app_context():
         return storage.get_room(code)

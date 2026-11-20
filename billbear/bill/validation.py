@@ -11,8 +11,8 @@ import unicodedata
 from decimal import Decimal
 from typing import Any, List, Optional
 
-from .money import Currency, TooManyDecimals, format_money, get_currency, parse_money
-from .receipt_contracts import normalize_item_category
+from billbear.bill.money import Currency, TooManyDecimals, format_money, get_currency, parse_money
+from billbear.scan.contracts import normalize_item_category
 
 NAME_MAX = 30
 ROOM_NAME_MAX = 60

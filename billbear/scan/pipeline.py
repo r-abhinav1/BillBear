@@ -13,8 +13,8 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import receipt_llm
-from .receipt_contracts import normalize_receipt_payload
+from billbear.scan import llm as receipt_llm
+from billbear.scan.contracts import normalize_receipt_payload
 
 log = logging.getLogger("billbear.scan")
 
@@ -32,18 +32,22 @@ class VisionUnavailable(VisionFailed):
     """No provider can be used right now (not configured, or billing/quota problem)."""
 
 
+# Measured on gemini-3.1-flash-lite (2026-11-20): about 25 output tokens per
+# dish; 60 dishes took 5 s, 120 took 8 s, 180 took 10 s. A 200-dish bill (the
+# most a bill can have) needs ~12 s, so one call gets 20 s. The browser waits
+# longer than the whole budget (SCAN_TIMEOUT_MS in create_room.html).
 def vision_budget_seconds() -> float:
     try:
-        return max(5.0, float(os.getenv("VISION_BUDGET_SECONDS", "25")))
+        return max(5.0, float(os.getenv("VISION_BUDGET_SECONDS", "30")))
     except ValueError:
-        return 25.0
+        return 30.0
 
 
 def _per_call_cap() -> float:
     try:
-        return max(3.0, float(os.getenv("VISION_CALL_TIMEOUT_SECONDS", "15")))
+        return max(3.0, float(os.getenv("VISION_CALL_TIMEOUT_SECONDS", "20")))
     except ValueError:
-        return 15.0
+        return 20.0
 
 
 def _usable(receipt: Dict[str, Any]) -> bool:

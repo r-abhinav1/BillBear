@@ -134,7 +134,20 @@
         </section>
 
         <div class="actions actions--center">
-            <button type="submit" class="btn btn--primary btn--block" id="submitBtn">Save and open the room</button>
+            <button type="submit" class="btn btn--primary btn--block" id="submitBtn">{{ 'Save and see the rate card' if split_mode == 'counts' else 'Save and open the room' }}</button>
+            {# The second way to split: a link under the main button, so it never reads as the next step.
+               It opens a sheet that explains it; nothing changes until the host confirms there. #}
+            <input type="hidden" name="next_mode" id="nextMode" value="">
+            <input type="hidden" name="reopen" id="reopenPicks" value="">
+            <div class="alt-split" id="altSplit"{% if split_mode == 'items' %} hidden{% endif %}>
+                {% if split_mode == 'items' %}
+                <button type="button" class="link-btn" id="openSplitSheet">Big bill? Split by food type instead</button>
+                <p class="fineprint">Each food type split equally between the people who had it.</p>
+                {% else %}
+                <p class="small" style="padding-top: 8px; font-weight: 600">{{ 'Splitting by food type with a rate card.' if split_mode == 'counts' else 'Splitting by food type: everyone picks the types they had.' }}</p>
+                <button type="button" class="link-btn" id="openSplitSheet">Change how to split</button>
+                {% endif %}
+            </div>
             <button type="button" class="link-btn" id="downloadScanBtn" title="Reload it later without scanning again">Save this scan to a file</button>
         </div>
     </form>
@@ -160,7 +173,37 @@
     </template>
 </main>
 
+<div class="scrim" id="splitScrim" hidden></div>
+<div class="sheet" id="splitSheet" role="dialog" aria-modal="true" aria-labelledby="splitSheetTitle" hidden>
+    <div class="row" style="padding-bottom: 4px">
+        <h2 class="grow" id="splitSheetTitle" style="font-size: 1.4rem; font-weight: 800">Split by food type</h2>
+        <button type="button" class="icon-btn" id="splitClose" aria-label="Close">{{ ui.icon('close') }}</button>
+    </div>
+    <p class="small" style="color: var(--ink-soft)">Each type's dishes are split equally between the people who had some. Someone can have several types. Dishes marked Other are shared by everyone. <a class="textlink" href="/help/food-type" target="_blank" rel="noopener">How it works</a></p>
+    <div class="mini-pots" id="miniPots" aria-label="This bill by food type"></div>
+    <div class="stack" style="gap: 10px" role="radiogroup" aria-label="How to split by food type">
+        <button type="button" class="choice" role="radio" aria-checked="{{ 'false' if split_mode == 'types' else 'true' }}" data-mode="counts">
+            <span class="paw{% if split_mode == 'types' %} paw--empty{% endif %}" aria-hidden="true">{{ ui.paw_svg() }}</span>
+            <span><b>I know how many had what</b><span>Type how many people had each type. You get a price per person for each type to read out or share. Nobody needs to join.</span></span>
+        </button>
+        <button type="button" class="choice" role="radio" aria-checked="{{ 'true' if split_mode == 'types' else 'false' }}" data-mode="types">
+            <span class="paw{% if split_mode != 'types' %} paw--empty{% endif %}" aria-hidden="true">{{ ui.paw_svg() }}</span>
+            <span><b>Let everyone pick</b><span>Open the room as usual. Guests scan the QR and tap the food types they had instead of each dish.</span></span>
+        </button>
+    </div>
+    {% if submitted_count %}
+    <p class="notice notice--error" style="margin-top: 4px">{{ submitted_count }} {{ 'person has' if submitted_count == 1 else 'people have' }} already sent picks. Switching sends everyone back to pick again.</p>
+    {% endif %}
+    <button type="button" class="btn btn--primary btn--block" id="splitGo">Save and type the numbers</button>
+    {% if split_mode == 'items' %}
+    <button type="button" class="link-btn" id="splitKeep" style="align-self: center">Keep splitting dish by dish</button>
+    {% else %}
+    <button type="button" class="link-btn" id="splitBack" style="align-self: center">Go back to splitting dish by dish</button>
+    {% endif %}
+</div>
+
 <div class="scrim" id="typeScrim" hidden></div>
+{% for key in ['veg', 'nonveg', 'egg', 'alcohol', 'other'] %}<template data-type-mark="{{ key }}">{{ ui.type_mark(key, 14) }}</template>{% endfor %}
 <div class="sheet" id="typeSheet" role="dialog" aria-modal="true" aria-labelledby="typeSheetTitle" hidden>
     <div class="row" style="padding-bottom: 4px">
         <h2 class="grow" id="typeSheetTitle" style="font-size: 1.4rem; font-weight: 800">What kind of dish is it?</h2>
@@ -613,6 +656,110 @@
         function removeRow(button) {
             button.closest('.item-row').remove();
         }
+
+        /* ------------------------------------------------------------------ */
+        /* Split by food type: the link under Save, and its sheet               */
+        /* ------------------------------------------------------------------ */
+        const SPLIT_MODE = {{ split_mode | tojson }};
+        const SENT_COUNT = {{ submitted_count | tojson }};
+        const TYPE_ORDER = [['veg', 'Veg'], ['nonveg', 'Non-veg'], ['egg', 'Egg'], ['alcohol', 'Alcohol']];
+        const splitSheet = document.getElementById('splitSheet');
+        const splitScrim = document.getElementById('splitScrim');
+
+        // The bill as typed right now, by food type: {veg: {count, total}, ..., other: {...}}.
+        function typeTotals() {
+            const totals = {};
+            document.querySelectorAll('.item-row').forEach(row => {
+                const name = (row.querySelector('input[name="item_name"]')?.value || '').trim();
+                if (!name) return;
+                const type = row.querySelector('select[name="item_category"]')?.value || 'other';
+                const price = M.parse(row.querySelector('input[name="item_price"]')?.value);
+                const t = totals[type] || (totals[type] = { count: 0, total: 0 });
+                t.count += 1;
+                if (usable(price)) t.total += price;
+            });
+            return totals;
+        }
+
+        // The link only makes sense with two types or more; a bill that's all veg splits equally anyway.
+        function syncAltSplit() {
+            if (SPLIT_MODE !== 'items') return;
+            const totals = typeTotals();
+            const types = TYPE_ORDER.filter(([k]) => totals[k]).length;
+            document.getElementById('altSplit').hidden = types < 2;
+        }
+        editForm.addEventListener('change', syncAltSplit);
+        editForm.addEventListener('input', syncAltSplit);
+        new MutationObserver(syncAltSplit).observe(document.getElementById('itemsTable'), { childList: true });
+        syncAltSplit();
+
+        function chosenMode() {
+            const on = splitSheet.querySelector('.choice[aria-checked="true"]');
+            return on ? on.dataset.mode : 'counts';
+        }
+
+        function syncSplitGo() {
+            document.getElementById('splitGo').textContent =
+                chosenMode() === 'counts' ? 'Save and type the numbers' : 'Save and open the room';
+        }
+
+        function openSplitSheet() {
+            const totals = typeTotals();
+            const pots = document.getElementById('miniPots');
+            pots.replaceChildren();
+            TYPE_ORDER.concat([['other', 'Everyone']]).forEach(([key, label]) => {
+                if (!totals[key]) return;
+                const chip = document.createElement('span');
+                const tpl = document.querySelector(`template[data-type-mark="${key}"]`);
+                if (tpl) chip.appendChild(tpl.content.firstElementChild.cloneNode(true));
+                chip.append(label + ' ');
+                const amount = document.createElement('span');
+                amount.className = 'mono';
+                amount.textContent = money(totals[key].total);
+                chip.appendChild(amount);
+                pots.appendChild(chip);
+            });
+            syncSplitGo();
+            splitScrim.hidden = false;
+            splitSheet.hidden = false;
+            document.getElementById('splitClose').focus();
+        }
+
+        function closeSplitSheet() {
+            if (splitSheet.hidden) return;
+            splitSheet.hidden = true;
+            splitScrim.hidden = true;
+            document.getElementById('openSplitSheet').focus();
+        }
+
+        function saveWithMode(mode) {
+            document.getElementById('nextMode').value = mode;
+            document.getElementById('reopenPicks').value = SENT_COUNT ? '1' : '';
+            closeSplitSheet();
+            if (editForm.requestSubmit) editForm.requestSubmit(document.getElementById('submitBtn'));
+            else document.getElementById('submitBtn').click();
+        }
+
+        document.getElementById('openSplitSheet').addEventListener('click', openSplitSheet);
+        document.getElementById('splitClose').addEventListener('click', closeSplitSheet);
+        splitScrim.addEventListener('click', closeSplitSheet);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSplitSheet(); });
+        splitSheet.querySelectorAll('.choice').forEach(btn => btn.addEventListener('click', () => {
+            splitSheet.querySelectorAll('.choice').forEach(b => {
+                const on = b === btn;
+                b.setAttribute('aria-checked', on ? 'true' : 'false');
+                b.querySelector('.paw').classList.toggle('paw--empty', !on);
+            });
+            syncSplitGo();
+        }));
+        document.getElementById('splitGo').addEventListener('click', () => saveWithMode(chosenMode()));
+        const splitKeep = document.getElementById('splitKeep');
+        if (splitKeep) splitKeep.addEventListener('click', closeSplitSheet);
+        const splitBack = document.getElementById('splitBack');
+        if (splitBack) splitBack.addEventListener('click', () => saveWithMode('items'));
+        // If the browser refuses the form (a required box left empty), the choice is
+        // not kept for a later plain Save.
+        editForm.addEventListener('invalid', () => { document.getElementById('nextMode').value = ''; }, true);
 
         editForm.addEventListener('submit', function () {
             // Turn any "5%" still in a box into its amount before sending.

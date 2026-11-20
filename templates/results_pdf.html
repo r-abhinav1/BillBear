@@ -37,6 +37,16 @@
     </tr>
 </table>
 <table cellspacing="0">
+    {% if pots %}
+    {% for pot in pots[user] %}
+    <tr>
+        <td class="line box-l" width="72%">{{ mark(pot.key) }}{{ pot.label }} <span class="soft">(split {{ pot.ways }} {{ 'way' if pot.ways == 1 else 'ways' }})</span></td>
+        <td class="amount box-r" width="28%">{{ money(pot.share) }}</td>
+    </tr>
+    {% else %}
+    {{ charge('No food types picked', '&nbsp;' | safe) }}
+    {% endfor %}
+    {% else %}
     {% for item in d.item_details %}
     <tr>
         <td class="line box-l" width="72%">{{ mark(cats.get(item.name)) }}{{ item.name | pdf_text }}{% if item.mode == 'units' %} <span class="soft">({{ item.portions }} of {{ item.quantity }})</span>{% elif item.mode == 'shared' %} <span class="soft">(shared {{ item.sharers }} {{ 'way' if item.sharers == 1 else 'ways' }})</span>{% elif item.shared_by > 1 %} <span class="soft">(1 of {{ item.shared_by }})</span>{% endif %}</td>
@@ -45,6 +55,7 @@
     {% else %}
     {{ charge('Nothing picked', '&nbsp;' | safe) }}
     {% endfor %}
+    {% endif %}
     {% for c in d.charges %}{{ charge(c.label | pdf_text, ('-' if c.kind == 'discount' else '') ~ money(c.amount)) }}{% endfor %}
     <tr><td class="box-l box-b last" width="72%">&nbsp;</td><td class="box-r box-b last" width="28%">&nbsp;</td></tr>
 </table>

@@ -3,6 +3,8 @@
 {% block title %}{{ room.room_name }}, BillBear{% endblock %}
 {% block body_attrs %} data-live{% endblock %}
 {% block content %}
+{% set mode = room.split_mode %}
+{% set by_type = mode == 'types' %}
 <main class="stack stack--lg">
     <div>
         <div class="row row--between">
@@ -10,16 +12,24 @@
             <span id="connection-status" class="live connecting">Connecting</span>
         </div>
         <h1>{{ room.room_name }}</h1>
+        {% if mode != 'items' %}<p style="margin-top: 8px"><span class="mode-badge">{{ ui.diet('veg', false) }}{{ 'By food type, rate card' if mode == 'counts' else 'By food type' }}</span></p>{% endif %}
     </div>
 
     <div class="actions" id="actions-container">
-        {% if me %}
+        {% if mode == 'counts' and not room.finalized %}
+            {% if is_host %}
+            <a href="{{ url_for('rate_card.rate_card_page', room_code=room_code) }}" class="btn btn--primary btn--block">See the rate card</a>
+            <a href="{{ url_for('rooms.edit_items', room_code=room_code) }}" class="btn btn--block">Edit dishes</a>
+            {% else %}
+            <div class="notice">{{ room.host_name }} is splitting this bill with a rate card by food type, so there's nothing to pick here. Ask {{ room.host_name }} for it.</div>
+            {% endif %}
+        {% elif me %}
             {% if room.finalized %}
             <a href="{{ url_for('results.results_page', room_code=room_code) }}" class="btn btn--primary btn--block">See the split</a>
             {% elif me.submitted %}
-            <a href="{{ url_for('picks.waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">Your picks are in. See who's left</a>
+            <a href="{{ url_for('picks.waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">Your {{ 'food types are' if by_type else 'picks are' }} in. See who's left</a>
             {% else %}
-            <a href="{{ url_for('picks.select_items', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">Pick my dishes</a>
+            <a href="{{ url_for('picks.select_items', room_code=room_code, user_name=me.name) }}" class="btn btn--primary btn--block">{{ 'Pick my food types' if by_type else 'Pick my dishes' }}</a>
             {# The host's controls (head count, guests, split) live on the waiting page. #}
             {% if is_host %}<a href="{{ url_for('picks.waiting_room', room_code=room_code, user_name=me.name) }}" class="btn btn--block">Manage the table</a>{% endif %}
             {% endif %}
@@ -31,6 +41,7 @@
         {% endif %}
     </div>
 
+    {% if mode != 'counts' %}
     <section class="stack">
         <div class="row row--between">
             <h2>At the table</h2>
@@ -63,11 +74,23 @@
             </div>
         </section>
     </div>
+    {% endif %}
 
     <section class="receipt">
         <div class="paper stack">
             <h2>On the bill</h2>
             <hr class="dash dash--ink">
+            {% if mode != 'items' and pots %}
+            {# Split by food type: the bill as its pots. #}
+            <div class="stack" style="gap: 12px">
+                {% for pot in pots %}
+                <div class="my-pot">
+                    <div class="my-pot__head">{{ ui.type_mark(pot.key) }}{{ pot.label }}<span class="mono">{{ pot.total | money(room.currency.code) }}</span></div>
+                    <ul>{% for item in pot.dishes %}<li><span>{{ item.name }}{% if item.quantity > 1 %} ×{{ item.quantity }}{% endif %}</span><span>{{ item.price }}</span></li>{% endfor %}</ul>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
             <div class="lines">
                 {% for item in room['items'] %}
                 <div class="line"><span class="with-diet">{{ ui.diet(item.category) }}<span>{{ item.name }}{% if item.quantity > 1 %} <span class="pick__qty">×{{ item.quantity }}</span>{% if item.each %}<span class="line__calc">{{ item.each }}</span>{% endif %}{% endif %}</span></span><span>{{ item.price }}</span></div>
@@ -75,6 +98,7 @@
                 <p class="fineprint">No dishes yet.</p>
                 {% endfor %}
             </div>
+            {% endif %}
         </div>
         <div class="tear"></div>
     </section>
@@ -105,8 +129,8 @@
     <script>
         const $ = (id) => document.getElementById(id);
         const joinUrl = () => $('joinUrl').textContent.trim();
-        $('copyBtn').addEventListener('click', () => BB.copyText(joinUrl(), $('copyBtn')));
-        if (BB.canShare()) {
+        if ($('copyBtn')) $('copyBtn').addEventListener('click', () => BB.copyText(joinUrl(), $('copyBtn')));
+        if ($('copyBtn') && BB.canShare()) {
             // On a phone the share sheet comes first; copying the link stays one tap away.
             $('shareBtn').hidden = false;
             $('copyBtn').classList.remove('btn--honey');
@@ -164,7 +188,8 @@
                     if (d.status !== 'success') throw new Error('bad status');
                     const meSubmitted = MY_NAME ? d.submitted_users.includes(MY_NAME) : false;
                     // Buttons depend on these: re-render the page when they change.
-                    if (d.finalized || meSubmitted !== MY_SUBMITTED) { window.location.reload(); return; }
+                    // The host switching how the bill is split changes the buttons too.
+                    if (d.finalized || meSubmitted !== MY_SUBMITTED || d.split_mode !== {{ room.split_mode | tojson }}) { window.location.reload(); return; }
                     $('expectedValue').textContent = d.expected_people;
                     $('joinedValue').textContent = d.total_users;
                     $('submittedValue').textContent = d.submitted_count;
@@ -187,7 +212,7 @@
                 if (document.hidden) { clearTimeout(timer); timer = null; }
                 else if (!timer) tick();
             });
-            {% if not room.finalized %}tick();{% else %}setIndicator('connected', 'Final');{% endif %}
+            {% if room.split_mode == 'counts' and not room.finalized %}setIndicator('connected', 'Rate card');{% elif not room.finalized %}tick();{% else %}setIndicator('connected', 'Final');{% endif %}
         })();
     </script>
 {% endblock %}

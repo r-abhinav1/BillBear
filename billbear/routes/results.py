@@ -3,6 +3,7 @@ from flask import Blueprint, current_app, render_template
 
 from billbear import storage
 from billbear.bill.audit import audit_bill
+from billbear.bill.food_types import TYPES, pot_lines
 from billbear.bill.split import calculate_bill_split
 from billbear.pdf import render as pdf_render
 from billbear.web.access import caller, load_room, not_linked_page, rate_limited, redirect_for
@@ -33,6 +34,7 @@ def results_page(room_code):
         room=room,
         room_code=room["code"],
         bill_split=bill_split,
+        pots=pot_lines(room, bill_split) if room["split_mode"] == TYPES else None,
         pdf_available=pdf_render.PDF_AVAILABLE,
         caller_name=me["name"],
         caller_is_host=me["is_host"],

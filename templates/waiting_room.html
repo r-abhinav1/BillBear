@@ -4,6 +4,7 @@
 {% block topbar_left %}<a class="backlink" href="{{ url_for('rooms.room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
 {% block body_attrs %} data-live{% endblock %}
 {% block content %}
+{% set by_type = room.split_mode == 'types' %}
 <div id="hostNoticeBanner" class="banner" style="display: none" role="alert">
     <p id="hostNoticeText"></p>
     <button id="hostNoticeAction" type="button" class="btn btn--small btn--honey">Action</button>
@@ -11,7 +12,10 @@
 
 <main class="stack stack--lg">
     <div>
-        <p class="eyebrow">{{ room['room_name'] }}</p>
+        <div class="row row--between">
+            <p class="eyebrow">{{ room['room_name'] }}</p>
+            {% if by_type %}<span class="mode-badge">{{ ui.diet('veg', false) }}By food type</span>{% endif %}
+        </div>
         <h1 id="headline">Waiting for everyone</h1>
         <p class="lede" id="waitingDetail" style="margin-top: 8px">
             {% if is_host %}When everyone has sent their picks, split the bill.{% else %}{{ room['host_name'] }} splits the bill once everyone has sent their picks. You'll be taken there automatically.{% endif %}
@@ -34,12 +38,27 @@
 
     {% set my_submitted = user_name in room.submitted_users %}
     <div class="notice stack" id="pickCard" {% if my_submitted %}style="display: none"{% endif %}>
-        <strong>You haven't sent your picks yet.</strong>
+        <strong>You haven't sent your {{ 'food types' if by_type else 'picks' }} yet.</strong>
         <span>Tap what you had so the bill can be split{% if is_host %}. You can't split it until yours are in too{% endif %}.</span>
-        <a class="btn btn--honey" href="{{ url_for('picks.select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
+        <a class="btn btn--honey" href="{{ url_for('picks.select_items', room_code=room_code, user_name=user_name) }}">{{ 'Pick my food types' if by_type else 'Pick my dishes' }}</a>
     </div>
 
     {# What this person sent, laid out like the bill: diet mark, dish, quantity, shared or not. #}
+    {% if by_type %}
+    {# Split by type: every dish in the types they sent, and roughly what that comes to so far. #}
+    <section class="stack" id="sentCard" hidden>
+        <div class="receipt">
+            <div class="paper stack" style="gap: 10px">
+                <h2>What was in your food types</h2>
+                <hr class="dash dash--ink">
+                <div class="stack" id="sentLines" style="gap: 10px"></div>
+            </div>
+            <div class="tear"></div>
+        </div>
+        <div class="outline-box row row--between" style="font-weight: 700"><span>About, so far</span><span class="mono" id="estimate"></span></div>
+        <p class="small soft" id="estimateNote">This changes as more people tap the same types. Your share settles once everyone has sent.</p>
+    </section>
+    {% else %}
     <section class="receipt" id="sentCard" hidden>
         <div class="paper stack" style="gap: 10px">
             <h2>What you sent</h2>
@@ -50,6 +69,14 @@
         </div>
         <div class="tear"></div>
     </section>
+    {% endif %}
+
+    {% if by_type and is_host %}
+    <section class="stack" style="gap: 10px">
+        <h2>In each food type</h2>
+        <div class="coverage" id="coverage"></div>
+    </section>
+    {% endif %}
 
     <section class="stack">
         <div class="row row--between">
@@ -62,7 +89,6 @@
             {% if is_host %}<button type="button" class="link-btn" id="seatDropBtn">Not coming</button>{% endif %}
         </div>
         {% if is_host %}
-        <button type="button" class="btn btn--block" id="nudgeBtn" hidden></button>
         <div class="row row--between">
             <span style="font-weight: 600">People at the table</span>
             <div class="stepper">
@@ -97,6 +123,23 @@
         <div class="links">
             <a class="textlink" href="{{ url_for('rooms.edit_items', room_code=room_code) }}">Edit dishes</a>
         </div>
+        {% if by_type %}
+        <details class="fold outline-box" id="modeBox">
+            <summary>Splitting by food type</summary>
+            <div class="stack" style="gap: 10px; padding-bottom: 6px">
+                <p class="small" id="modeText">Everyone taps the food types they had. To split dish by dish instead, switch back.</p>
+                <button type="button" class="btn btn--small" id="modeBackBtn">Switch to dish by dish</button>
+                <div class="sheet__confirm" id="modeConfirm" hidden>
+                    <span id="modeConfirmText"></span>
+                    <div class="row" style="gap: 10px">
+                        <button type="button" class="btn btn--solid" id="modeConfirmYes">Switch and reopen</button>
+                        <button type="button" class="btn btn--ghost" id="modeConfirmNo">Keep food types</button>
+                    </div>
+                </div>
+                <p class="status-line error small" id="modeStatus" aria-live="polite"></p>
+            </div>
+        </details>
+        {% endif %}
         {% if host_link %}
         <details class="fold outline-box" id="hostLinkBox">
             <summary>Save your host link</summary>
@@ -125,6 +168,10 @@
         </div>
         <button type="button" class="icon-btn" id="sheetClose" aria-label="Close">{{ ui.icon('close') }}</button>
     </div>
+    <button type="button" class="sheet__action" id="sheetNudge" hidden>
+        {{ ui.icon('nudge', 26) }}
+        <span><b id="sheetNudgeLabel">Nudge them</b><span id="sheetNudgeHint">Sends them a reminder through your messaging app, with the room link.</span></span>
+    </button>
     <button type="button" class="sheet__action" id="sheetRepick" data-action="revoke">
         {{ ui.icon('repick', 26) }}
         <span><b>Let them re-pick</b><span>Reopens their picks. Their phone asks them to choose again.</span></span>
@@ -160,14 +207,19 @@
 
 <template id="pawTpl">{{ ui.paw(true) }}</template>
 {% for c in ['veg', 'nonveg', 'egg', 'alcohol'] %}<template data-diet="{{ c }}">{{ ui.diet(c) }}</template>{% endfor %}
+<template data-diet="other">{{ ui.everyone_mark() }}</template>
 {% endblock %}
 {% block scripts %}
+    <script src="{{ url_for('static', filename='js/money.js') }}"></script>
     <script>
         const roomCode = {{ room_code | tojson }};
         const hostName = {{ room.host_name | tojson }};
         const roomName = {{ room.room_name | tojson }};
         const currentUser = {{ user_name | tojson }};
         const isHost = {{ is_host | tojson }};
+        const BY_TYPE = {{ (room.split_mode == 'types') | tojson }};
+        const POTS = {{ pots | tojson }};
+        const CURRENCY = {{ room.currency | tojson }};
         const MIN_PEOPLE = {{ MIN_PEOPLE }};
 
         const POLL_FAST_MS = 3000;
@@ -251,7 +303,7 @@
             if (isSelf) bits.push('You');
             if (isTheHost) bits.push(isSelf ? 'the host' : 'Host');
             let meta = bits.length ? bits.join(', ') + '. ' : '';
-            meta += isSubmitted ? 'Picks sent.' : 'Still picking.';
+            meta += isSubmitted ? (BY_TYPE ? 'Food types sent.' : 'Picks sent.') : 'Still picking.';
             if (data.devices && data.devices[user] === false) meta += ' Phone unlinked, can rejoin.';
             who.appendChild(el('div', 'person__meta', meta));
             row.appendChild(who);
@@ -339,6 +391,84 @@
             }));
         }
 
+        /* Split by type: the dishes in my types, pot by pot, and the host's count per pot. */
+        let typesKey = null;
+        function renderTypesSent(data) {
+            const mine = new Set(data.my_types);
+            const pickers = data.type_pickers || {};
+            const settled = data.still_editing.length === 0 && data.waiting_for === 0;
+            $('estimate').textContent = BBMoney.format(data.my_estimate || 0, CURRENCY);
+            $('estimateNote').textContent = settled
+                ? 'Everyone has sent. This is your share once the host splits the bill.'
+                : 'This changes as more people tap the same types. Your share settles once everyone has sent.';
+            const key = JSON.stringify([data.my_types, pickers, data.submitted_count]);
+            if (key === typesKey) return;
+            typesKey = key;
+            const blocks = POTS.filter(p => mine.has(p.key) || p.key === 'other').map(p => {
+                const block = el('div', 'my-pot');
+                const head = el('div', 'my-pot__head');
+                const mark = dietMark(p.key);
+                if (mark) head.appendChild(mark);
+                head.append(p.label);
+                const ways = p.key === 'other' ? data.submitted_count : (pickers[p.key] || 0);
+                head.appendChild(el('span', 'mono', `split ${ways} ${ways === 1 ? 'way' : 'ways'}${settled ? '' : ' so far'}`));
+                block.appendChild(head);
+                const list = el('ul');
+                p.dishes.forEach(d => {
+                    const li = el('li');
+                    li.appendChild(el('span', null, d.quantity > 1 ? `${d.name} ×${d.quantity}` : d.name));
+                    li.appendChild(el('span', null, d.price));
+                    list.appendChild(li);
+                });
+                block.appendChild(list);
+                return block;
+            });
+            if (!mine.size) blocks.unshift(el('p', 'fineprint', "You didn't tap a food type."));
+            $('sentLines').replaceChildren(...blocks);
+        }
+
+        function renderCoverage(data) {
+            const box = $('coverage');
+            if (!box) return;
+            const pickers = data.type_pickers || {};
+            box.replaceChildren(...POTS.filter(p => p.key !== 'other').map(p => {
+                const n = pickers[p.key] || 0;
+                const cell = el('div', 'cov' + (n || !data.submitted_count ? '' : ' cov--none'));
+                const mark = dietMark(p.key);
+                if (mark) cell.appendChild(mark);
+                cell.append(p.label);
+                cell.appendChild(el('span', 'mono', `${n} ${n === 1 ? 'person' : 'people'}`));
+                return cell;
+            }));
+            const back = $('modeBackBtn');
+            if (back && !back.dataset.busy) {
+                $('modeText').textContent = data.submitted_count
+                    ? `${data.submitted_count} ${data.submitted_count === 1 ? 'person has' : 'people have'} sent food types. Switching to dish by dish sends everyone back to pick again.`
+                    : 'Everyone taps the food types they had. Nobody has sent yet, so you can still switch to dish by dish.';
+            }
+        }
+
+        async function switchToDishes(reopen) {
+            const r = await postJson(`/room/${roomCode}/host/split-mode`, { mode: 'items', reopen });
+            if (r.ok && r.data && r.data.redirect) { window.location.href = r.data.redirect; return; }
+            if (r.data && r.data.code === 'PICKS_SENT') {
+                $('modeConfirmText').textContent = r.data.message;
+                $('modeBackBtn').hidden = true;
+                $('modeConfirm').hidden = false;
+                return;
+            }
+            $('modeStatus').textContent = (r.data && r.data.message) || 'Could not switch. Try again.';
+        }
+
+        if ($('modeBackBtn')) {
+            $('modeBackBtn').addEventListener('click', () => switchToDishes(false));
+            $('modeConfirmYes').addEventListener('click', () => switchToDishes(true));
+            $('modeConfirmNo').addEventListener('click', () => {
+                $('modeConfirm').hidden = true;
+                $('modeBackBtn').hidden = false;
+            });
+        }
+
         $('userList').addEventListener('click', async (e) => {
             const manage = e.target.closest('button[data-manage]');
             if (manage) { openSheet(manage.dataset.manage); return; }
@@ -371,9 +501,19 @@
             const picks = (lastData.picks && lastData.picks[sheetUser]) || [];
             $('sheetName').textContent = sheetUser;
             $('sheetDetail').textContent = !sent ? 'Joined, still picking.'
-                : picks.length ? 'Picks sent: ' + picks.join(', ')
-                : 'Picks sent: nothing picked.';
+                : picks.length ? (BY_TYPE ? 'Food types sent: ' : 'Picks sent: ') + picks.join(', ')
+                : (BY_TYPE ? 'Sent: only what everyone shares.' : 'Picks sent: nothing picked.');
             $('sheetRepick').hidden = !sent;
+            $('sheetNudge').hidden = sent;
+            if (!sent && $('sheetNudge').dataset.user !== sheetUser) {
+                // Only when the sheet opens for someone new: a "Copied" on the button must survive the polls.
+                $('sheetNudge').dataset.user = sheetUser;
+                delete $('sheetNudgeLabel').dataset.label;
+                $('sheetNudgeLabel').textContent = `Nudge ${sheetUser}`;
+                $('sheetNudgeHint').textContent = BB.canShare()
+                    ? 'Sends them a reminder through your messaging app, with the room link.'
+                    : 'Copies a reminder with the room link, to paste in a message to them.';
+            }
             $('sheetRemoveText').textContent = `Remove ${sheetUser}? Their picks are thrown away.`;
         }
 
@@ -405,6 +545,7 @@
             const sheet = $('guestSheet');
             if (!sheet) return;
             sheetUser = null;
+            delete $('sheetNudge').dataset.user;
             sheet.hidden = true;
             $('sheetScrim').hidden = true;
         }
@@ -431,6 +572,13 @@
                 } catch (_e) {
                     $('sheetMoveHow').textContent = moveLink;
                 }
+            });
+            $('sheetNudge').addEventListener('click', () => {
+                if (!sheetUser) return;
+                const what = BY_TYPE ? 'food types' : 'picks';
+                const text = `${sheetUser}, we're waiting on your ${what} for ${roomName}. Tap what you had so I can split the bill.`;
+                if (BB.canShare()) BB.share({ title: roomName, text, url: joinUrl() });
+                else BB.copyText(`${text} ${joinUrl()}`, $('sheetNudgeLabel'), 'Copied. Paste it to them');
             });
             $('sheetRemoveCancel').addEventListener('click', () => {
                 $('sheetRemoveAsk').hidden = false;
@@ -470,20 +618,6 @@
             const detail = $('finalizeDetail');
             const ready = !!data.can_finalize;
 
-            // Anyone still picking can be nudged through the phone's share sheet.
-            const nudge = $('nudgeBtn');
-            const slow = data.still_editing.filter(n => n !== currentUser);
-            nudge.hidden = ready || slow.length === 0;
-            if (slow.length) {
-                const who = slow.length <= 2 ? joinNames(slow) : `${slow.length} people`;
-                const label = BB.canShare() ? `Nudge ${who}` : `Copy a nudge for ${who}`;
-                if (nudge.dataset.shown !== label) {   // not every poll: a "Copied" flash must survive
-                    nudge.dataset.shown = label;
-                    nudge.dataset.label = label;
-                    nudge.textContent = label;
-                }
-            }
-
             // Ready: the split button and its warnings sit at the top. Not yet: the
             // status line and the greyed-out button stay down with the host controls.
             $('readyCard').hidden = !ready;
@@ -502,7 +636,13 @@
             // Unpicked dishes are worth knowing about early, so the same line shows in
             // whichever place the host is looking: below while waiting, beside the button once ready.
             let unclaimedText = '';
-            if (data.unclaimed_items.length) {
+            if (BY_TYPE) {
+                const missing = data.unpicked_types || [];
+                if (missing.length && data.submitted_count) {
+                    const total = missing.reduce((s, p) => s + p.total, 0);
+                    unclaimedText = `Nobody has picked ${joinNames(missing.map(p => p.label.toLowerCase()))} yet (${BBMoney.format(total, CURRENCY)}). Splitting now leaves it out, so ask around first.`;
+                }
+            } else if (data.unclaimed_items.length) {
                 const list = data.unclaimed_items.slice(0, 6).join(', ') + (data.unclaimed_items.length > 6 ? ' and more' : '');
                 unclaimedText = `Nobody has picked: ${list}. Unpicked dishes aren't charged to anyone, so ask around first.`;
             }
@@ -650,6 +790,12 @@
                     return;
                 }
 
+                if (data.split_mode && data.split_mode !== {{ room.split_mode | tojson }}) {
+                    // The host switched how the bill is split: this page was made for the old way.
+                    stopPolling();
+                    window.location.reload();
+                    return;
+                }
                 lastData = data;
                 const meSubmitted = data.submitted_users.includes(currentUser);
 
@@ -669,9 +815,15 @@
                 }
                 prevMeSubmitted = meSubmitted;
                 $('pickCard').style.display = meSubmitted ? 'none' : 'flex';
-                const sent = Array.isArray(data.my_picks);
-                $('sentCard').hidden = !(meSubmitted && sent);
-                if (sent) renderSent(data.my_picks, data.taken || {}, data.still_editing.length === 0 && data.waiting_for === 0);
+                if (BY_TYPE) {
+                    $('sentCard').hidden = !(meSubmitted && Array.isArray(data.my_types));
+                    if (meSubmitted && Array.isArray(data.my_types)) renderTypesSent(data);
+                    renderCoverage(data);
+                } else {
+                    const sent = Array.isArray(data.my_picks);
+                    $('sentCard').hidden = !(meSubmitted && sent);
+                    if (sent) renderSent(data.my_picks, data.taken || {}, data.still_editing.length === 0 && data.waiting_for === 0);
+                }
 
                 renderHeadline(data);
                 $('statusCount').textContent = `${data.submitted_count}/${data.expected_people} sent`;
@@ -713,17 +865,6 @@
                 text: `${hostName} invited you to ${roomName} on BillBear. Room code ${roomCode}.`,
                 url: joinUrl(),
             }));
-        }
-
-        const nudgeBtn = $('nudgeBtn');
-        if (nudgeBtn) {
-            nudgeBtn.addEventListener('click', () => {
-                const names = lastData ? lastData.still_editing.filter(n => n !== currentUser) : [];
-                if (!names.length) return;
-                const text = `${joinNames(names)}: we're waiting on your picks for ${roomName}. Tap what you had so I can split the bill.`;
-                if (BB.canShare()) BB.share({ title: roomName, text, url: joinUrl() });
-                else BB.copyText(`${text} ${joinUrl()}`, nudgeBtn);
-            });
         }
 
         const copyHostLinkBtn = $('copyHostLinkBtn');

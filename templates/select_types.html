@@ -1,0 +1,213 @@
+{% extends 'base.html' %}
+{% import '_ui.html' as ui %}
+{% set cur = room['currency'].code %}
+{% set food = pots | rejectattr('key', 'equalto', 'other') | list %}
+{% set shared = pots | selectattr('key', 'equalto', 'other') | first %}
+{% block title %}Tap what you had, {{ room['room_name'] }}{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('rooms.room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
+{% block head %}<style>form.loading .pots { opacity: 0.6; pointer-events: none; }</style>{% endblock %}
+{% block body_attrs %} data-live{% endblock %}
+{% block content %}
+<main class="stack has-paybar">
+    <div class="row">
+        <div class="bear-avatar">{{ ui.bear(66) }}</div>
+        <div class="grow">
+            <p class="eyebrow">{{ room['room_name'] }}, hosted by {{ room['host_name'] }}</p>
+            <h1 style="font-size: 1.75rem">{{ user_name }}, tap what you had</h1>
+        </div>
+    </div>
+    <p>{{ "You're" if user_name == room['host_name'] else room['host_name'] ~ ' is' }} splitting by food type. Tap every type you had any of. Each type is split equally between the people who tap it.</p>
+
+    <form method="POST" id="selectionForm" class="stack">
+        <input type="hidden" name="split_mode" value="types">
+        {% if food %}
+        <div class="pots" role="group" aria-label="Food types on the bill">
+            {% for pot in food %}
+            {% set on = pot.key in (pre_selected or []) %}
+            <label class="tile pot{% if on %} is-on{% endif %}" for="type_{{ pot.key }}" data-type="{{ pot.key }}" data-total="{{ pot.total }}">
+                <input type="checkbox" class="sr-only" id="type_{{ pot.key }}" name="selected_types" value="{{ pot.key }}"{% if on %} checked{% endif %}>
+                <div class="tear tear--top"></div>
+                <div class="pot__paper">
+                    <div class="pot__head">
+                        {{ ui.type_mark(pot.key, 24) }}
+                        <span class="grow">
+                            <span class="pot__name">{{ pot.label }}</span>
+                            <span class="pot__meta" style="display: block; margin-top: 2px">{{ pot.dishes | length }} {{ 'dish' if pot.dishes | length == 1 else 'dishes' }}, <b>{{ pot.total | money(cur) }}</b>. <span class="js-pickers" data-type="{{ pot.key }}"></span></span>
+                        </span>
+                        {{ ui.paw(on) }}
+                    </div>
+                </div>
+                <div class="tear"></div>
+            </label>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice">No dish on the bill has a food type yet. Ask {{ room['host_name'] }} to check the bill.</div>
+        {% endif %}
+
+        {% if shared %}
+        <div class="everyone">
+            {{ ui.everyone_mark(20) }}
+            <span><b>Everyone shares</b> {{ shared.dishes | map(attribute='name') | join(', ') }} ({{ shared.total | money(cur) }}). You don't need to tap it.</span>
+        </div>
+        {% endif %}
+
+        <details class="fold outline-box">
+            <summary>What's in each type</summary>
+            <div class="stack" style="gap: 10px; padding-top: 8px">
+                {% for pot in pots %}
+                <div class="my-pot">
+                    <div class="my-pot__head">{{ ui.type_mark(pot.key) }}{{ pot.label }}</div>
+                    <ul>{% for dish in pot.dishes %}<li><span>{{ dish.name }}{% if dish.quantity > 1 %} ×{{ dish.quantity }}{% endif %}</span><span>{{ dish.price }}</span></li>{% endfor %}</ul>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+
+        <input type="hidden" name="submission_id" id="submission_id" value="">
+        <div id="submitStatus" class="status-line center" aria-live="polite"></div>
+
+        <div class="paybar">
+            <div>
+                <div class="paybar__count" id="selectedCount">No food types, before tax</div>
+                <div class="paybar__total" id="selectedTotal">{{ 0 | money(cur) }}</div>
+            </div>
+            <button type="submit" class="btn" id="submitBtn">Send my food types</button>
+        </div>
+    </form>
+</main>
+{% endblock %}
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/money.js') }}"></script>
+    <script>
+        const CURRENCY = {{ room['currency'] | tojson }};
+        const ROOM_CODE = {{ room_code | tojson }};
+        const USER_NAME = {{ user_name | tojson }};
+        const SHARED_TOTAL = {{ (shared.total if shared else 0) | tojson }};
+        const form = document.getElementById('selectionForm');
+        const boxes = () => Array.from(document.querySelectorAll('input[name="selected_types"]'));
+        let pickers = {};      // type -> people who have sent it (not me: I haven't sent yet)
+        let sentCount = 0;
+
+        // Roughly what I'd pay before tax: each type I tap shared with the people who
+        // tapped it already, plus my part of what everyone shares.
+        function updateSelection() {
+            let sum = 0;
+            boxes().forEach(box => {
+                const tile = box.closest('.tile');
+                tile.classList.toggle('is-on', box.checked);
+                const paw = tile.querySelector('.paw');
+                paw.classList.toggle('paw--empty', !box.checked);
+                if (box.checked) sum += (parseFloat(tile.dataset.total) || 0) / ((pickers[box.value] || 0) + 1);
+            });
+            sum += SHARED_TOTAL / (sentCount + 1);
+            const n = boxes().filter(b => b.checked).length;
+            document.getElementById('selectedCount').textContent =
+                n ? `${n} food type${n === 1 ? '' : 's'}, about, before tax` : 'No food types, before tax';
+            document.getElementById('selectedTotal').textContent = BBMoney.format(sum, CURRENCY);
+            document.getElementById('submitBtn').textContent = n ? 'Send my food types' : 'Send: only what everyone shares';
+        }
+
+        async function refreshPickers() {
+            if (document.hidden) return;
+            try {
+                const resp = await fetch(`/room/${ROOM_CODE}/status`, {
+                    credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' },
+                });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (data.split_mode && data.split_mode !== 'types') {
+                    setStatus('The host changed how this bill is split. Reload the page to carry on.', 'error');
+                    return;
+                }
+                pickers = data.type_pickers || {};
+                sentCount = data.submitted_count || 0;
+                document.querySelectorAll('.js-pickers').forEach(el => {
+                    const n = pickers[el.dataset.type] || 0;
+                    el.textContent = n ? `${n} ${n === 1 ? 'person' : 'people'} so far.` : 'Nobody yet.';
+                });
+                updateSelection();
+            } catch (_e) { /* offline: keep what is shown */ }
+        }
+
+        /* Sending: one submission id per tab, so a retry after a lost response isn't sent twice. */
+        const sidKey = `bb_submission:${ROOM_CODE}:${USER_NAME}`;
+        function ensureSubmissionId() {
+            let sid = null;
+            try { sid = sessionStorage.getItem(sidKey); } catch (_e) {}
+            if (!sid) {
+                sid = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'sid-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+                try { sessionStorage.setItem(sidKey, sid); } catch (_e) {}
+            }
+            document.getElementById('submission_id').value = sid;
+            return sid;
+        }
+        function clearSubmissionId() { try { sessionStorage.removeItem(sidKey); } catch (_e) {} }
+
+        function setStatus(text, type) {
+            const el = document.getElementById('submitStatus');
+            el.textContent = text || '';
+            el.classList.toggle('error', type === 'error');
+            el.classList.toggle('success', type === 'success');
+        }
+
+        function setLoading(on) {
+            form.classList.toggle('loading', on);
+            document.getElementById('submitBtn').disabled = on;
+        }
+
+        async function savedAnyway(sid) {
+            try {
+                const resp = await fetch(`/api/room/${ROOM_CODE}/my-status`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } });
+                const my = resp.ok ? await resp.json() : null;
+                return my && my.submitted && my.submission_id === sid ? my.redirect : null;
+            } catch (_e) { return null; }
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!boxes().some(b => b.checked)
+                && !confirm("You haven't tapped a food type, so you'll only pay your part of what everyone shares. Send anyway?")) {
+                return;
+            }
+            const sid = ensureSubmissionId();
+            setLoading(true);
+            setStatus('Sending your food types…');
+            try {
+                const resp = await fetch(window.location.pathname, {
+                    method: 'POST', body: new FormData(form), credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'fetch' },
+                });
+                let json = null;
+                try { json = await resp.json(); } catch (_e) {}
+                if (resp.ok && json && json.status === 'success') {
+                    clearSubmissionId();
+                    window.location.replace(json.redirect);
+                    return;
+                }
+                if (json && json.code === 'MODE_CHANGED') {
+                    setLoading(false);
+                    setStatus(json.message, 'error');
+                    return;
+                }
+                const landed = await savedAnyway(sid);
+                if (landed) { clearSubmissionId(); window.location.replace(landed); return; }
+                setLoading(false);
+                setStatus((json && json.message) || `Could not send your food types (HTTP ${resp.status}). Tap Send to try again.`, 'error');
+            } catch (_netErr) {
+                setStatus('Connection dropped. Checking whether your food types were saved…');
+                const landed = await savedAnyway(sid);
+                if (landed) { clearSubmissionId(); window.location.replace(landed); return; }
+                setLoading(false);
+                setStatus('Could not reach the server. Check your connection and tap Send again.', 'error');
+            }
+        });
+
+        form.addEventListener('change', updateSelection);
+        ensureSubmissionId();
+        updateSelection();
+        refreshPickers();
+        setInterval(refreshPickers, 5000);
+        document.addEventListener('visibilitychange', refreshPickers);
+    </script>
+{% endblock %}

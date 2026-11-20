@@ -13,6 +13,7 @@ from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Iterable, List
 
+from billbear.bill.food_types import FOOD_TYPES, TYPES, clean_types, present_types, split_mode
 from billbear.bill.money import format_money, get_currency
 
 
@@ -92,6 +93,24 @@ def assemble_room(
             if several and was and int(was) > held:
                 lowered_by_pid[claim["participant_id"]][claim["item_id"]] = int(was)
 
+    # Split by food type: what a person tapped stands in for their claims. A type
+    # counts as sharing every dish of it (a several-of dish as "sharing", 0), and
+    # the dishes typed "other" are everyone's. Claims left over from splitting
+    # dish by dish stay in the table, unused, in case the host switches back.
+    mode = split_mode(room_row.get("split_mode"))
+    present = present_types(items)
+    types_by_pid: Dict[int, List[str]] = {}
+    for p in participants:
+        types_by_pid[p["id"]] = clean_types(p.get("categories") or [], present)
+    if mode == TYPES:
+        claims_by_pid = defaultdict(dict)
+        lowered_by_pid = defaultdict(dict)
+        for p in participants:
+            mine = set(types_by_pid[p["id"]])
+            for item in items:
+                if item["category"] in mine or item["category"] not in FOOD_TYPES:
+                    claims_by_pid[p["id"]][item["id"]] = 0 if item["quantity"] > 1 else 1
+
     position_by_id = {item["id"]: idx for idx, item in enumerate(items)}
     host = next((p for p in participants if p["is_host"]), None)
 
@@ -118,6 +137,8 @@ def assemble_room(
             "claim_portions": {i: mine[i] for i in ids},
             # Dishes where the host's edit lowered this person's claim: {item id: what it was}.
             "claim_lowered": dict(lowered_by_pid.get(p["id"], {})),
+            # Food types tapped (split by type), kept to the ones the bill has.
+            "categories": types_by_pid[p["id"]],
         })
 
     claimed_by_submitted = {i for p in people if p["submitted"] for i in p["claim_ids"]}
@@ -127,7 +148,8 @@ def assemble_room(
     # units claimed, or 0 for someone sharing whatever is left. `taken` also
     # counts people who reopened their picks: what they last sent stays on hold
     # until they send again. `sent` is only what is currently submitted.
-    several_ids = {item["id"] for item in items if item["quantity"] > 1}
+    # Nobody claims units when splitting by type: everyone shares the whole dish.
+    several_ids = {item["id"] for item in items if item["quantity"] > 1} if mode != TYPES else set()
     taken: Dict[int, List[Dict[str, Any]]] = {item_id: [] for item_id in several_ids}
     sent: Dict[int, List[Dict[str, Any]]] = {item_id: [] for item_id in several_ids}
     for p in people:
@@ -167,6 +189,9 @@ def assemble_room(
 
     return {
         "code": room_row["code"],
+        # "items" (dish by dish), "types" (everyone taps food types) or "counts" (rate card).
+        "split_mode": mode,
+        "type_counts": room_row.get("type_counts") if isinstance(room_row.get("type_counts"), dict) else {},
         "room_name": room_row["room_name"],
         "host_name": host["name"] if host else "",
         "host_participant_id": host["id"] if host else None,

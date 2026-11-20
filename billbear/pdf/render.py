@@ -9,6 +9,7 @@ from io import BytesIO
 from flask import make_response, render_template
 
 from billbear.bill.audit import audit_bill
+from billbear.bill.food_types import TYPES, pot_lines
 from billbear.bill.split import calculate_bill_split
 from billbear.config import on_vercel, STATIC_DIR
 from billbear.pdf.text import families_in, FONT_DIR, font_face_css, font_path, install_shaping
@@ -107,28 +108,15 @@ def pdf_bytes(room: dict, room_code: str) -> tuple:
     return data, False
 
 
-def pdf_response(room: dict, data: bytes):
+def pdf_response(room: dict, data: bytes, suffix: str = "bill_split"):
     response = make_response(data)
     response.headers["Content-Type"] = "application/pdf"
-    response.headers["Content-Disposition"] = f'attachment; filename="{_safe_filename(room["room_name"])}_bill_split.pdf"'
+    response.headers["Content-Disposition"] = f'attachment; filename="{_safe_filename(room["room_name"])}_{suffix}.pdf"'
     return response
 
 
-def render_pdf(room: dict, room_code: str) -> bytes:
-    bill_split = calculate_bill_split(room)
-    all_square = all(w.get("severity") in ("ok", "note") for w in audit_bill(room, bill_split))
+def _html_to_pdf(html: str) -> bytes:
     install_shaping()
-    html = render_template(
-        "results_pdf.html",
-        room=room,
-        room_code=room_code,
-        bill_split=bill_split,
-        all_square=all_square,
-        # When the bill was split (in the server's time zone, as before), not when
-        # this copy was made: every download of one split is the same file.
-        current_date=room["finalized_at"].astimezone() if room.get("finalized_at") else datetime.now(),
-        font_faces=_pdf_fonts(room, bill_split),
-    )
     buf = BytesIO()
     if WEASYPRINT_AVAILABLE and not on_vercel():
         from pathlib import Path
@@ -143,3 +131,36 @@ def render_pdf(room: dict, room_code: str) -> bytes:
     else:
         raise RuntimeError("No PDF library")
     return buf.getvalue()
+
+
+def render_rate_card_pdf(room: dict, card: dict) -> bytes:
+    """A rate card (split by food type, host's counts) as a PDF. Not cached: the counts can change."""
+    texts = [room["room_name"], room["host_name"]] + [item["name"] for item in room["items"]]
+    html = render_template(
+        "rate_card_pdf.html",
+        room=room,
+        room_code=room["code"],
+        card=card,
+        current_date=datetime.now(),
+        font_faces=font_face_css(families_in(texts)),
+    )
+    return _html_to_pdf(html)
+
+
+def render_pdf(room: dict, room_code: str) -> bytes:
+    bill_split = calculate_bill_split(room)
+    all_square = all(w.get("severity") in ("ok", "note") for w in audit_bill(room, bill_split))
+    html = render_template(
+        "results_pdf.html",
+        room=room,
+        room_code=room_code,
+        bill_split=bill_split,
+        # Split by food type: each person's lines are their pots, not every dish.
+        pots=pot_lines(room, bill_split) if room.get("split_mode") == TYPES else None,
+        all_square=all_square,
+        # When the bill was split (in the server's time zone, as before), not when
+        # this copy was made: every download of one split is the same file.
+        current_date=room["finalized_at"].astimezone() if room.get("finalized_at") else datetime.now(),
+        font_faces=_pdf_fonts(room, bill_split),
+    )
+    return _html_to_pdf(html)

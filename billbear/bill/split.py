@@ -1,8 +1,8 @@
 import math
 from typing import Any, Dict, List
 
-from .bill_totals import CHARGE, DISCOUNT, read_bill
-from .money import allocate, amount_or_zero, from_units, to_units
+from billbear.bill.totals import CHARGE, DISCOUNT, read_bill
+from billbear.bill.money import allocate, amount_or_zero, from_units, to_units
 
 
 def item_amount(item: Dict[str, Any]) -> float:

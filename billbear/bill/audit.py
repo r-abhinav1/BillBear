@@ -7,9 +7,9 @@ group collectively didn't assign every item to someone.
 """
 from typing import Any, Dict, List
 
-from .bill_split import item_amount
-from .bill_totals import read_bill
-from .money import format_money
+from billbear.bill.split import item_amount
+from billbear.bill.totals import read_bill
+from billbear.bill.money import format_money
 
 
 def round_off_tolerance(currency) -> float:

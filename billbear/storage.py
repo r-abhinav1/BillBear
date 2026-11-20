@@ -18,12 +18,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import psycopg
 from psycopg.types.json import Jsonb
 
-import db
-from utils.bill_totals import bill_signature, legacy_field_names
-from utils.portions import fit_claims
-from utils.room_assembler import assemble_room
-from utils.session import hash_secret, issue_recovery_token, issue_user_id, secrets_match
-from utils.validation import name_key
+from billbear import db
+from billbear.bill.totals import bill_signature, legacy_field_names
+from billbear.bill.portions import fit_claims
+from billbear.bill.assembler import assemble_room
+from billbear.web.session import hash_secret, issue_recovery_token, issue_user_id, secrets_match
+from billbear.bill.validation import name_key
 
 # Unambiguous alphabet: no 0/O, 1/I/L.
 ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -218,7 +218,7 @@ def _fit_held_claims(cur, code: str, old_quantity: Optional[Dict[int, int]] = No
     two people can each hold a claim that fits alone but not together, and each
     is then blocked by the other's: neither can send until one gives way by
     hand. Trim them here instead, in the order people joined
-    (utils.portions.fit_claims).
+    (billbear.bill.portions.fit_claims).
 
     A trimmed claim remembers what the person last sent (`lowered_from`), and
     fitting always starts from that, not from the trimmed value. So a host who

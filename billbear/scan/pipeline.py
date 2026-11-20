@@ -13,8 +13,8 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import receipt_llm
-from .receipt_contracts import normalize_receipt_payload
+from billbear.scan import llm as receipt_llm
+from billbear.scan.contracts import normalize_receipt_payload
 
 log = logging.getLogger("billbear.scan")
 

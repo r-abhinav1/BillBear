@@ -23,7 +23,7 @@
     <section class="receipt">
         <div class="paper paper--tight">
             {% for t in topics %}
-            <a class="topic" href="{{ url_for('help_topic', topic=t.slug) }}">
+            <a class="topic" href="{{ url_for('pages.help_topic', topic=t.slug) }}">
                 <span class="topic__num">{{ loop.index }}</span>
                 <span class="grow"><b>{{ t.title }}</b><span>{{ t.blurb }}</span></span>
                 {{ ui.icon('back', 18) }}
@@ -33,7 +33,7 @@
         <div class="tear"></div>
     </section>
 
-    <a class="nextup" href="{{ url_for('help_topic', topic=topics[0].slug) }}">
+    <a class="nextup" href="{{ url_for('pages.help_topic', topic=topics[0].slug) }}">
         <span class="nextup__text"><span class="nextup__kicker">Start here</span><b>{{ topics[0].title }}</b><span>{{ topics[0].blurb }}</span></span>
         <span class="nextup__paw">{{ ui.paw_svg() }}</span>
     </a>

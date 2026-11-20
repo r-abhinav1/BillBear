@@ -19,7 +19,7 @@ import unicodedata
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional
 
-from .money import Currency, amount_or_zero, get_currency, parse_amount, parse_money, to_minor
+from billbear.bill.money import Currency, amount_or_zero, get_currency, parse_amount, parse_money, to_minor
 
 CHARGE = "charge"
 DISCOUNT = "discount"

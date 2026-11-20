@@ -7,7 +7,7 @@
     <div>
         <div class="bear-peek" style="width: 132px; height: 84px; margin-left: 24px">{{ ui.bear(132) }}</div>
         <section class="receipt">
-            <form class="paper stack" method="POST" action="{{ url_for('host_recover', room_code=room_code) }}">
+            <form class="paper stack" method="POST" action="{{ url_for('join.host_recover', room_code=room_code) }}">
                 <p>Host controls for <strong>{{ room.room_name }}</strong> (<span class="mono">{{ room_code }}</span>) will move to this device. The previous host device loses them.</p>
                 <input type="hidden" name="k" value="{{ token }}">
                 <button type="submit" class="btn btn--primary btn--block">Use this device as host</button>

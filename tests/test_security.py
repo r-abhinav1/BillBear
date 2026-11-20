@@ -34,7 +34,7 @@ def test_cannot_submit_as_someone_else():
 
 def test_cookie_name_spoofing_is_ignored():
     """A validly-signed cookie only proves the uid; the name inside it is not trusted."""
-    from utils.session import make_session_token
+    from billbear.web.session import make_session_token
 
     code, _host, bob = _guest_room()
     stranger = new_client()
@@ -193,9 +193,7 @@ def test_scan_requires_ticket(monkeypatch):
 
 
 def test_scan_success_with_ticket(monkeypatch):
-    import app as app_module
-
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", lambda b64, mime: {
         "items": [{"name": "Tea <script>", "price": "₹30"}], "total": "₹30.00",
     })
     c = new_client()
@@ -212,10 +210,9 @@ def test_scan_success_with_ticket(monkeypatch):
 
 def test_a_scan_with_more_dishes_than_a_bill_can_hold_keeps_the_first_200(monkeypatch):
     # It used to be a 500 after the paid model call had already been made.
-    import app as app_module
-    from utils.validation import MAX_ITEMS
+    from billbear.bill.validation import MAX_ITEMS
 
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", lambda b64, mime: {
         "items": [{"name": f"Line {n}", "price": "10"} for n in range(MAX_ITEMS + 50)],
     })
     c = new_client()
@@ -229,9 +226,7 @@ def test_a_scan_with_more_dishes_than_a_bill_can_hold_keeps_the_first_200(monkey
 
 def test_scan_cannot_confirm_its_own_currency(monkeypatch):
     """Text on the photo could make the model claim the currency is settled; only the host's tap counts."""
-    import app as app_module
-
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", lambda b64, mime: {
         "items": [{"name": "Ramen", "price": 1200}],
         "currency": {"code": "JPY", "confirmed": True, "evidence": ["symbol"]},
     })
@@ -256,13 +251,12 @@ def test_scan_rejects_oversize():
 
 
 def test_scan_vision_failure_is_502(monkeypatch):
-    import app as app_module
-    from utils.receipt_pipeline import VisionFailed
+    from billbear.scan.pipeline import VisionFailed
 
     def boom(b64, mime):
         raise VisionFailed("nope")
 
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", boom)
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", boom)
     c = new_client()
     c.get("/create")
     resp = _scan(c, _jpeg_bytes())
@@ -270,10 +264,8 @@ def test_scan_vision_failure_is_502(monkeypatch):
 
 
 def test_scan_rate_limited(monkeypatch):
-    import app as app_module
-
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
-    from utils.security import RATE_LIMITS
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
+    from billbear.web.security import RATE_LIMITS
 
     limit = RATE_LIMITS["scan"][0]
     c = new_client()
@@ -284,13 +276,13 @@ def test_scan_rate_limited(monkeypatch):
 
 def test_one_network_gets_a_small_share_of_the_days_scans():
     # One IP must not be able to use up the site's whole daily allowance.
-    from utils.security import RATE_LIMITS
+    from billbear.web.security import RATE_LIMITS
 
     assert RATE_LIMITS["scan"][0] <= RATE_LIMITS["scan_day"][0] <= 10
 
 
 def test_secret_key_fails_closed_on_vercel(monkeypatch):
-    import utils.session as session_module
+    import billbear.web.session as session_module
 
     monkeypatch.setenv("VERCEL", "1")
     monkeypatch.setenv("SECRET_KEY", "dev-secret-change-in-production")
@@ -314,10 +306,8 @@ def test_cron_writes_heartbeat_each_run():
 
 
 def test_scan_global_daily_cap(monkeypatch):
-    import app as app_module
-
     monkeypatch.setenv("SCAN_DAILY_CAP", "2")
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
     a, b = new_client(), new_client()
     a.get("/create")
     b.get("/create")
@@ -358,12 +348,10 @@ def test_proxy_https_origin_accepted_when_trusting_proxy(monkeypatch):
 
 def test_junk_uploads_do_not_use_up_the_global_scan_cap(monkeypatch):
     """Only a real image headed for the paid vision API may spend a slot of the daily allowance."""
-    import app as app_module
-
     monkeypatch.setenv("SCAN_DAILY_CAP", "2")
     calls = []
     monkeypatch.setattr(
-        app_module, "extract_receipt_from_vision",
+        "billbear.routes.scan.extract_receipt_from_vision",
         lambda b64, mime: calls.append(1) or {"items": [{"name": "A", "price": "1"}]},
     )
     c = new_client()
@@ -377,10 +365,8 @@ def test_junk_uploads_do_not_use_up_the_global_scan_cap(monkeypatch):
 
 
 def test_exhausted_day_turns_callers_away_before_decoding(monkeypatch):
-    import app as app_module
-
     monkeypatch.setenv("SCAN_DAILY_CAP", "1")
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", lambda b64, mime: {"items": [{"name": "A", "price": "1"}]})
     c = new_client()
     c.get("/create")
     assert _scan(c, _jpeg_bytes()).status_code == 200
@@ -388,7 +374,7 @@ def test_exhausted_day_turns_callers_away_before_decoding(monkeypatch):
     def must_not_run(raw):
         raise AssertionError("image was decoded after the daily cap was reached")
 
-    monkeypatch.setattr(app_module, "prepare_receipt_image", must_not_run)
+    monkeypatch.setattr("billbear.routes.scan.prepare_receipt_image", must_not_run)
     resp = _scan(c, _jpeg_bytes())
     assert resp.status_code == 429 and resp.get_json()["code"] == "DAILY_CAP"
 
@@ -407,7 +393,7 @@ def test_room_members_are_not_locked_out_by_someone_elses_bad_guesses():
 
 
 def test_stale_tab_on_an_expired_room_does_not_lock_the_network():
-    from utils.session import make_session_token
+    from billbear.web.session import make_session_token
 
     stale = new_client()
     stale.set_cookie("bb_session_ABCDEF", make_session_token("ABCDEF", "uid-1", "Bob"))
@@ -424,14 +410,12 @@ def test_host_token_guessing_stays_throttled_even_for_a_member():
 
 
 def test_pdf_download_is_throttled(monkeypatch):
-    import app as app_module
-
     host = new_client()
     code = make_room(host, num_people=1)
     submit(host, code, "Alice", ["Pasta"])
     post_json(host, f"/room/{code}/finalize")
-    monkeypatch.setattr(app_module, "PDF_AVAILABLE", True)
-    monkeypatch.setattr(app_module, "render_pdf", lambda room, c: b"%PDF")
+    monkeypatch.setattr("billbear.pdf.render.PDF_AVAILABLE", True)
+    monkeypatch.setattr("billbear.pdf.render.render_pdf", lambda room, c: b"%PDF")
     statuses = [host.get(f"/room/{code}/download").status_code for _ in range(21)]
     assert statuses[:20] == [200] * 20
     assert statuses[20] == 429
@@ -447,7 +431,7 @@ def test_pdf_download_is_throttled(monkeypatch):
 
 def _bot_check_on(monkeypatch, good=("good",)):
     """Turnstile switched on, with a stand-in Cloudflare that accepts only the `good` tokens."""
-    import utils.security as security
+    import billbear.web.security as security
 
     monkeypatch.setenv("TURNSTILE_SECRET_KEY", "test-secret")
     monkeypatch.setenv("TURNSTILE_SITE_KEY", "test-site")
@@ -471,9 +455,7 @@ def _bot_check_on(monkeypatch, good=("good",)):
 
 
 def _stub_vision(monkeypatch):
-    import app as app_module
-
-    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {
+    monkeypatch.setattr("billbear.routes.scan.extract_receipt_from_vision", lambda b64, mime: {
         "items": [{"name": "Tea", "price": "₹30"}], "total": "₹30.00",
     })
 

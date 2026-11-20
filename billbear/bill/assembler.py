@@ -1,7 +1,7 @@
 """
 Pure rows -> room-dict adapter.
 
-`utils/bill_split.py`, `utils/bill_audit.py` and the templates were written
+`bill/split.py`, `bill/audit.py` and the templates were written
 against the old Redis JSON blob (`users`, `selections`, `submitted_users`,
 `items`, `ocr_data`, ...). This module rebuilds that shape from normalized
 rows so those consumers keep working unchanged.
@@ -13,7 +13,7 @@ from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Iterable, List
 
-from .money import format_money, get_currency
+from billbear.bill.money import format_money, get_currency
 
 
 def each_label(price: Any, quantity: int, currency) -> str:

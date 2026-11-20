@@ -10,7 +10,7 @@ opens the results and downloads the PDF.
 
 The bot check and the per-network limits would stop a test from one machine
 within seconds, so the server lets requests through that carry the
-`LOAD_TEST_TOKEN` secret in an `X-Load-Test` header (`utils/security.py`). Scans
+`LOAD_TEST_TOKEN` secret in an `X-Load-Test` header (`billbear/web/security.py`). Scans
 keep every limit. The secret is in `.env`; set the same value on the server only
 for a test, and delete it straight after.
 

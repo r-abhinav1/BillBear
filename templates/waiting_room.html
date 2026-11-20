@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% import '_ui.html' as ui %}
 {% block title %}Waiting room, {{ room['room_name'] }}{% endblock %}
-{% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('rooms.room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
 {% block body_attrs %} data-live{% endblock %}
 {% block content %}
 <div id="hostNoticeBanner" class="banner" style="display: none" role="alert">
@@ -36,7 +36,7 @@
     <div class="notice stack" id="pickCard" {% if my_submitted %}style="display: none"{% endif %}>
         <strong>You haven't sent your picks yet.</strong>
         <span>Tap what you had so the bill can be split{% if is_host %}. You can't split it until yours are in too{% endif %}.</span>
-        <a class="btn btn--honey" href="{{ url_for('select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
+        <a class="btn btn--honey" href="{{ url_for('picks.select_items', room_code=room_code, user_name=user_name) }}">Pick my dishes</a>
     </div>
 
     {# What this person sent, laid out like the bill: diet mark, dish, quantity, shared or not. #}
@@ -95,7 +95,7 @@
         <p id="finalizeDetail" style="font-weight: 600">Checking…</p>
         <button type="button" class="btn btn--primary btn--block" id="finalizeWaitBtn" disabled>Split the bill</button>
         <div class="links">
-            <a class="textlink" href="{{ url_for('edit_items', room_code=room_code) }}">Edit dishes</a>
+            <a class="textlink" href="{{ url_for('rooms.edit_items', room_code=room_code) }}">Edit dishes</a>
         </div>
         {% if host_link %}
         <details class="fold outline-box" id="hostLinkBox">

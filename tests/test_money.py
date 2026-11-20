@@ -3,11 +3,11 @@ from decimal import Decimal
 
 import pytest
 
-from utils.bill_audit import audit_bill
-from utils.bill_split import calculate_bill_split
-from utils.bill_totals import bill_signature, clean_charges, read_bill
-from utils.money import TooManyDecimals, allocate, format_money, get_currency, parse_amount, to_minor
-from utils.receipt_contracts import normalize_receipt_payload
+from billbear.bill.audit import audit_bill
+from billbear.bill.split import calculate_bill_split
+from billbear.bill.totals import bill_signature, clean_charges, read_bill
+from billbear.bill.money import TooManyDecimals, allocate, format_money, get_currency, parse_amount, to_minor
+from billbear.scan.contracts import normalize_receipt_payload
 
 INR, JPY, CHF = get_currency("INR"), get_currency("JPY"), get_currency("CHF")
 

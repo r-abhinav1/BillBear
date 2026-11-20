@@ -469,9 +469,7 @@ def test_my_status_and_waiting_redirects():
 
 
 def test_qr_link_uses_lan_address_when_opened_via_localhost(monkeypatch):
-    import app as app_module
-
-    monkeypatch.setattr(app_module, "_lan_ip", lambda: "192.168.1.50")
+    monkeypatch.setattr("billbear.web.sharing._lan_ip", lambda: "192.168.1.50")
     monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
     host = new_client()
     code = make_room(host)
@@ -483,10 +481,8 @@ def test_qr_link_uses_lan_address_when_opened_via_localhost(monkeypatch):
 
 
 def test_share_links_prefer_ngrok_tunnel(monkeypatch):
-    import app as app_module
-
     monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
-    monkeypatch.setattr(app_module, "_ngrok_public_url", lambda: "https://abc.ngrok-free.app")
+    monkeypatch.setattr("billbear.web.sharing._ngrok_public_url", lambda: "https://abc.ngrok-free.app")
     host = new_client()
     code = make_room(host, num_people=1)
     assert f"https://abc.ngrok-free.app/join/{code}" in host.get(f"/room/{code}").get_data(as_text=True)
@@ -908,7 +904,7 @@ def _naan_room(people, quantity=2, price="90"):
 
 
 def _item_totals(code):
-    from utils.bill_split import calculate_bill_split
+    from billbear.bill.split import calculate_bill_split
 
     return {n: d["item_total"] for n, d in calculate_bill_split(room(code))["user_breakdown"].items()}
 
@@ -1015,11 +1011,11 @@ def test_reopened_picks_stay_on_hold_for_their_owner():
 
 
 def test_help_pages_link_through_in_order(client):
-    import app as app_module
+    from billbear.routes.pages import HELP_TOPICS
 
     index = client.get("/help")
     assert index.status_code == 200
-    slugs = [t["slug"] for t in app_module.HELP_TOPICS]
+    slugs = [t["slug"] for t in HELP_TOPICS]
     for position, slug in enumerate(slugs):
         page = client.get(f"/help/{slug}")
         assert page.status_code == 200, slug
@@ -1247,6 +1243,7 @@ def test_names_with_spaces_and_hindi_reach_the_pick_screen_on_vercel(monkeypatch
     from urllib.parse import quote
 
     import app as app_module
+    from billbear import DecodedPathInfo
 
     host = new_client()
     code = make_room(host, num_people=4)
@@ -1260,16 +1257,16 @@ def test_names_with_spaces_and_hindi_reach_the_pick_screen_on_vercel(monkeypatch
         resp = guest.get(encoded, environ_overrides=as_vercel)
         assert resp.status_code == 302 and resp.headers["Location"].endswith(encoded)   # redirects to itself
 
-        monkeypatch.setattr(app_module.app, "wsgi_app", app_module.DecodedPathInfo(app_module.app.wsgi_app))
+        monkeypatch.setattr(app_module.app, "wsgi_app", DecodedPathInfo(app_module.app.wsgi_app))
         assert guest.get(encoded, environ_overrides=as_vercel).status_code == 200
         monkeypatch.undo()
 
 
 def test_decoded_path_info_leaves_plain_paths_alone():
-    import app as app_module
+    from billbear import DecodedPathInfo
 
     seen = []
-    mw = app_module.DecodedPathInfo(lambda environ, start: seen.append(environ["PATH_INFO"]) or [])
+    mw = DecodedPathInfo(lambda environ, start: seen.append(environ["PATH_INFO"]) or [])
     mw({"PATH_INFO": "/room/AB12CD/user/Asha/select-items"}, None)
     mw({"PATH_INFO": "/room/AB12CD/user/%E0%A4%B0/x"}, None)
     assert seen[0] == "/room/AB12CD/user/Asha/select-items"
@@ -1277,12 +1274,12 @@ def test_decoded_path_info_leaves_plain_paths_alone():
 
 
 def test_pdf_is_rendered_once_per_split(monkeypatch):
-    import app as app_module
+    from billbear.pdf import render as pdf_render
 
     renders = []
-    real = app_module.render_pdf
-    monkeypatch.setattr(app_module, "render_pdf", lambda room, c: renders.append(room["finalized_at"]) or real(room, c))
-    app_module._PDF_CACHE.clear()
+    real = pdf_render.render_pdf
+    monkeypatch.setattr(pdf_render, "render_pdf", lambda room, c: renders.append(room["finalized_at"]) or real(room, c))
+    pdf_render._PDF_CACHE.clear()
     code, host, bob, cara = _full_room()
     for client, name in ((host, "Alice"), (bob, "Bob"), (cara, "Cara")):
         submit(client, code, name, ["Pasta"])

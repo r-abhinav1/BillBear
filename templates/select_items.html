@@ -2,7 +2,7 @@
 {% import '_ui.html' as ui %}
 {% set LABELS = {'veg': 'Veg', 'nonveg': 'Non-veg', 'egg': 'Egg', 'alcohol': 'Alcohol'} %}
 {% block title %}Tap what you had, {{ room['room_name'] }}{% endblock %}
-{% block topbar_left %}<a class="backlink" href="{{ url_for('room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('rooms.room_summary', room_code=room_code) }}">{{ ui.icon('back', 18) }} Room</a>{% endblock %}
 {% block head %}<style>form.loading .receipt { opacity: 0.6; pointer-events: none; }</style>{% endblock %}
 {% block body_attrs %} data-live{% endblock %}
 {% block content %}

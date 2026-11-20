@@ -1,5 +1,5 @@
 """Non-Latin names in the PDF: which font each run of text gets."""
-from utils.pdf_text import families_in, font_face_css, font_path, install_shaping, pdf_text, runs
+from billbear.pdf.text import families_in, font_face_css, font_path, install_shaping, pdf_text, runs
 
 
 def test_runs_split_by_script_and_keep_latin_in_helvetica():
@@ -31,7 +31,7 @@ def test_font_urls_only_reach_bundled_files():
 
 
 def test_every_bundled_font_file_exists():
-    from utils.pdf_text import SCRIPT_FONTS
+    from billbear.pdf.text import SCRIPT_FONTS
     import os
 
     for _family, filename, _ranges in SCRIPT_FONTS:

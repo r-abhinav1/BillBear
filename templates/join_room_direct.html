@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% import '_ui.html' as ui %}
 {% block title %}{% if room %}Join {{ room.room_name }}{% else %}Room not found{% endif %}, BillBear{% endblock %}
-{% block topbar_left %}<a class="backlink" href="{{ url_for('index') }}">{{ ui.icon('back', 18) }} Home</a>{% endblock %}
+{% block topbar_left %}<a class="backlink" href="{{ url_for('pages.index') }}">{{ ui.icon('back', 18) }} Home</a>{% endblock %}
 {% block content %}
 <main class="stack stack--lg">
 {% if not room %}
@@ -10,7 +10,7 @@
         <div class="paper paper--bitten stack">
             <h1>Bear ate this room</h1>
             <p>Room "{{ room_code }}" doesn't exist or has expired. {% if error %}{{ error }}{% else %}Check the code with your host.{% endif %}</p>
-            <a class="btn btn--primary btn--block" href="{{ url_for('join') }}">Try another code</a>
+            <a class="btn btn--primary btn--block" href="{{ url_for('join.join') }}">Try another code</a>
         </div>
         <div class="tear"></div>
     </section>

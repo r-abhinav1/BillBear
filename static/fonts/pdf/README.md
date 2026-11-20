@@ -3,7 +3,7 @@
 The PDF of the split is drawn with the PDF's built-in Helvetica, which only has
 Western European letters. These fonts print the rest: dish, people and charge
 names in Indian scripts, Sinhala, Thai, and Chinese, Japanese and Korean.
-`utils/pdf_text.py` decides which text uses which file; English text and
+`billbear/pdf/text.py` decides which text uses which file; English text and
 amounts stay in Helvetica.
 
 | File | Script | Licence |

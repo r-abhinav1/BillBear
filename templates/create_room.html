@@ -314,7 +314,7 @@
             return ['host_name', 'room_name', 'num_people'].every(id => document.getElementById(id).value.trim());
         }
 
-        // The same rules as the server (utils/validation.py), checked first so a
+        // The same rules as the server (billbear/bill/validation.py), checked first so a
         // refused name costs nothing. Returns a message, or '' when all is well.
         function detailsProblem() {
             if (!detailsFilled()) return 'Fill in your name, the occasion and how many people.';

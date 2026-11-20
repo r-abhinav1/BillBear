@@ -2,8 +2,8 @@
 import pytest
 
 from tests.conftest import app, join, make_room, needs_db, new_client
-from utils.observability import _scrub, capture, cron_monitor, enabled
-from utils.security import LOAD_TEST_HEADER
+from billbear.web.observability import _scrub, capture, cron_monitor, enabled
+from billbear.web.security import LOAD_TEST_HEADER
 
 
 def test_events_carry_no_names_bodies_cookies_or_ips():
@@ -43,7 +43,7 @@ def test_healthz_reports_the_database(client):
 
 @needs_db
 def test_load_test_pass_skips_network_limits_only_with_the_secret(monkeypatch):
-    import utils.security as security
+    import billbear.web.security as security
 
     monkeypatch.setitem(security.RATE_LIMITS, "join", (1, 600))
     code = make_room(new_client(), num_people=10)
@@ -64,7 +64,7 @@ def test_load_test_pass_skips_network_limits_only_with_the_secret(monkeypatch):
 
 @needs_db
 def test_load_test_pass_never_lifts_scan_limits(monkeypatch):
-    import utils.security as security
+    import billbear.web.security as security
     from tests.test_security import _jpeg_bytes, _scan
 
     token = "k6-" + "x" * 40
@@ -78,7 +78,7 @@ def test_load_test_pass_never_lifts_scan_limits(monkeypatch):
 
 
 def test_metrics_do_nothing_without_sentry():
-    from utils.observability import count, count_sampled, distribution, distribution_sampled
+    from billbear.web.observability import count, count_sampled, distribution, distribution_sampled
 
     count("scan.result", outcome="success")
     distribution("pdf.render", 12.0, "millisecond")
@@ -87,7 +87,7 @@ def test_metrics_do_nothing_without_sentry():
 
 
 def test_sampled_counts_are_scaled_so_totals_stay_right(monkeypatch):
-    import utils.observability as obs
+    import billbear.web.observability as obs
 
     sent = []
     monkeypatch.setattr(obs, "_enabled", True)
@@ -103,7 +103,7 @@ def test_sampled_counts_are_scaled_so_totals_stay_right(monkeypatch):
 def test_rare_metrics_flush_at_the_end_of_their_request(monkeypatch):
     import sentry_sdk
 
-    import utils.observability as obs
+    import billbear.web.observability as obs
     from tests.conftest import app
 
     flushed = []

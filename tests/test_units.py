@@ -5,14 +5,14 @@ from decimal import Decimal
 
 import pytest
 
-from utils import receipt_llm
-from utils.bill_audit import audit_bill
-from utils.bill_split import calculate_bill_split
-from utils.image_prep import ImageRejected, prepare_receipt_image
-from utils.receipt_pipeline import VisionFailed, VisionUnavailable, extract_receipt_from_vision
-from utils.money import get_currency
-from utils.room_assembler import assemble_room, each_label, unique_display_names
-from utils.validation import clean_items, normalize_person_name, parse_price
+from billbear.scan import llm as receipt_llm
+from billbear.bill.audit import audit_bill
+from billbear.bill.split import calculate_bill_split
+from billbear.scan.image_prep import ImageRejected, prepare_receipt_image
+from billbear.scan.pipeline import VisionFailed, VisionUnavailable, extract_receipt_from_vision
+from billbear.bill.money import get_currency
+from billbear.bill.assembler import assemble_room, each_label, unique_display_names
+from billbear.bill.validation import clean_items, normalize_person_name, parse_price
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -291,7 +291,7 @@ def test_audit_ignores_round_off_but_flags_real_gaps():
 
 
 def test_item_category_normalization():
-    from utils.receipt_contracts import normalize_item_category, normalize_receipt_payload
+    from billbear.scan.contracts import normalize_item_category, normalize_receipt_payload
 
     assert normalize_item_category("Non-Veg") == "nonveg"
     assert normalize_item_category(" ALCOHOLIC ") == "alcohol"
@@ -310,7 +310,7 @@ def test_item_category_normalization():
 
 
 def test_scan_prompt_asks_for_category():
-    from utils.receipt_rules import build_image_receipt_prompt
+    from billbear.scan.rules import build_image_receipt_prompt
 
     prompt = build_image_receipt_prompt()
     assert '"category":"[veg|nonveg|egg|alcohol|other]"' in prompt
@@ -325,15 +325,15 @@ def test_scan_prompt_asks_for_category():
     (None, 1), ("", 1), ("lots", 1), (0, 1), (True, 1), (500, 99),
 ])
 def test_quantity_normalization(raw, expected):
-    from utils.receipt_contracts import normalize_item_quantity
-    from utils.validation import normalize_quantity
+    from billbear.scan.contracts import normalize_item_quantity
+    from billbear.bill.validation import normalize_quantity
 
     assert normalize_quantity(raw) == expected
     assert normalize_item_quantity(raw) == expected
 
 
 def test_scan_prompt_asks_for_quantity():
-    from utils.receipt_rules import build_image_receipt_prompt
+    from billbear.scan.rules import build_image_receipt_prompt
 
     prompt = build_image_receipt_prompt()
     assert '"quantity":[whole number]' in prompt
@@ -480,7 +480,7 @@ def test_each_label_for_lines_the_bill_lists_several_of():
 
 
 def test_pick_rows_show_the_bill_order_and_shared_status():
-    from app import _pick_rows
+    from billbear.routes.rooms import _pick_rows
 
     room = {
         "items": [
@@ -516,7 +516,7 @@ def test_pick_rows_show_the_bill_order_and_shared_status():
     (1, [1, 1], [1, 1]),            # a single dish is shared, never counted in units
 ])
 def test_fit_claims(quantity, held, fitted):
-    from utils.portions import fit_claims
+    from billbear.bill.portions import fit_claims
 
     assert fit_claims(quantity, held) == fitted
     assert fit_claims(quantity, fitted) == fitted       # already valid: a second pass changes nothing

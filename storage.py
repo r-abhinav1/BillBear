@@ -209,7 +209,7 @@ def create_room(
     raise RoomError("CODE_EXHAUSTED", "Could not allocate a room code. Try again.", status=503)
 
 
-def _fit_held_claims(cur, code: str) -> None:
+def _fit_held_claims(cur, code: str, old_quantity: Optional[Dict[int, int]] = None) -> None:
     """
     Make the claims people hold fit the quantities the bill now lists.
 
@@ -218,11 +218,30 @@ def _fit_held_claims(cur, code: str) -> None:
     two people can each hold a claim that fits alone but not together, and each
     is then blocked by the other's: neither can send until one gives way by
     hand. Trim them here instead, in the order people joined
-    (utils.portions.fit_claims). Everyone is asked to confirm again after an
-    edit like this. A trimmed claim remembers what it was (`lowered_from`, the
-    earliest value if it is trimmed twice before they send) so their pick
-    screen can say what changed.
+    (utils.portions.fit_claims).
+
+    A trimmed claim remembers what the person last sent (`lowered_from`), and
+    fitting always starts from that, not from the trimmed value. So a host who
+    lowers a quantity by mistake and puts it back gives everyone their claim
+    back, a partial raise gives back what fits, and a second cut works from
+    what they sent. `lowered_from` stays only while the claim is still below
+    it, which is when their pick screen says what changed. Sending again
+    replaces the claim and clears it.
+
+    `old_quantity` is each dish's quantity before this edit. A dish listed
+    once is shared by whoever picked it, so when it becomes several-of, those
+    picks become "sharing" rather than one unit each, handed out by join order.
     """
+    old_quantity = old_quantity or {}
+    cur.execute("SELECT id, quantity FROM items WHERE room_code = %s", (code,))
+    became_several = [row["id"] for row in cur.fetchall() if row["quantity"] > 1 and old_quantity.get(row["id"]) == 1]
+    if became_several:
+        # A claim that still remembers a count came from when the dish was
+        # several-of; it is restored by the fitting below.
+        cur.execute(
+            "UPDATE claims SET portions = 0 WHERE item_id = ANY(%s) AND lowered_from IS NULL",
+            (became_several,),
+        )
     # A dish the bill lists once is shared equally; a claim never counts more than one.
     cur.execute(
         "UPDATE claims c SET portions = 1, lowered_from = COALESCE(c.lowered_from, c.portions) FROM items i"
@@ -230,7 +249,7 @@ def _fit_held_claims(cur, code: str) -> None:
         (code,),
     )
     cur.execute(
-        "SELECT c.participant_id, c.item_id, c.portions, i.quantity FROM claims c"
+        "SELECT c.participant_id, c.item_id, c.portions, c.lowered_from, i.quantity FROM claims c"
         " JOIN items i ON i.id = c.item_id JOIN participants p ON p.id = c.participant_id"
         " WHERE i.room_code = %s AND i.quantity > 1 ORDER BY c.item_id, p.joined_at, p.id",
         (code,),
@@ -239,13 +258,14 @@ def _fit_held_claims(cur, code: str) -> None:
     for row in cur.fetchall():
         by_item.setdefault(row["item_id"], []).append(row)
     for item_id, held in by_item.items():
-        fitted = fit_claims(held[0]["quantity"], [row["portions"] for row in held])
-        for row, portions in zip(held, fitted):
-            if portions != row["portions"]:
+        sent = [max(row["portions"], row["lowered_from"] or 0) for row in held]
+        fitted = fit_claims(held[0]["quantity"], sent)
+        for row, wanted, portions in zip(held, sent, fitted):
+            lowered_from = wanted if portions < wanted else None
+            if (portions, lowered_from) != (row["portions"], row["lowered_from"]):
                 cur.execute(
-                    "UPDATE claims SET portions = %s, lowered_from = COALESCE(lowered_from, %s)"
-                    " WHERE participant_id = %s AND item_id = %s",
-                    (portions, row["portions"], row["participant_id"], item_id),
+                    "UPDATE claims SET portions = %s, lowered_from = %s WHERE participant_id = %s AND item_id = %s",
+                    (portions, lowered_from, row["participant_id"], item_id),
                 )
 
 
@@ -255,8 +275,9 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
     insert new rows, delete removed rows (their claims cascade). If anything
     changed and anyone had submitted, every submission is reset so people
     reconfirm against the new prices (their picks stay as a draft). Changing
-    only an item's category (veg/nonveg/...) does not reset anyone; changing
-    its quantity does, because it changes how many portions can be claimed.
+    only an item's category (veg/nonveg/...) does not reset anyone. Changing
+    only quantities resets just the people holding those dishes: the dish
+    costs the same in total, but how many portions can be claimed changed.
     Returns True if submissions were reset.
     """
     code = normalize_code(code)
@@ -290,9 +311,20 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
         if removed:
             cur.execute("DELETE FROM items WHERE id = ANY(%s)", (removed,))
 
-        _fit_held_claims(cur, code)
+        _fit_held_claims(cur, code, {item_id: row["quantity"] for item_id, row in existing.items()})
 
         after = sorted((pos, it["name"], it["price"], it.get("quantity") or 1) for pos, it in enumerate(items))
+        # Dishes kept with the same name and price but a new quantity. If that is
+        # all that changed, the dish costs the same in total, so nobody else's
+        # share (or tax share) moves: only the people holding it confirm again.
+        requantified = [
+            it["id"] for it in items
+            if it.get("id") in existing and (it.get("quantity") or 1) != existing[it["id"]]["quantity"]
+        ]
+        unchanged_but_quantity = (
+            sorted(r[:3] for r in before) == sorted(r[:3] for r in after)
+            and len(kept_ids) == len(existing) == len(items)
+        )
         new_ocr = dict(room_row["ocr_data"] or {})
         if "charges" in totals:
             # The rows replace the fixed fields an older room may still have.
@@ -305,9 +337,18 @@ def replace_items(code: str, items: List[dict], totals: Dict[str, Any]) -> bool:
         # being saved in the newer shape.
         changed = before != after or bill_signature(new_ocr) != bill_signature(room_row["ocr_data"] or {})
 
+        signature_same = bill_signature(new_ocr) == bill_signature(room_row["ocr_data"] or {})
         cur.execute("UPDATE rooms SET ocr_data = %s WHERE code = %s", (Jsonb(new_ocr), code))
         reset = False
-        if changed:
+        if changed and unchanged_but_quantity and signature_same and requantified:
+            cur.execute(
+                "UPDATE participants SET submitted_at = NULL, submission_id = NULL"
+                " WHERE room_code = %s AND submitted_at IS NOT NULL"
+                " AND id IN (SELECT participant_id FROM claims WHERE item_id = ANY(%s))",
+                (code, requantified),
+            )
+            reset = cur.rowcount > 0
+        elif changed:
             cur.execute(
                 "UPDATE participants SET submitted_at = NULL, submission_id = NULL"
                 " WHERE room_code = %s AND submitted_at IS NOT NULL",

@@ -210,6 +210,23 @@ def test_scan_success_with_ticket(monkeypatch):
     assert receipt["currency"]["code"] == "INR" and receipt["currency"]["confirmed"] is False
 
 
+def test_a_scan_with_more_dishes_than_a_bill_can_hold_keeps_the_first_200(monkeypatch):
+    # It used to be a 500 after the paid model call had already been made.
+    import app as app_module
+    from utils.validation import MAX_ITEMS
+
+    monkeypatch.setattr(app_module, "extract_receipt_from_vision", lambda b64, mime: {
+        "items": [{"name": f"Line {n}", "price": "10"} for n in range(MAX_ITEMS + 50)],
+    })
+    c = new_client()
+    c.get("/create")
+    resp = _scan(c, _jpeg_bytes())
+    assert resp.status_code == 200, resp.get_json()
+    receipt = resp.get_json()["receipt"]
+    assert len(receipt["items"]) == MAX_ITEMS and receipt["items"][-1]["name"] == f"Line {MAX_ITEMS - 1}"
+    assert receipt["dropped"] == 50
+
+
 def test_scan_cannot_confirm_its_own_currency(monkeypatch):
     """Text on the photo could make the model claim the currency is settled; only the host's tap counts."""
     import app as app_module

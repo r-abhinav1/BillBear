@@ -79,7 +79,7 @@ python3 run.py                                            # http://localhost:500
 
 Without `GEMINI_API_KEYS` the scan endpoint returns "not configured" and hosts use **Enter items manually**.
 
-Scanning uses **Gemini 3.1 Flash-Lite** (`GEMINI_IMAGE_MODEL`), about ₹0.2 per bill with GST (up to ~₹0.5 for a very long bill; output tokens are most of it). `SCAN_DAILY_CAP` (default 15; production uses 100) caps total scans per day across all users, so at 100 a day spend can't pass ~₹50 a day. Each network (IP) gets at most 5 scans per 10 minutes and 10 per day (`RATE_LIMITS` in `utils/security.py`). Past a limit, users get "enter items manually". Each scan logs its token usage (`[receipt_llm] gemini usage ...`), so you can check real costs in the Vercel logs.
+Scanning uses **Gemini 3.1 Flash-Lite** (`GEMINI_IMAGE_MODEL`), about ₹0.15 for a typical bill with GST, rising by about ₹0.004 a dish (₹0.85 for a 200-dish bill; output tokens are most of it). `SCAN_DAILY_CAP` (default 15; production uses 200) caps total scans per day across all users. Each network (IP) gets at most 5 scans per 10 minutes and 10 per day (`RATE_LIMITS` in `utils/security.py`). Past a limit, users get "enter items manually". Each scan logs its token usage (`[receipt_llm] gemini usage ...`), so you can check real costs in the Vercel logs. Full numbers, measured scans and launch-day estimates: [docs/LLM_COSTS.md](docs/LLM_COSTS.md).
 
 ## How it works
 

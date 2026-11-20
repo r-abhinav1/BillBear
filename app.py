@@ -85,6 +85,7 @@ from utils.session import (  # noqa: E402
     set_session_cookie,
 )
 from utils.validation import (  # noqa: E402
+    MAX_ITEMS,
     MAX_PEOPLE,
     MIN_PEOPLE,
     clean_items,
@@ -470,8 +471,11 @@ def _safe_filename(name: str) -> str:
 
 # Images the PDF template may embed, referenced there as "bbasset/<name>".
 _PDF_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "images")
+# The watermark is a JPEG on purpose: it is drawn on every page, and the PDF
+# library stores a PNG as raw pixels each time (~135 KB a page) but passes a
+# JPEG through as is (~7 KB). Vercel can't send a response over 4.5 MB.
 _PDF_ASSETS = {
-    "pdf-bear.png", "pdf-watermark.png",
+    "pdf-bear.png", "pdf-watermark.jpg",
     "pdf-veg.png", "pdf-nonveg.png", "pdf-egg.png", "pdf-alcohol.png", "pdf-blank.png",
 }
 
@@ -704,7 +708,14 @@ def _scan_receipt():
     # as confirmed: only the host's tap does.
     receipt = normalize_receipt_payload(receipt)
     currency = get_currency(receipt["currency"]["code"])
-    items = clean_items(receipt.get("items"), currency=currency)
+    raw_items = receipt.get("items") if isinstance(receipt.get("items"), list) else []
+    try:
+        items = clean_items(raw_items, currency=currency)
+    except ValueError:
+        # More lines than a bill can hold. The scan is already paid for, so keep
+        # the first MAX_ITEMS and tell the host, rather than fail the whole scan.
+        items = clean_items(raw_items[:MAX_ITEMS], currency=currency)
+        receipt["dropped"] = len(raw_items) - MAX_ITEMS
     receipt["items"] = [
         {"name": i["name"], "price": as_number(i["price"]), "category": i["category"],
          "quantity": i["quantity"]}

@@ -742,14 +742,92 @@ def test_no_note_when_the_claim_still_fits():
     assert NOTE not in _pick_page(host, code, "Alice") + _pick_page(bob, code, "Bob")
 
 
-def test_making_a_dish_single_then_several_again_tells_them_their_count_dropped():
+def test_making_a_dish_single_then_several_again_gives_their_counts_back():
     code, host, bob = _dosa_room()
     assert _submit_portions(host, code, "Alice", {"Masala Dosa": 2}).status_code == 200
     assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
     _set_dosas_to(host, code, 1)
     assert NOTE not in _pick_page(host, code, "Alice")          # one dish: nothing to count
     _set_dosas_to(host, code, 5)
-    assert "your 2 became 1." in _pick_page(host, code, "Alice")
+    assert _dosa_claims(code) == {"Alice": [2], "Bob": [2]}
+    assert NOTE not in _pick_page(host, code, "Alice") + _pick_page(bob, code, "Bob")
+
+
+def test_putting_a_lowered_quantity_back_restores_every_claim():
+    # A host's slip (5 -> 3 -> 5) used to leave Alice at 2 and Bob sharing, and
+    # tapping Send on the pre-filled screen moved money from one to the other.
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 3)
+    assert _dosa_claims(code) == {"Alice": [2], "Bob": [0]}
+    _set_dosas_to(host, code, 5)
+    assert _dosa_claims(code) == {"Alice": [3], "Bob": [2]}
+    assert NOTE not in _pick_page(host, code, "Alice") + _pick_page(bob, code, "Bob")
+    assert all(p["claim_lowered"] == {} for p in room(code)["participants"])
+
+
+def test_a_partial_raise_gives_back_what_fits():
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 2)        # Alice 1, Bob sharing
+    _set_dosas_to(host, code, 4)        # Alice gets all 3 back; Bob gets the 1 left
+    assert _dosa_claims(code) == {"Alice": [3], "Bob": [1]}
+    assert NOTE not in _pick_page(host, code, "Alice")
+    assert "The host changed the bill: your 2 became 1." in _pick_page(bob, code, "Bob")
+
+
+def test_a_claim_confirmed_after_a_cut_is_not_restored():
+    # Once someone sends the trimmed amount, that is what they chose.
+    code, host, bob = _dosa_room()
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 3}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 2}).status_code == 200
+    _set_dosas_to(host, code, 4)
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 1}).status_code == 200
+    _set_dosas_to(host, code, 5)
+    assert _dosa_claims(code) == {"Alice": [3], "Bob": [1]}
+
+
+def test_a_single_dish_that_turns_out_to_be_several_is_shared_by_its_pickers():
+    # Picks on a dish listed once used to become one unit each, by join order.
+    code, host, bob = _dosa_room()
+    _set_dosas_to(host, code, 1)
+    assert submit(host, code, "Alice", ["Masala Dosa"]).status_code == 200
+    assert submit(bob, code, "Bob", ["Masala Dosa"]).status_code == 200
+    _set_dosas_to(host, code, 3)
+    assert _dosa_claims(code) == {"Alice": [0], "Bob": [0]}
+    r = room(code)
+    assert r["quantity_mismatches"] == []
+    assert NOTE not in _pick_page(host, code, "Alice") + _pick_page(bob, code, "Bob")
+    assert _submit_portions(host, code, "Alice", {"Masala Dosa": 0}).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+
+
+def test_changing_only_a_quantity_asks_only_that_dishs_holders_to_confirm():
+    code, host, bob = _dosa_room()
+    assert submit(host, code, "Alice", ["Coffee"]).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    _set_dosas_to(host, code, 4)
+    assert room(code)["submitted_users"] == {"Alice"}      # Alice never had a dosa
+
+
+def test_changing_a_price_with_the_quantity_still_asks_everyone():
+    code, host, bob = _dosa_room()
+    assert submit(host, code, "Alice", ["Coffee"]).status_code == 200
+    assert _submit_portions(bob, code, "Bob", {"Masala Dosa": 0}).status_code == 200
+    r = room(code)
+    resp = host.post(f"/edit/{code}", data={
+        "item_id": [str(i["id"]) for i in r["items"]],
+        "item_name": ["Masala Dosa", "Coffee"],
+        "item_price": ["400", "60"],
+        "item_quantity": ["4", "1"],
+        "item_category": ["veg", "veg"],
+        "subtotal": "460", "total": "460",
+    })
+    assert resp.status_code == 302
+    assert room(code)["submitted_users"] == set()
 
 
 def test_cannot_split_while_units_have_no_owner():
@@ -1085,6 +1163,33 @@ def test_english_pdf_embeds_no_extra_fonts():
     post_json(host, f"/room/{code}/finalize")
     pdf = host.get(f"/room/{code}/download").data
     assert b"NotoSans" not in pdf and b"DroidSans" not in pdf
+
+
+def test_a_big_tables_pdf_stays_well_under_vercels_response_limit():
+    # The page watermark used to be stored again on every page as raw pixels
+    # (~135 KB a page): a 50-person split passed Vercel's 4.5 MB limit. As a
+    # JPEG it is passed through as is, a few KB a page.
+    import io
+
+    from pypdf import PdfReader
+
+    host = new_client()
+    code = make_room(host, num_people=12)
+    guests = [(new_client(), f"Guest {n}") for n in range(1, 12)]
+    for client, name in guests:
+        assert join(client, code, name).status_code == 302
+    for client, name in [(host, "Alice")] + guests:
+        submit(client, code, name, ["Pasta", "Pizza", "Coke"])
+    assert post_json(host, f"/room/{code}/finalize").status_code == 200
+    pdf = host.get(f"/room/{code}/download").data
+    reader = PdfReader(io.BytesIO(pdf))
+    assert len(reader.pages) >= 2
+    # Every page's watermark is a JPEG passed through, never raw pixels.
+    for page in reader.pages:
+        images = [obj.get_object() for obj in (page["/Resources"].get("/XObject") or {}).values()]
+        watermark = max(images, key=lambda img: img["/Width"] * img["/Height"])
+        assert "/DCTDecode" in str(watermark["/Filter"])
+        assert len(watermark.get_data()) < 20_000
 
 
 # --- ways back ------------------------------------------------------------------
